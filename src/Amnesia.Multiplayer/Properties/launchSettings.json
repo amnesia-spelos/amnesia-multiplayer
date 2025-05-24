@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Amnesia.Multiplayer": {
+      "commandName": "Project"
+    },
+    "Container (Dockerfile)": {
+      "commandName": "Docker"
+    }
+  }
+}

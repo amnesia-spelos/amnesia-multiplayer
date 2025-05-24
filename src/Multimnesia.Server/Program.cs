@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.SignalR;
+﻿using System.Collections.Concurrent;
+using Microsoft.AspNetCore.SignalR;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSignalR();
@@ -9,15 +10,22 @@ app.Run();
 
 public class ChatHub : Hub
 {
-    public async Task SendMessage(string user, string message)
+    private string _lobbyAuthority = string.Empty;
+
+    public async Task JoinLobby()
     {
-        Console.WriteLine($"{user}: {message}");
-        await Clients.All.SendAsync("ReceiveMessage", user, message);
+        Console.WriteLine($"User: {Context.ConnectionId}");
+
+        if (string.IsNullOrWhiteSpace(_lobbyAuthority))
+        {
+            _lobbyAuthority = Context.ConnectionId;
+        }
+
+        await Clients.Caller.SendAsync("OnLobbyJoined", _lobbyAuthority == Context.ConnectionId);
     }
 
     public async Task SendPlayerPos(string posMsg)
     {
-        Console.WriteLine($"pos: {posMsg}");
         await Clients.Others.SendAsync("ReceivePosition", posMsg);
     }
 
@@ -25,5 +33,11 @@ public class ChatHub : Hub
     {
         Console.WriteLine($"script: {script}");
         await Clients.Others.SendAsync("ScriptExec", script);
+    }
+
+    public async Task EntityGrab(string script)
+    {
+        Console.WriteLine($"entity grab: {script}");
+        await Clients.Others.SendAsync("EntityGrab", script);
     }
 }

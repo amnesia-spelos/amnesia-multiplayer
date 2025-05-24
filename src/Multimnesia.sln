@@ -7,6 +7,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Multimnesia.Server", "Multi
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Multimnesia.Client", "Multimnesia.Client\Multimnesia.Client.csproj", "{2FAA8024-21E2-4080-9801-441C537A9237}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Amnesia.Multiplayer", "Amnesia.Multiplayer\Amnesia.Multiplayer.csproj", "{4F4E88D1-F537-45DC-A0E0-78868CB3337F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,6 +23,10 @@ Global
 		{2FAA8024-21E2-4080-9801-441C537A9237}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{2FAA8024-21E2-4080-9801-441C537A9237}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{2FAA8024-21E2-4080-9801-441C537A9237}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4F4E88D1-F537-45DC-A0E0-78868CB3337F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4F4E88D1-F537-45DC-A0E0-78868CB3337F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4F4E88D1-F537-45DC-A0E0-78868CB3337F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4F4E88D1-F537-45DC-A0E0-78868CB3337F}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
