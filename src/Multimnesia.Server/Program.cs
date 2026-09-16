@@ -1,43 +1,35 @@
-﻿using System.Collections.Concurrent;
-using Microsoft.AspNetCore.SignalR;
+using System.Text.Json.Serialization;
+using Multimnesia.Server;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddSignalR();
+builder.Services.AddSingleton<SessionAdmission>();
+builder.Services.AddSignalR().AddJsonProtocol(json =>
+    json.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
-var app = builder.Build();
-app.MapHub<ChatHub>("/chat");
-app.Run();
-
-public class ChatHub : Hub
+var options = builder.Configuration.GetSection(RelayOptions.SectionName).Get<RelayOptions>() ?? new RelayOptions();
+var errors = options.Validate();
+if (errors.Count > 0)
 {
-    private string _lobbyAuthority = string.Empty;
-
-    public async Task JoinLobby()
-    {
-        Console.WriteLine($"User: {Context.ConnectionId}");
-
-        if (string.IsNullOrWhiteSpace(_lobbyAuthority))
-        {
-            _lobbyAuthority = Context.ConnectionId;
-        }
-
-        await Clients.Caller.SendAsync("OnLobbyJoined", _lobbyAuthority == Context.ConnectionId);
-    }
-
-    public async Task SendPlayerPos(string posMsg)
-    {
-        await Clients.Others.SendAsync("ReceivePosition", posMsg);
-    }
-
-    public async Task ScriptExec(string script)
-    {
-        Console.WriteLine($"script: {script}");
-        await Clients.Others.SendAsync("ScriptExec", script);
-    }
-
-    public async Task EntityGrab(string script)
-    {
-        Console.WriteLine($"entity grab: {script}");
-        await Clients.Others.SendAsync("EntityGrab", script);
-    }
+    foreach (var error in errors) Console.Error.WriteLine($"Configuration error: {error}");
+    return 2;
 }
+
+builder.WebHost.UseUrls($"http://{FormatHost(options.ListenAddress)}:{options.Port}");
+var app = builder.Build();
+app.MapHub<MultiplayerRelayHub>("/chat");
+
+Console.WriteLine("WARNING: This unauthenticated diagnostic Multiplayer Relay permits raw script relay.");
+Console.WriteLine("Use it only on a trusted LAN. Never expose it to the internet.");
+Console.WriteLine($"Multiplayer Relay listening on http://{FormatHost(options.ListenAddress)}:{options.Port}");
+
+try
+{
+    await app.RunAsync();
+    return 0;
+}
+catch (OperationCanceledException)
+{
+    return 0;
+}
+
+static string FormatHost(string address) => address.Contains(':') ? $"[{address}]" : address;
