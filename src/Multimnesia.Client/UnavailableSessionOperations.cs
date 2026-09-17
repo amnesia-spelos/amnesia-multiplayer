@@ -5,6 +5,7 @@ namespace Multimnesia.Client;
 public sealed class UnavailableSessionOperations : ISessionOperations
 {
     public event Action? MultiplayerSessionEnded { add { } remove { } }
+    public bool IsJoined => false;
     private static readonly SessionOperationResult Unavailable =
         SessionOperationResult.Failed("Multiplayer connectivity is not available yet.");
 

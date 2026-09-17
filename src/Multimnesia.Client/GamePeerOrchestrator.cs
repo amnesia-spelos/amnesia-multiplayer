@@ -55,6 +55,7 @@ public readonly record struct SessionOperationResult(bool Success, string? Feedb
 public interface ISessionOperations
 {
     event Action? MultiplayerSessionEnded;
+    bool IsJoined { get; }
     Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken);
     Task<SessionOperationResult> JoinAsync(string destination, CancellationToken cancellationToken);
     Task LeaveAsync(GamePeerState state, CancellationToken cancellationToken);

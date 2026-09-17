@@ -9,10 +9,12 @@ public sealed class SharedCustomStoryStartTests
     private readonly List<string> _displayed = [];
     private readonly List<string> _startedLocally = [];
     private StartCustomStoryExchangeOutcome _localOutcome = StartCustomStoryExchangeOutcome.Starting;
+    private TaskCompletionSource<StartCustomStoryExchangeOutcome>? _localStart;
+    private const string OwnStartWarning = "Only the Session Host's Custom Story starts are shared.";
 
     private SharedCustomStoryStart Create() => new(
         _sessions,
-        (identifier, _) => { _startedLocally.Add(identifier); return Task.FromResult(_localOutcome); },
+        (identifier, _) => { _startedLocally.Add(identifier); return _localStart?.Task ?? Task.FromResult(_localOutcome); },
         message => { _displayed.Add(message); return ValueTask.CompletedTask; });
 
     [Fact]
@@ -20,7 +22,7 @@ public sealed class SharedCustomStoryStartTests
     {
         _sessions.JoiningPlayerAdmitted = true;
 
-        await Create().HandleLocalStartAsync("mp-test-cs", TestContext.Current.CancellationToken);
+        await Create().HandleLocalGameEventAsync(new GameEvent.CustomStoryStarted("mp-test-cs"), TestContext.Current.CancellationToken);
 
         Assert.Equal(["mp-test-cs"], _sessions.SentStarts);
         Assert.Equal(["Starting Custom Story mp-test-cs for the other player."], _displayed);
@@ -32,7 +34,7 @@ public sealed class SharedCustomStoryStartTests
     {
         _sessions.JoiningPlayerAdmitted = false;
 
-        await Create().HandleLocalStartAsync("mp-test-cs", TestContext.Current.CancellationToken);
+        await Create().HandleLocalGameEventAsync(new GameEvent.CustomStoryStarted("mp-test-cs"), TestContext.Current.CancellationToken);
 
         Assert.Empty(_displayed);
     }
@@ -96,10 +98,101 @@ public sealed class SharedCustomStoryStartTests
         Assert.Empty(_displayed);
     }
 
+    [Fact]
+    public async Task Joining_Player_reproducing_the_host_start_sees_no_warning()
+    {
+        _sessions.IsJoined = true;
+        var sharedStart = Create();
+
+        // The game's reply and start event are read before the exchange with the local game resumes.
+        await ReproduceHostStartAsync(sharedStart, "mp-test-cs", reportedStart: "mp-test-cs");
+
+        Assert.Equal(["The host started Custom Story mp-test-cs."], _displayed);
+        Assert.Empty(_sessions.SentStarts);
+    }
+
+    [Fact]
+    public async Task Joining_Player_own_start_without_a_pending_Shared_Custom_Story_Start_is_kept_local_with_a_warning()
+    {
+        _sessions.IsJoined = true;
+
+        await Create().HandleLocalGameEventAsync(new GameEvent.CustomStoryStarted("my-own-cs"), TestContext.Current.CancellationToken);
+
+        Assert.Equal([OwnStartWarning], _displayed);
+        Assert.Empty(_sessions.SentStarts);
+    }
+
+    [Fact]
+    public async Task Joining_Player_start_with_a_mismatched_identifier_is_their_own()
+    {
+        _sessions.IsJoined = true;
+
+        await ReproduceHostStartAsync(Create(), "mp-test-cs", reportedStart: "my-own-cs");
+
+        Assert.Equal([OwnStartWarning, "The host started Custom Story mp-test-cs."], _displayed);
+        Assert.Empty(_sessions.SentStarts);
+    }
+
+    [Fact]
+    public async Task Only_the_next_start_after_a_Shared_Custom_Story_Start_is_the_reproduced_one()
+    {
+        _sessions.IsJoined = true;
+        var sharedStart = Create();
+        await ReproduceHostStartAsync(sharedStart, "mp-test-cs", reportedStart: "mp-test-cs");
+        _displayed.Clear();
+
+        await sharedStart.HandleLocalGameEventAsync(new GameEvent.CustomStoryStarted("mp-test-cs"), TestContext.Current.CancellationToken);
+
+        Assert.Equal([OwnStartWarning], _displayed);
+    }
+
+    [Fact]
+    public async Task A_failed_Shared_Custom_Story_Start_leaves_no_reproduced_start_pending()
+    {
+        _sessions.IsJoined = true;
+        var sharedStart = Create();
+        _localStart = new();
+        var hostStart = sharedStart.HandleHostStartAsync("mp-test-cs", TestContext.Current.CancellationToken);
+        await sharedStart.HandleLocalGameEventAsync(
+            new GameEvent.StartCustomStoryResponded(StartCustomStoryOutcome.NotInMainMenu), TestContext.Current.CancellationToken);
+        _localStart.SetResult(StartCustomStoryExchangeOutcome.NotInMainMenu);
+        await hostStart;
+        _displayed.Clear();
+
+        await sharedStart.HandleLocalGameEventAsync(new GameEvent.CustomStoryStarted("mp-test-cs"), TestContext.Current.CancellationToken);
+
+        Assert.Equal([OwnStartWarning], _displayed);
+    }
+
+    [Fact]
+    public async Task A_starting_reply_to_a_Command_the_Game_Peer_did_not_issue_for_the_host_is_not_a_reproduction()
+    {
+        _sessions.IsJoined = true;
+        var sharedStart = Create();
+
+        await sharedStart.HandleLocalGameEventAsync(
+            new GameEvent.StartCustomStoryResponded(StartCustomStoryOutcome.Starting), TestContext.Current.CancellationToken);
+        await sharedStart.HandleLocalGameEventAsync(new GameEvent.CustomStoryStarted("mp-test-cs"), TestContext.Current.CancellationToken);
+
+        Assert.Equal([OwnStartWarning], _displayed);
+    }
+
+    private async Task ReproduceHostStartAsync(SharedCustomStoryStart sharedStart, string hostStart, string reportedStart)
+    {
+        _localStart = new();
+        var exchange = sharedStart.HandleHostStartAsync(hostStart, TestContext.Current.CancellationToken);
+        await sharedStart.HandleLocalGameEventAsync(
+            new GameEvent.StartCustomStoryResponded(StartCustomStoryOutcome.Starting), TestContext.Current.CancellationToken);
+        await sharedStart.HandleLocalGameEventAsync(new GameEvent.CustomStoryStarted(reportedStart), TestContext.Current.CancellationToken);
+        _localStart.SetResult(StartCustomStoryExchangeOutcome.Starting);
+        await exchange;
+    }
+
     private sealed class FakeSessionOperations : ISessionOperations
     {
         public event Action? MultiplayerSessionEnded { add { } remove { } }
         public bool JoiningPlayerAdmitted { get; set; }
+        public bool IsJoined { get; set; }
         public List<string> SentStarts { get; } = [];
         public List<(string, SharedCustomStoryStartOutcome)> SentOutcomes { get; } = [];
         public Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
@@ -109,7 +202,7 @@ public sealed class SharedCustomStoryStartTests
 
         public Task<bool> SendCustomStoryStartedAsync(string identifier, CancellationToken cancellationToken)
         {
-            if (JoiningPlayerAdmitted) SentStarts.Add(identifier);
+            SentStarts.Add(identifier);
             return Task.FromResult(JoiningPlayerAdmitted);
         }
 

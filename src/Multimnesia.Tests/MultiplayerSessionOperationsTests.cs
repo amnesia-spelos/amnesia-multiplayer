@@ -604,8 +604,11 @@ public sealed class MultiplayerSessionOperationsTests
         await joining.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken);
         await WaitUntilAsync(() => { lock (hostNotices) return hostNotices.Contains("A player joined."); });
         Assert.False(await joining.SendCustomStoryStartedAsync("mp-test-cs", TestContext.Current.CancellationToken));
+        Assert.True(joining.IsJoined);
+        Assert.False(host.IsJoined);
 
         await joining.LeaveAsync(GamePeerState.Joined, TestContext.Current.CancellationToken);
+        Assert.False(joining.IsJoined);
         await WaitUntilAsync(() => { lock (hostNotices) return hostNotices.Contains("A player left."); });
         Assert.False(await host.SendCustomStoryStartedAsync("mp-test-cs", TestContext.Current.CancellationToken));
     }

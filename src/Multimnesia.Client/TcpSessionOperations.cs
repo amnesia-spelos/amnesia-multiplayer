@@ -65,6 +65,8 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     public Guid PeerCorrelationId { get; private set; }
     public event Action? MultiplayerSessionEnded;
 
+    public bool IsJoined { get { lock (_gate) return _joinedConnection is not null; } }
+
     public Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken)
     {
         try
