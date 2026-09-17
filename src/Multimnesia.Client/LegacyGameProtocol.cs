@@ -10,6 +10,7 @@ public abstract record GameEvent
     public sealed record PositionReported(PlayerPosition Position) : GameEvent;
     public sealed record ScriptCalled(string Script) : GameEvent;
     public sealed record CommandCompleted : GameEvent;
+    public sealed record ChatSubmitted(ChatEntry Entry) : GameEvent;
     public sealed record Unknown(string Line) : GameEvent;
 }
 
@@ -22,6 +23,7 @@ public static class LegacyGameProtocol
 
     public static GameEvent ParseEvent(string line)
     {
+        if (ChatEntry.TryParseLocalSubmission(line, out var entry)) return new GameEvent.ChatSubmitted(entry);
         if (TryParsePosition(line, out var position)) return new GameEvent.PositionReported(position);
         if (line.StartsWith(ScriptCallPrefix, StringComparison.Ordinal)) return new GameEvent.ScriptCalled(line[ScriptCallPrefix.Length..]);
         if (line.StartsWith("RESPONSE:exec:", StringComparison.Ordinal)) return new GameEvent.CommandCompleted();

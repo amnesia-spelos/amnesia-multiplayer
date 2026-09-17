@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 using System.Net.Sockets;
-using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Configuration;
@@ -27,20 +27,10 @@ Console.CancelKeyPress += (_, eventArgs) =>
     cancellation.Cancel();
 };
 
-using var game = new TcpClient();
-try
-{
-    await game.ConnectAsync(options.GameHost, options.GamePort, cancellation.Token);
-}
-catch (Exception exception) when (exception is SocketException or OperationCanceledException)
-{
-    Console.Error.WriteLine($"Local-game connection failed at {options.GameHost}:{options.GamePort}: {exception.Message}");
-    return exception is OperationCanceledException ? 0 : 1;
-}
-
-await using var gameStream = game.GetStream();
-await using var writer = new StreamWriter(gameStream, Encoding.ASCII, leaveOpen: true) { AutoFlush = true };
-using var reader = new StreamReader(gameStream, Encoding.ASCII, leaveOpen: true);
+await using var gameStream = await ConnectToLocalGameAsync(options, cancellation.Token);
+if (gameStream is null) return 0;
+await using var writer = GameInteractionProtocol.CreateWriter(gameStream);
+using var reader = GameInteractionProtocol.CreateReader(gameStream);
 var welcome = await reader.ReadLineAsync(cancellation.Token);
 if (welcome is null)
 {
@@ -52,6 +42,7 @@ Console.WriteLine($"Connected to local game at {options.GameHost}:{options.GameP
 var remotePositions = new ConcurrentStack<PlayerPosition>();
 var remoteScripts = new ConcurrentQueue<string>();
 var sessionReady = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+var orchestrator = new GamePeerOrchestrator(new UnavailableSessionOperations());
 
 await using var relay = new HubConnectionBuilder()
     .WithUrl(options.RelayUrl)
@@ -95,7 +86,7 @@ try
     if (admission.SessionReady) sessionReady.TrySetResult();
     else Console.WriteLine("Waiting for the other Game Peer...");
 
-    var readTask = ReadGameEventsAsync(reader, relay, cancellation.Token);
+    var readTask = ReadGameEventsAsync(reader, writer, orchestrator, relay, cancellation.Token);
     if (!sessionReady.Task.IsCompleted)
     {
         var startupTask = await Task.WhenAny(sessionReady.Task, readTask);
@@ -125,7 +116,12 @@ finally
 
 return 0;
 
-static async Task ReadGameEventsAsync(StreamReader reader, HubConnection relay, CancellationToken cancellationToken)
+static async Task ReadGameEventsAsync(
+    StreamReader reader,
+    StreamWriter writer,
+    GamePeerOrchestrator orchestrator,
+    HubConnection relay,
+    CancellationToken cancellationToken)
 {
     while (!cancellationToken.IsCancellationRequested)
     {
@@ -140,12 +136,56 @@ static async Task ReadGameEventsAsync(StreamReader reader, HubConnection relay, 
             case GameEvent.ScriptCalled script:
                 await relay.InvokeAsync("SendScriptCall", script.Script, cancellationToken);
                 break;
+            case GameEvent.ChatSubmitted chat:
+                var feedback = await orchestrator.HandleAsync(chat.Entry, cancellationToken);
+                if (feedback is not null)
+                    await writer.WriteLineAsync(GameInteractionProtocol.Display(feedback).AsMemory(), cancellationToken);
+                break;
             case GameEvent.Unknown unknown:
                 Console.WriteLine($"Unrecognized local-game message: {unknown.Line}");
                 break;
         }
     }
 }
+
+static Task<Stream?> ConnectToLocalGameAsync(GamePeerOptions options, CancellationToken cancellationToken)
+{
+    var connector = new LocalGameConnector(
+        async token =>
+        {
+            var game = new TcpClient();
+            try
+            {
+                await game.ConnectAsync(options.GameHost, options.GamePort, token);
+                return game.GetStream();
+            }
+            catch
+            {
+                game.Dispose();
+                throw;
+            }
+        },
+        Task.Delay,
+        WriteConnectionStatus,
+        TimeSpan.FromSeconds(1),
+        TimeSpan.FromSeconds(30));
+    return connector.ConnectAsync(cancellationToken);
+}
+
+static void WriteConnectionStatus(GameConnectionStatus status) =>
+    Console.WriteLine(JsonSerializer.Serialize(new
+    {
+        timestamp = status.Timestamp,
+        severity = status.Severity.ToString(),
+        @event = status.Event switch
+        {
+            GameConnectionEvent.ConnectionFailed => "connection_failed",
+            GameConnectionEvent.ConnectionRetry => "connection_retry",
+            GameConnectionEvent.ConnectionRecovered => "connection_recovered",
+            _ => throw new ArgumentOutOfRangeException(nameof(status))
+        },
+        status.Attempt
+    }));
 
 static async Task RunMovementLoopAsync(
     StreamWriter writer,
