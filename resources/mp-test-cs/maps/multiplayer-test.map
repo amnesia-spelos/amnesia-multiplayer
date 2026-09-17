@@ -1,0 +1,72 @@
+<Level>
+    <EditorSession>
+        <Performance CamClipPlanes="0.05 1000" LightsActive="false" PSActive="false" ShowFog="false" ShowSkybox="false" WorldReflection="false" />
+        <ViewportConfig BGColor="0.2 0.2 0.2 1" GAmbientLight="true" GPointLight="true" GridSnap="true" GridSnapSeparation="0.25" SelectedViewport="3" UsingEnlargedViewport="true">
+            <Viewport CameraPosition="0 0 0" CameraTarget="0 0 0" CameraZoom="5.5" GridHeight="0" GridPlane="0" Preset="0" RenderMode="1" ShowAxes="false" ShowGrid="false" UsingLTCam="false" />
+            <Viewport CameraPosition="180 0 0" CameraTarget="0 0 0" CameraZoom="0" GridHeight="0" GridPlane="0" Preset="1" RenderMode="1" ShowAxes="true" ShowGrid="true" UsingLTCam="true" />
+            <Viewport CameraPosition="0 180 0" CameraTarget="0 0 0" CameraZoom="0" GridHeight="0" GridPlane="1" Preset="2" RenderMode="1" ShowAxes="true" ShowGrid="true" UsingLTCam="true" />
+            <Viewport CameraPosition="-2.11874 8.64377 11.0405" CameraTarget="0 0 0" CameraZoom="1.26013" GridHeight="0" GridPlane="1" Preset="3" RenderMode="0" ShowAxes="true" ShowGrid="true" UsingLTCam="true" />
+        </ViewportConfig>
+        <Groups>
+            <Group ID="0" Name="None" Visible="false" />
+        </Groups>
+    </EditorSession>
+    <MapData FogActive="false" FogColor="1 1 1 1" FogCulling="true" FogEnd="20" FogFalloffExp="1" FogStart="0" GlobalDecalMaxTris="300" Name="" SkyBoxActive="false" SkyBoxColor="1 1 1 1" SkyBoxTexture="">
+        <MapContents>
+            <FileIndex_StaticObjects NumOfFiles="2">
+                <File Id="0" Path="static_objects/dungeonbase/wall/default.dae" />
+                <File Id="1" Path="static_objects/dungeonbase/wall/corner_concave_round_short_extension.dae" />
+            </FileIndex_StaticObjects>
+            <FileIndex_Entities NumOfFiles="1">
+                <File Id="0" Path="entities/lamp/candlestick_floor/candlestick_floor.ent" />
+            </FileIndex_Entities>
+            <FileIndex_Decals NumOfFiles="0" />
+            <StaticObjects>
+                <StaticObject CastShadows="true" Collides="true" FileIndex="0" Group="0" ID="3" Name="wall_default_1" Rotation="0 0 0" Scale="1 1 1" Tag="" WorldPos="-2 0 -2.5" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="0" Group="0" ID="4" Name="wall_default_2" Rotation="0 0 0" Scale="1 1 1" Tag="" WorldPos="2 0 -2.5" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="1" Group="0" ID="6" Name="wall_corner_concave_round_short_extension_1" Rotation="8.74228e-008 1.5708 8.74228e-008" Scale="1 1 1" Tag="" WorldPos="-5 0 -1.5" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="1" Group="0" ID="7" Name="wall_corner_concave_round_short_extension_2" Rotation="0 -1.19209e-007 0" Scale="1 1 1" Tag="" WorldPos="5 0 -1.5" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="1" Group="0" ID="9" Name="wall_corner_concave_round_short_extension_3" Rotation="-3.14159 2.06632e-007 -3.14159" Scale="1 1 1" Tag="" WorldPos="-5 0 4.5" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="0" Group="0" ID="10" Name="wall_default_3" Rotation="-3.14159 8.74228e-008 -3.14159" Scale="1 1 1" Tag="" WorldPos="-2 0 5.5" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="0" Group="0" ID="11" Name="wall_default_4" Rotation="-3.14159 8.74228e-008 -3.14159" Scale="1 1 1" Tag="" WorldPos="2 0 5.5" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="1" Group="0" ID="12" Name="wall_corner_concave_round_short_extension_4" Rotation="-2.03444 -1.5708 2.03444" Scale="1 1 1" Tag="" WorldPos="5 0 4.5" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="0" Group="0" ID="14" Name="wall_default_5" Rotation="3.14159 -1.5708 3.14159" Scale="1 1 1" Tag="" WorldPos="6 0 1.5" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="0" Group="0" ID="15" Name="wall_default_6" Rotation="3.14159 1.5708 -3.14159" Scale="1 1 1" Tag="" WorldPos="-6 0 1.5" />
+            </StaticObjects>
+            <Primitives>
+                <Plane Active="true" AlignToWorldCoords="false" CastShadows="false" Collides="true" Corner1UV="0.970571 3.62222" Corner2UV="0 0" Corner3UV="5.55407 -1.48821" Corner4UV="6.52464 2.13401" EndCorner="11.5 0 7.5" Group="0" ID="2" Material="static_objects/dungeonbase/floor/cobbled_stone.mat" Name="Plane" Rotation="0 0 0" Scale="1 1 1" StartCorner="0 0 0" Tag="" TextureAngle="0.261799" TileAmount="0.5 1 0.5" TileOffset="0 0 0" WorldPos="-5.75 0 -2.25" />
+                <Plane Active="true" AlignToWorldCoords="false" CastShadows="false" Collides="true" Corner1UV="0 6" Corner2UV="0 0" Corner3UV="9.2 0" Corner4UV="9.2 6" EndCorner="11.5 0 7.5" Group="0" ID="16" Material="static_objects/dungeonbase/floor/dirt_mould.mat" Name="Plane_1" Rotation="-3.14159 0 0" Scale="1 1 1" StartCorner="0 0 0" Tag="" TextureAngle="0" TileAmount="0.8 1 0.8" TileOffset="0 0 0" WorldPos="-5.75 4 5.25" />
+            </Primitives>
+            <Decals />
+            <Entities>
+                <Area Active="true" AreaType="PlayerStart" Group="0" ID="1" Mesh="" Name="PlayerStartArea_1" Rotation="0 0 0" Scale="1 1 1" Tag="" WorldPos="0 0 0">
+                    <UserVariables />
+                </Area>
+                <BoxLight Active="true" BlendFunc="1" CastShadows="false" DiffuseColor="0.180054 0.172852 0.230469 1" FalloffMap="" FlickerActive="false" FlickerFade="false" FlickerOffColor="0 0 0 1" FlickerOffFadeMaxLength="0" FlickerOffFadeMinLength="0" FlickerOffMaxLength="0" FlickerOffMinLength="0" FlickerOffPS="" FlickerOffRadius="0" FlickerOffSound="" FlickerOnFadeMaxLength="0" FlickerOnFadeMinLength="0" FlickerOnMaxLength="0" FlickerOnMinLength="0" FlickerOnPS="" FlickerOnSound="" Gobo="" GoboAnimFrameTime="0" GoboAnimMode="None" Group="0" ID="17" Name="BoxLight_1" Radius="1" Rotation="0 0 0" Scale="12.75 6 8.75" ShadowResolution="High" ShadowsAffectDynamic="true" ShadowsAffectStatic="true" Size="12.75 6 8.75" Tag="" WorldPos="0.5 2.75 1.5" />
+                <Entity Active="true" FileIndex="0" Group="0" ID="18" Name="candlestick_floor_1" Rotation="0 -0.785398 2.38419e-007" Scale="1 1 1" Tag="" WorldPos="-1.75 0 -1.5">
+                    <UserVariables>
+                        <Var Name="CastShadows" Value="true" />
+                        <Var Name="StaticPhysics" Value="false" />
+                        <Var Name="IsAffectedByDecal" Value="false" />
+                        <Var Name="CallbackFunc" Value="" />
+                        <Var Name="ConnectedProps" Value="" />
+                        <Var Name="ConnectionStateChangeCallback" Value="" />
+                        <Var Name="FullGameSave" Value="false" />
+                        <Var Name="PlayerLookAtCallback" Value="" />
+                        <Var Name="PlayerLookAtCallbackAutoRemove" Value="false" />
+                        <Var Name="PlayerInteractCallback" Value="" />
+                        <Var Name="PlayerInteractCallbackAutoRemove" Value="false" />
+                        <Var Name="Lit" Value="true" />
+                        <Var Name="ConnectedLight" Value="" />
+                        <Var Name="ConnectionLightAmount" Value="1" />
+                        <Var Name="ConnectionLightUseOnColor" Value="true" />
+                        <Var Name="ConnectionLightUseSpec" Value="false" />
+                    </UserVariables>
+                </Entity>
+                <PointLight Active="true" CastShadows="false" DiffuseColor="0.558594 0.48311 0.322937 1" FalloffMap="" FlickerActive="false" FlickerFade="false" FlickerOffColor="0 0 0 1" FlickerOffFadeMaxLength="0" FlickerOffFadeMinLength="0" FlickerOffMaxLength="0" FlickerOffMinLength="0" FlickerOffPS="" FlickerOffRadius="0" FlickerOffSound="" FlickerOnFadeMaxLength="0" FlickerOnFadeMinLength="0" FlickerOnMaxLength="0" FlickerOnMinLength="0" FlickerOnPS="" FlickerOnSound="" Gobo="" GoboAnimFrameTime="0" GoboAnimMode="None" Group="0" ID="19" Name="PointLight_1" Radius="6.32456" Rotation="0 0 0" Scale="1 1 1" ShadowResolution="High" ShadowsAffectDynamic="true" ShadowsAffectStatic="true" Tag="" WorldPos="-1.5 2 -0.25" />
+            </Entities>
+            <Misc />
+            <StaticObjectCombos />
+        </MapContents>
+    </MapData>
+</Level>
