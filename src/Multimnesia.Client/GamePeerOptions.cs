@@ -9,6 +9,9 @@ public sealed class GamePeerOptions
     public int JoinTimeoutSeconds { get; set; } = 10;
     public string GameHost { get; set; } = IPAddress.Loopback.ToString();
     public int GamePort { get; set; } = 5150;
+    public string LogLevel { get; set; } = "Information";
+
+    public RelaySeverity ParsedLogLevel => Enum.Parse<RelaySeverity>(LogLevel, ignoreCase: true);
 
     public IReadOnlyList<string> Validate()
     {
@@ -18,6 +21,8 @@ public sealed class GamePeerOptions
         if (!IPAddress.TryParse(GameHost, out var gameAddress) || !IPAddress.IsLoopback(gameAddress))
             errors.Add("GamePeer:GameHost must be a loopback IP address; never expose the Game Interaction Protocol to the LAN.");
         if (GamePort is < 1 or > 65535) errors.Add("GamePeer:GamePort must be between 1 and 65535.");
+        if (!Enum.TryParse<RelaySeverity>(LogLevel, ignoreCase: true, out _))
+            errors.Add("GamePeer:LogLevel must be one of Debug, Information, Warning, Error.");
         return errors;
     }
 }

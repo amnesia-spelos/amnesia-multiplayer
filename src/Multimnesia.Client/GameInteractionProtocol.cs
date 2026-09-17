@@ -46,7 +46,15 @@ public static class GameInteractionProtocol
         new(stream, Utf8, leaveOpen: true) { AutoFlush = true, NewLine = "\n" };
 
     public static GameEvent ParseEvent(string? line) =>
-        line is null ? new GameEvent.Unknown(string.Empty) : LegacyGameProtocol.ParseEvent(line);
+        line is not null && ChatEntry.TryParseLocalSubmission(line, out var entry)
+            ? new GameEvent.ChatSubmitted(entry)
+            : new GameEvent.Unknown(line ?? string.Empty);
 
     public static string Display(ChatEntry entry) => $"chat:{entry.Author}:{entry.Message}";
+}
+
+public abstract record GameEvent
+{
+    public sealed record ChatSubmitted(ChatEntry Entry) : GameEvent;
+    public sealed record Unknown(string Line) : GameEvent;
 }

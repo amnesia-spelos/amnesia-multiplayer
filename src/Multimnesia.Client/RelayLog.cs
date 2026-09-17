@@ -30,6 +30,9 @@ public static class RelayLog
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
+    public static Action<RelayLogEntry> ConsoleSinkAt(RelaySeverity minimumSeverity) =>
+        entry => { if (entry.Severity >= minimumSeverity) ConsoleSink(entry); };
+
     public static void ConsoleSink(RelayLogEntry entry) => Console.WriteLine(JsonSerializer.Serialize(new
     {
         timestamp = entry.Timestamp,

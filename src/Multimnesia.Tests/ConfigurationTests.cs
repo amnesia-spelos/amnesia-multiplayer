@@ -1,5 +1,4 @@
 using Multimnesia.Client;
-using Multimnesia.Server;
 
 namespace Multimnesia.Tests;
 
@@ -14,6 +13,7 @@ public sealed class ConfigurationTests
         Assert.Equal(5150, options.GamePort);
         Assert.Equal(5000, options.RelayPort);
         Assert.Equal(10, options.JoinTimeoutSeconds);
+        Assert.Equal("Information", options.LogLevel);
         Assert.Empty(options.Validate());
     }
 
@@ -26,10 +26,18 @@ public sealed class ConfigurationTests
     }
 
     [Fact]
-    public void Relay_rejects_an_invalid_port()
+    public void Game_peer_rejects_an_invalid_relay_port()
     {
-        var options = new RelayOptions { Port = 0 };
+        var options = new GamePeerOptions { RelayPort = 0 };
 
-        Assert.Contains(options.Validate(), error => error.Contains("port", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(options.Validate(), error => error.Contains("RelayPort", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Game_peer_rejects_an_unrecognized_log_level()
+    {
+        var options = new GamePeerOptions { LogLevel = "Verbose" };
+
+        Assert.Contains(options.Validate(), error => error.Contains("LogLevel", StringComparison.Ordinal));
     }
 }

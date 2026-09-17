@@ -13,6 +13,7 @@ if (errors.Count > 0)
     foreach (var error in errors) Console.Error.WriteLine($"Configuration error: {error}");
     return 2;
 }
+var logLevel = options.ParsedLogLevel;
 
 using var cancellation = new CancellationTokenSource();
 Console.CancelKeyPress += (_, eventArgs) => { eventArgs.Cancel = true; cancellation.Cancel(); };
@@ -50,7 +51,8 @@ while (!cancellation.IsCancellationRequested)
             JoinTimeout = TimeSpan.FromSeconds(options.JoinTimeoutSeconds)
         },
         DisplaySystemAsync,
-        receiveChat: DisplayAsync);
+        receiveChat: DisplayAsync,
+        log: RelayLog.ConsoleSinkAt(logLevel));
     var orchestrator = new GamePeerOrchestrator(sessions);
 
     try
