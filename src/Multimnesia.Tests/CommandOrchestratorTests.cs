@@ -35,13 +35,13 @@ public sealed class CommandOrchestratorTests
         { GamePeerState.Local, "/leave", GamePeerState.Local, "You are not in a Multiplayer Session." },
         { GamePeerState.Hosting, "/host", GamePeerState.Hosting, "Leave the current Multiplayer Session first." },
         { GamePeerState.Hosting, "/join host", GamePeerState.Hosting, "Leave the current Multiplayer Session first." },
-        { GamePeerState.Hosting, "/leave", GamePeerState.Local, null },
+        { GamePeerState.Hosting, "/leave", GamePeerState.Local, "Hosting stopped." },
         { GamePeerState.Joining, "/host", GamePeerState.Joining, "Leave the current Multiplayer Session first." },
         { GamePeerState.Joining, "/join host", GamePeerState.Joining, "Leave the current Multiplayer Session first." },
-        { GamePeerState.Joining, "/leave", GamePeerState.Local, null },
+        { GamePeerState.Joining, "/leave", GamePeerState.Local, "Joining cancelled." },
         { GamePeerState.Joined, "/host", GamePeerState.Joined, "Leave the current Multiplayer Session first." },
         { GamePeerState.Joined, "/join host", GamePeerState.Joined, "Leave the current Multiplayer Session first." },
-        { GamePeerState.Joined, "/leave", GamePeerState.Local, null },
+        { GamePeerState.Joined, "/leave", GamePeerState.Local, "You left the Multiplayer Session." },
     };
 
     [Theory]
@@ -107,6 +107,42 @@ public sealed class CommandOrchestratorTests
 
         Assert.Equal(GamePeerState.Joined, orchestrator.State);
         Assert.Equal("Joined the Multiplayer Session.", feedback?.Message);
+    }
+
+    [Fact]
+    public async Task Leave_immediately_cancels_an_in_progress_join()
+    {
+        var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var operations = new RecordingSessionOperations
+        {
+            Join = async token =>
+            {
+                try { await Task.Delay(Timeout.InfiniteTimeSpan, token); }
+                catch (OperationCanceledException) { cancelled.SetResult(); }
+                return SessionOperationResult.Failed("Joining cancelled.");
+            }
+        };
+        var orchestrator = new GamePeerOrchestrator(operations);
+        var joining = orchestrator.HandleAsync(new ChatEntry("Player", "/join game-box"), TestContext.Current.CancellationToken);
+
+        var feedback = await orchestrator.HandleAsync(new ChatEntry("Player", "/leave"), TestContext.Current.CancellationToken);
+        await cancelled.Task;
+        await joining;
+
+        Assert.Equal(GamePeerState.Local, orchestrator.State);
+        Assert.Equal(new ChatEntry("SYSTEM", "Joining cancelled."), feedback);
+    }
+
+    [Fact]
+    public async Task Successful_join_can_be_left_without_reusing_a_disposed_cancellation_source()
+    {
+        var orchestrator = new GamePeerOrchestrator(new RecordingSessionOperations());
+        await orchestrator.HandleAsync(new ChatEntry("Player", "/join game-box"), TestContext.Current.CancellationToken);
+
+        var feedback = await orchestrator.HandleAsync(new ChatEntry("Player", "/leave"), TestContext.Current.CancellationToken);
+
+        Assert.Equal(GamePeerState.Local, orchestrator.State);
+        Assert.Equal("You left the Multiplayer Session.", feedback?.Message);
     }
 
     private sealed class RecordingSessionOperations : ISessionOperations

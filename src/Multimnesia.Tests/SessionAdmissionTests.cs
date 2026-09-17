@@ -28,11 +28,27 @@ public sealed class SessionAdmissionTests
         admission.TryAdmit("first");
         admission.TryAdmit("second");
 
-        admission.EndSessionFor("first");
+        admission.Depart("first");
         var replacement = admission.TryAdmit("replacement");
 
         Assert.True(replacement.Accepted);
         Assert.Equal(GamePeerRole.SessionHost, replacement.Role);
         Assert.False(replacement.SessionReady);
+    }
+
+    [Fact]
+    public void Joining_Player_departure_preserves_host_and_opens_replacement_slot()
+    {
+        var admission = new SessionAdmission();
+        admission.TryAdmit("host");
+        admission.TryAdmit("joining");
+
+        var role = admission.Depart("joining");
+        var replacement = admission.TryAdmit("replacement");
+
+        Assert.Equal(GamePeerRole.JoiningPlayer, role);
+        Assert.True(admission.IsAdmitted("host"));
+        Assert.Equal(GamePeerRole.JoiningPlayer, replacement.Role);
+        Assert.True(replacement.SessionReady);
     }
 }

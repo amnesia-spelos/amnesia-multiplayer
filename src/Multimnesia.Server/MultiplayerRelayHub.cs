@@ -28,10 +28,11 @@ public sealed class MultiplayerRelayHub(SessionAdmission admission) : Hub
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
-        if (admission.EndSessionFor(Context.ConnectionId))
+        var role = admission.Depart(Context.ConnectionId);
+        if (role is not null)
         {
             Console.WriteLine($"Game Peer {Context.ConnectionId} disconnected.");
-            await Clients.Others.SendAsync("RemoteDisconnected");
+            await Clients.Others.SendAsync(role == GamePeerRole.SessionHost ? "HostDisconnected" : "JoiningPlayerDisconnected");
         }
         await base.OnDisconnectedAsync(exception);
     }

@@ -5,6 +5,20 @@ namespace Multimnesia.Tests;
 public sealed class LocalGameConnectionTests
 {
     [Fact]
+    public void Repeated_local_game_losses_use_bounded_exponential_backoff()
+    {
+        var delays = Enumerable.Range(1, 7)
+            .Select(attempt => LocalGameReconnectPolicy.DelayForAttempt(
+                attempt, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(30)))
+            .ToArray();
+
+        Assert.Equal(
+            [TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(8),
+                TimeSpan.FromSeconds(16), TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30)],
+            delays);
+    }
+
+    [Fact]
     public async Task Connection_failures_retry_with_bounded_backoff_and_recover_without_intervention()
     {
         var attempts = 0;

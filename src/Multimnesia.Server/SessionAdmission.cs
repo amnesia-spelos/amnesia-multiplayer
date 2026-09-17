@@ -20,13 +20,16 @@ public sealed class SessionAdmission
     }
 
     public bool IsAdmitted(string connectionId) { lock (_gate) return _connections.Contains(connectionId); }
-    public bool EndSessionFor(string connectionId)
+    public GamePeerRole? Depart(string connectionId)
     {
         lock (_gate)
         {
-            if (!_connections.Contains(connectionId)) return false;
-            _connections.Clear();
-            return true;
+            var index = _connections.IndexOf(connectionId);
+            if (index < 0) return null;
+            var role = index == 0 ? GamePeerRole.SessionHost : GamePeerRole.JoiningPlayer;
+            if (role == GamePeerRole.SessionHost) _connections.Clear();
+            else _connections.RemoveAt(index);
+            return role;
         }
     }
 

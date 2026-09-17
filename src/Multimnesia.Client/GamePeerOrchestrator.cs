@@ -64,6 +64,7 @@ public sealed class GamePeerOrchestrator
 {
     private readonly ISessionOperations _operations;
     private int _multiplayerSessionEndVersion;
+    private CancellationTokenSource? _joinCancellation;
 
     public GamePeerOrchestrator(ISessionOperations operations, GamePeerState initialState = GamePeerState.Local)
     {
@@ -90,9 +91,16 @@ public sealed class GamePeerOrchestrator
                 return SystemFeedback(rejected.Feedback);
             case PeerInput.Command { Value: PeerCommand.LeaveCommand }:
                 if (State == GamePeerState.Local) return SystemFeedback("You are not in a Multiplayer Session.");
-                await _operations.LeaveAsync(State, cancellationToken);
+                var leavingState = State;
                 State = GamePeerState.Local;
-                return null;
+                Interlocked.Exchange(ref _joinCancellation, null)?.Cancel();
+                await _operations.LeaveAsync(leavingState, cancellationToken);
+                return SystemFeedback(leavingState switch
+                {
+                    GamePeerState.Hosting => "Hosting stopped.",
+                    GamePeerState.Joining => "Joining cancelled.",
+                    _ => "You left the Multiplayer Session."
+                });
             case PeerInput.Command when State != GamePeerState.Local:
                 return SystemFeedback("Leave the current Multiplayer Session first.");
             case PeerInput.Command { Value: PeerCommand.HostCommand }:
@@ -100,11 +108,20 @@ public sealed class GamePeerOrchestrator
             case PeerInput.Command { Value: PeerCommand.Join join }:
                 var sessionEndVersion = Volatile.Read(ref _multiplayerSessionEndVersion);
                 State = GamePeerState.Joining;
-                var joinResult = await _operations.JoinAsync(join.Destination, cancellationToken);
-                State = joinResult.Success && sessionEndVersion == Volatile.Read(ref _multiplayerSessionEndVersion)
-                    ? GamePeerState.Joined
-                    : GamePeerState.Local;
-                return joinResult.Feedback is null ? null : SystemFeedback(joinResult.Feedback);
+                using (var joinCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+                {
+                    _joinCancellation = joinCancellation;
+                    try
+                    {
+                        var joinResult = await _operations.JoinAsync(join.Destination, joinCancellation.Token);
+                        if (State != GamePeerState.Joining) return null;
+                        State = joinResult.Success && sessionEndVersion == Volatile.Read(ref _multiplayerSessionEndVersion)
+                            ? GamePeerState.Joined
+                            : GamePeerState.Local;
+                        return joinResult.Feedback is null ? null : SystemFeedback(joinResult.Feedback);
+                    }
+                    finally { Interlocked.CompareExchange(ref _joinCancellation, null, joinCancellation); }
+                }
             default:
                 throw new InvalidOperationException("Unsupported Game Peer command.");
         }

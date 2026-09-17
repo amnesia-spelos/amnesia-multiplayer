@@ -9,6 +9,15 @@ public sealed record GameConnectionStatus(
     GameConnectionEvent Event,
     int Attempt);
 
+public static class LocalGameReconnectPolicy
+{
+    public static TimeSpan DelayForAttempt(int attempt, TimeSpan initialBackoff, TimeSpan maximumBackoff)
+    {
+        var multiplier = Math.Pow(2, Math.Min(Math.Max(attempt, 1) - 1, 30));
+        return TimeSpan.FromTicks((long)Math.Min(initialBackoff.Ticks * multiplier, maximumBackoff.Ticks));
+    }
+}
+
 public sealed class LocalGameConnector(
     Func<CancellationToken, ValueTask<Stream>> connect,
     Func<TimeSpan, CancellationToken, Task> delay,
@@ -47,11 +56,7 @@ public sealed class LocalGameConnector(
     }
 
     private TimeSpan BoundedBackoff(int attempt)
-    {
-        var multiplier = Math.Pow(2, Math.Min(attempt - 1, 30));
-        var ticks = Math.Min(initialBackoff.Ticks * multiplier, maximumBackoff.Ticks);
-        return TimeSpan.FromTicks((long)ticks);
-    }
+        => LocalGameReconnectPolicy.DelayForAttempt(attempt, initialBackoff, maximumBackoff);
 
     private void Report(ConnectionLogSeverity severity, GameConnectionEvent eventName, int attempt) =>
         report(new(DateTimeOffset.UtcNow, severity, eventName, attempt));

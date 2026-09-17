@@ -10,6 +10,111 @@ namespace Multimnesia.Tests;
 public sealed class MultiplayerSessionOperationsTests
 {
     [Fact]
+    public async Task Joining_Player_can_leave_and_a_replacement_can_join()
+    {
+        var port = FreePort();
+        var hostNotices = new List<string>();
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            message => { lock (hostNotices) hostNotices.Add(message); return ValueTask.CompletedTask; });
+        await using var first = new TcpSessionOperations(new SessionNetworkOptions { Port = port });
+        await using var replacement = new TcpSessionOperations(new SessionNetworkOptions { Port = port });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        Assert.True((await first.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken)).Success);
+
+        await first.LeaveAsync(GamePeerState.Joined, TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => { lock (hostNotices) return hostNotices.Contains("A player left."); });
+        var result = await replacement.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success);
+    }
+
+    [Fact]
+    public async Task Session_Host_leave_returns_Joining_Player_to_Local_with_exact_feedback()
+    {
+        var port = FreePort();
+        var joiningNotices = new List<string>();
+        await using var hostOperations = new TcpSessionOperations(new SessionNetworkOptions { Port = port });
+        await using var joiningOperations = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            message => { lock (joiningNotices) joiningNotices.Add(message); return ValueTask.CompletedTask; });
+        var joining = new GamePeerOrchestrator(joiningOperations);
+        await hostOperations.HostAsync(TestContext.Current.CancellationToken);
+        await joining.HandleAsync(new ChatEntry("Player", "/join 127.0.0.1"), TestContext.Current.CancellationToken);
+
+        await hostOperations.LeaveAsync(GamePeerState.Hosting, TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => joining.State == GamePeerState.Local);
+
+        lock (joiningNotices) Assert.Contains("The host ended the Multiplayer Session.", joiningNotices);
+    }
+
+    [Fact]
+    public async Task Abrupt_Joining_Player_loss_keeps_hosting_and_allows_replacement()
+    {
+        var port = FreePort();
+        var hostNotices = new List<string>();
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port, HeartbeatInterval = TimeSpan.FromMilliseconds(20), HeartbeatTimeout = TimeSpan.FromMilliseconds(100) },
+            message => { lock (hostNotices) hostNotices.Add(message); return ValueTask.CompletedTask; });
+        await using var replacement = new TcpSessionOperations(new SessionNetworkOptions { Port = port });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        using var first = new TcpClient(AddressFamily.InterNetwork);
+        await first.ConnectAsync(IPAddress.Loopback, port, TestContext.Current.CancellationToken);
+        await LanProtocol.WriteAsync(first.GetStream(),
+            new LanMessage.JoinRequest(LanProtocol.CurrentVersion, Guid.NewGuid()), TestContext.Current.CancellationToken);
+        Assert.IsType<LanMessage.AdmissionAccepted>(await LanProtocol.ReadAsync(first.GetStream(), TestContext.Current.CancellationToken));
+
+        first.Dispose();
+        await WaitUntilAsync(() => { lock (hostNotices) return hostNotices.Contains("A player disconnected."); });
+        var result = await replacement.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success);
+    }
+
+    [Fact]
+    public async Task Silent_Session_Host_loss_is_detected_by_heartbeat_timeout()
+    {
+        var port = FreePort();
+        var notices = new List<string>();
+        using var silentHost = new TcpListener(IPAddress.Loopback, port);
+        silentHost.Start();
+        var hostTask = Task.Run(async () =>
+        {
+            using var connection = await silentHost.AcceptTcpClientAsync(TestContext.Current.CancellationToken);
+            var request = await LanProtocol.ReadAsync(connection.GetStream(), TestContext.Current.CancellationToken);
+            Assert.IsType<LanMessage.JoinRequest>(request);
+            await LanProtocol.WriteAsync(connection.GetStream(),
+                new LanMessage.AdmissionAccepted(LanProtocol.CurrentVersion, Guid.NewGuid()), TestContext.Current.CancellationToken);
+            await Task.Delay(TimeSpan.FromMilliseconds(300), TestContext.Current.CancellationToken);
+        }, TestContext.Current.CancellationToken);
+        await using var operations = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port, HeartbeatInterval = TimeSpan.FromMilliseconds(20), HeartbeatTimeout = TimeSpan.FromMilliseconds(100) },
+            message => { lock (notices) notices.Add(message); return ValueTask.CompletedTask; });
+        var joining = new GamePeerOrchestrator(operations);
+
+        await joining.HandleAsync(new ChatEntry("Player", "/join 127.0.0.1"), TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => joining.State == GamePeerState.Local);
+
+        lock (notices) Assert.Contains("Connection to the host was lost.", notices);
+        await hostTask;
+    }
+
+    [Fact]
+    public async Task Graceful_disposal_signals_departure_before_shutdown()
+    {
+        var port = FreePort();
+        var hostNotices = new List<string>();
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            message => { lock (hostNotices) hostNotices.Add(message); return ValueTask.CompletedTask; });
+        var joining = new TcpSessionOperations(new SessionNetworkOptions { Port = port });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        await joining.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken);
+
+        await joining.DisposeAsync();
+        await WaitUntilAsync(() => { lock (hostNotices) return hostNotices.Contains("A player left."); });
+    }
+    [Fact]
     public async Task Ordinary_chat_is_delivered_bidirectionally_without_echoing_the_sender()
     {
         var port = FreePort();

@@ -11,11 +11,14 @@ public sealed class SessionNetworkOptions
     public int Port { get; init; } = 5000;
     public TimeSpan JoinTimeout { get; init; } = TimeSpan.FromSeconds(10);
     public TimeSpan HandshakeTimeout { get; init; } = TimeSpan.FromSeconds(3);
+    public TimeSpan HeartbeatInterval { get; init; } = TimeSpan.FromSeconds(2);
+    public TimeSpan HeartbeatTimeout { get; init; } = TimeSpan.FromSeconds(10);
     public int ProtocolVersion { get; init; } = LanProtocol.CurrentVersion;
 }
 
 public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
 {
+    private sealed record OutboundMessage(LanMessage Message, TaskCompletionSource? Sent = null);
     private const int OutboundChatCapacity = 64;
     private const string Incompatible = "The Multiplayer Session uses an incompatible protocol version.";
     private const string Full = "The Multiplayer Session is full.";
@@ -28,8 +31,8 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     private TcpListener? _listener;
     private TcpClient? _joinedConnection;
     private TcpClient? _admittedConnection;
-    private Channel<LanMessage.ChatEntry>? _joinedOutbound;
-    private Channel<LanMessage.ChatEntry>? _admittedOutbound;
+    private Channel<OutboundMessage>? _joinedOutbound;
+    private Channel<OutboundMessage>? _admittedOutbound;
     private Task? _acceptLoop;
 
     public TcpSessionOperations(
@@ -76,6 +79,8 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         try { addresses = await _resolver(destination).WaitAsync(deadline.Token); }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         { return SessionOperationResult.Failed("Joining the Multiplayer Session timed out."); }
+        catch (OperationCanceledException)
+        { return SessionOperationResult.Failed("Joining cancelled."); }
         catch (Exception exception) when (exception is SocketException or ArgumentException)
         { return SessionOperationResult.Failed($"Could not resolve the destination: {exception.Message}"); }
 
@@ -116,6 +121,11 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
                 connection.Dispose();
                 return SessionOperationResult.Failed("Joining the Multiplayer Session timed out.");
             }
+            catch (OperationCanceledException)
+            {
+                connection.Dispose();
+                return SessionOperationResult.Failed("Joining cancelled.");
+            }
             catch (Exception exception) when (exception is SocketException or IOException)
             {
                 connection.Dispose();
@@ -125,15 +135,37 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         return SessionOperationResult.Failed($"Could not join the Multiplayer Session: {lastFailure?.Message ?? "connection failed"}");
     }
 
-    public Task LeaveAsync(GamePeerState state, CancellationToken cancellationToken)
+    public async Task LeaveAsync(GamePeerState state, CancellationToken cancellationToken)
     {
-        Stop();
-        return Task.CompletedTask;
+        Channel<OutboundMessage>? outbound;
+        TcpClient? connection;
+        lock (_gate)
+        {
+            outbound = state == GamePeerState.Hosting ? _admittedOutbound : _joinedOutbound;
+            connection = state == GamePeerState.Hosting ? _admittedConnection : _joinedConnection;
+        }
+        if (outbound is not null && connection is not null)
+        {
+            var sent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (outbound.Writer.TryWrite(new(new LanMessage.Departure(), sent)))
+                await sent.Task.WaitAsync(TimeSpan.FromMilliseconds(250), cancellationToken);
+        }
+        if (state == GamePeerState.Hosting)
+        {
+            _listener?.Stop();
+            _listener = null;
+            lock (_gate) ClearAdmitted(connection);
+        }
+        else
+        {
+            connection?.Dispose();
+            lock (_gate) ClearJoined(connection);
+        }
     }
 
     public async Task SendChatAsync(ChatEntry entry, CancellationToken cancellationToken)
     {
-        Channel<LanMessage.ChatEntry>? outbound;
+        Channel<OutboundMessage>? outbound;
         TcpClient? connection;
         lock (_gate)
         {
@@ -141,16 +173,23 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
             connection = _joinedConnection ?? _admittedConnection;
         }
         if (outbound is null || connection is null) return;
-        if (outbound.Writer.TryWrite(new LanMessage.ChatEntry(entry.Author, entry.Message))) return;
+        if (outbound.Writer.TryWrite(new(new LanMessage.ChatEntry(entry.Author, entry.Message)))) return;
 
         connection.Dispose();
         await _notice("The remote Game Peer could not keep up with chat traffic.");
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
+        var state = _listener is not null ? GamePeerState.Hosting : _joinedConnection is not null ? GamePeerState.Joined : GamePeerState.Local;
+        if (state != GamePeerState.Local)
+        {
+            using var departure = new CancellationTokenSource(TimeSpan.FromMilliseconds(250));
+            try { await LeaveAsync(state, departure.Token); }
+            catch (Exception exception) when (exception is OperationCanceledException or TimeoutException) { }
+        }
         Stop();
-        return _acceptLoop is null ? ValueTask.CompletedTask : new ValueTask(IgnoreCancellationAsync(_acceptLoop));
+        if (_acceptLoop is not null) await IgnoreCancellationAsync(_acceptLoop);
     }
 
     private async Task AcceptLoopAsync(TcpListener listener, CancellationToken cancellationToken)
@@ -164,7 +203,7 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-        catch (SocketException) when (cancellationToken.IsCancellationRequested) { }
+        catch (SocketException) when (cancellationToken.IsCancellationRequested || !ReferenceEquals(_listener, listener)) { }
     }
 
     private async Task HandleAttemptAsync(TcpClient connection, CancellationToken cancellationToken)
@@ -227,28 +266,45 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         }
     }
 
-    private Channel<LanMessage.ChatEntry> StartOutbound(TcpClient connection, CancellationToken cancellationToken)
+    private Channel<OutboundMessage> StartOutbound(TcpClient connection, CancellationToken cancellationToken)
     {
-        var outbound = Channel.CreateBounded<LanMessage.ChatEntry>(new BoundedChannelOptions(OutboundChatCapacity)
+        var outbound = Channel.CreateBounded<OutboundMessage>(new BoundedChannelOptions(OutboundChatCapacity)
         {
             SingleReader = true,
-            SingleWriter = true,
+            SingleWriter = false,
             FullMode = BoundedChannelFullMode.Wait
         });
         _ = SendOutboundAsync(connection, outbound.Reader, cancellationToken);
+        _ = SendHeartbeatsAsync(outbound.Writer, cancellationToken);
         return outbound;
     }
 
     private static async Task SendOutboundAsync(
-        TcpClient connection, ChannelReader<LanMessage.ChatEntry> outbound, CancellationToken cancellationToken)
+        TcpClient connection, ChannelReader<OutboundMessage> outbound, CancellationToken cancellationToken)
     {
         try
         {
             await foreach (var entry in outbound.ReadAllAsync(cancellationToken))
-                await LanProtocol.WriteAsync(connection.GetStream(), entry, cancellationToken);
+            {
+                await LanProtocol.WriteAsync(connection.GetStream(), entry.Message, cancellationToken);
+                entry.Sent?.TrySetResult();
+            }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException) { connection.Dispose(); }
+    }
+
+    private async Task SendHeartbeatsAsync(ChannelWriter<OutboundMessage> outbound, CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await Task.Delay(_options.HeartbeatInterval, cancellationToken);
+                if (!outbound.TryWrite(new(new LanMessage.Heartbeat()))) break;
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
     }
 
     private async Task ReceiveChatAsync(TcpClient connection, bool isHost, CancellationToken cancellationToken)
@@ -257,17 +313,34 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                var message = await LanProtocol.ReadAsync(connection.GetStream(), cancellationToken);
-                if (message is not LanMessage.ChatEntry chat) throw new LanProtocolException("Unexpected LAN message after admission.");
-                await _receiveChat(new ChatEntry(chat.Author, chat.Message));
+                var message = await LanProtocol.ReadAsync(connection.GetStream(), cancellationToken)
+                    .AsTask().WaitAsync(_options.HeartbeatTimeout, cancellationToken);
+                switch (message)
+                {
+                    case LanMessage.ChatEntry chat:
+                        await _receiveChat(new ChatEntry(chat.Author, chat.Message));
+                        break;
+                    case LanMessage.Heartbeat:
+                        break;
+                    case LanMessage.Departure:
+                        await _notice(isHost ? "A player left." : "The host ended the Multiplayer Session.");
+                        return;
+                    default:
+                        throw new LanProtocolException("Unexpected LAN message after admission.");
+                }
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (LanProtocolException exception) when (exception.InnerException is EndOfStreamException)
+        {
+            await _notice(isHost ? "A player disconnected." : "Connection to the host was lost.");
+        }
         catch (LanProtocolException)
         {
             await _notice("The remote Game Peer violated the Multiplayer Session protocol.");
         }
-        catch (IOException) { }
+        catch (IOException) { await _notice(isHost ? "A player disconnected." : "Connection to the host was lost."); }
+        catch (TimeoutException) { await _notice(isHost ? "A player disconnected." : "Connection to the host was lost."); }
         finally
         {
             connection.Dispose();
@@ -275,15 +348,11 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
             {
                 if (isHost && ReferenceEquals(_admittedConnection, connection))
                 {
-                    _admittedConnection = null;
-                    _admittedOutbound?.Writer.TryComplete();
-                    _admittedOutbound = null;
+                    ClearAdmitted(connection);
                 }
                 if (!isHost && ReferenceEquals(_joinedConnection, connection))
                 {
-                    _joinedConnection = null;
-                    _joinedOutbound?.Writer.TryComplete();
-                    _joinedOutbound = null;
+                    ClearJoined(connection);
                     MultiplayerSessionEnded?.Invoke();
                 }
             }
@@ -304,6 +373,24 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         }
     }
 
+    private void ClearAdmitted(TcpClient? connection)
+    {
+        if (connection is not null && !ReferenceEquals(_admittedConnection, connection)) return;
+        _admittedConnection?.Dispose();
+        _admittedConnection = null;
+        _admittedOutbound?.Writer.TryComplete();
+        _admittedOutbound = null;
+    }
+
+    private void ClearJoined(TcpClient? connection)
+    {
+        if (connection is not null && !ReferenceEquals(_joinedConnection, connection)) return;
+        _joinedConnection?.Dispose();
+        _joinedConnection = null;
+        _joinedOutbound?.Writer.TryComplete();
+        _joinedOutbound = null;
+    }
+
     private static IEnumerable<IPAddress> UsablePrivateAddresses() =>
         NetworkInterface.GetAllNetworkInterfaces()
             .Where(network => network.OperationalStatus == OperationalStatus.Up && network.NetworkInterfaceType != NetworkInterfaceType.Loopback)
@@ -320,6 +407,6 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
 
     private static async Task IgnoreCancellationAsync(Task task)
     {
-        try { await task; } catch (OperationCanceledException) { }
+        try { await task; } catch (Exception exception) when (exception is OperationCanceledException or SocketException) { }
     }
 }

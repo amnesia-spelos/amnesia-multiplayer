@@ -10,6 +10,8 @@ public abstract record LanMessage
     public sealed record AdmissionAccepted(int ProtocolVersion, Guid SessionCorrelationId) : LanMessage;
     public sealed record AdmissionRejected(string Reason) : LanMessage;
     public sealed record ChatEntry(string Author, string Message) : LanMessage;
+    public sealed record Departure : LanMessage;
+    public sealed record Heartbeat : LanMessage;
 }
 
 public sealed class LanProtocolException(string message, Exception? innerException = null) : IOException(message, innerException);
@@ -30,6 +32,8 @@ public static class LanProtocol
             LanMessage.ChatEntry value when IsValidChat(value.Author, value.Message) =>
                 new { type = "chat-entry", author = value.Author, message = value.Message },
             LanMessage.ChatEntry => throw new LanProtocolException("Invalid Chat Entry."),
+            LanMessage.Departure => new { type = "departure" },
+            LanMessage.Heartbeat => new { type = "heartbeat" },
             _ => throw new LanProtocolException("Unsupported LAN message type.")
         });
         if (payload.Length > MaximumFrameBytes) throw new LanProtocolException("LAN message exceeds the maximum frame size.");
@@ -64,6 +68,8 @@ public static class LanProtocol
                     RequiredInt32(root, "protocolVersion"), RequiredGuid(root, "sessionCorrelationId")),
                 "admission-rejected" => new LanMessage.AdmissionRejected(RequiredString(root, "reason", 256)),
                 "chat-entry" => ReadChatEntry(root),
+                "departure" => new LanMessage.Departure(),
+                "heartbeat" => new LanMessage.Heartbeat(),
                 _ => throw new LanProtocolException("Unknown LAN message type.")
             };
         }
