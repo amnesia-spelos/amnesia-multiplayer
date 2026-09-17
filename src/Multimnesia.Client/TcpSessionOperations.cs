@@ -103,6 +103,8 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
             {
                 await connection.ConnectAsync(address, _options.Port, deadline.Token);
                 PeerCorrelationId = Guid.NewGuid();
+                Log(RelaySeverity.Debug, RelayEventName.HandshakeAttempted, RelayRole.Joining, "None->Attempting",
+                    endpoint: new IPEndPoint(address, _options.Port));
                 var stream = connection.GetStream();
                 await LanProtocol.WriteAsync(stream, new LanMessage.JoinRequest(_options.ProtocolVersion, PeerCorrelationId), deadline.Token);
                 var response = await LanProtocol.ReadAsync(stream, deadline.Token);
@@ -115,9 +117,12 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
                             _joinedConnection = connection;
                             _joinedOutbound = StartOutbound(connection, _lifetime.Token);
                         }
+                        Log(RelaySeverity.Information, RelayEventName.PeerAdmitted, RelayRole.Joining, "Attempting->Admitted");
                         _ = ReceiveChatAsync(connection, isHost: false, _lifetime.Token);
                         return SessionOperationResult.SucceededWith("Joined the Multiplayer Session.");
                     case LanMessage.AdmissionRejected rejected:
+                        Log(RelaySeverity.Information, RelayEventName.HandshakeRejected, RelayRole.Joining, "Attempting->None",
+                            RelayFailureCategory.Protocol);
                         connection.Dispose();
                         return SessionOperationResult.Failed(rejected.Reason);
                     default:
@@ -126,6 +131,8 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
+                Log(RelaySeverity.Information, RelayEventName.HandshakeRejected, RelayRole.Joining, "Attempting->None",
+                    RelayFailureCategory.Timeout);
                 connection.Dispose();
                 return SessionOperationResult.Failed("Joining the Multiplayer Session timed out.");
             }
@@ -136,6 +143,8 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
             }
             catch (Exception exception) when (exception is SocketException or IOException)
             {
+                Log(RelaySeverity.Information, RelayEventName.HandshakeRejected, RelayRole.Joining, "Attempting->None",
+                    RelayFailureCategory.Io);
                 connection.Dispose();
                 lastFailure = exception;
             }
@@ -246,7 +255,7 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
             if (join.ProtocolVersion != _options.ProtocolVersion)
             {
                 Log(RelaySeverity.Information, RelayEventName.HandshakeRejected, RelayRole.Host, "Attempting->None",
-                    RelayFailureCategory.Protocol);
+                    RelayFailureCategory.Protocol, peerCorrelationId: join.PeerCorrelationId);
                 await LanProtocol.WriteAsync(stream, new LanMessage.AdmissionRejected(Incompatible), handshake.Token);
                 connection.Dispose();
                 return;
@@ -265,7 +274,7 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
             if (connection is null)
             {
                 Log(RelaySeverity.Information, RelayEventName.HandshakeRejected, RelayRole.Host, "Attempting->None",
-                    RelayFailureCategory.Capacity);
+                    RelayFailureCategory.Capacity, peerCorrelationId: join.PeerCorrelationId);
                 await LanProtocol.WriteAsync(stream, new LanMessage.AdmissionRejected(Full), handshake.Token);
                 stream.Dispose();
                 return;
@@ -275,9 +284,10 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
                 await LanProtocol.WriteAsync(stream,
                     new LanMessage.AdmissionAccepted(_options.ProtocolVersion, SessionCorrelationId), handshake.Token);
                 lock (_gate) _admittedOutbound = StartOutbound(connection, cancellationToken);
-                Log(RelaySeverity.Information, RelayEventName.PeerAdmitted, RelayRole.Host, "Attempting->Admitted");
+                Log(RelaySeverity.Information, RelayEventName.PeerAdmitted, RelayRole.Host, "Attempting->Admitted",
+                    peerCorrelationId: join.PeerCorrelationId);
                 await _notice("A player joined.");
-                await ReceiveChatAsync(connection, isHost: true, cancellationToken);
+                await ReceiveChatAsync(connection, isHost: true, cancellationToken, join.PeerCorrelationId);
             }
             catch
             {
@@ -307,11 +317,12 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
 
     private void Log(
         RelaySeverity severity, RelayEventName @event, RelayRole role, string transition,
-        RelayFailureCategory failure = RelayFailureCategory.None, IPEndPoint? endpoint = null) =>
+        RelayFailureCategory failure = RelayFailureCategory.None, IPEndPoint? endpoint = null,
+        Guid? peerCorrelationId = null) =>
         _log(new RelayLogEntry(
             DateTimeOffset.UtcNow, severity, @event, role, transition,
             SessionCorrelationId == Guid.Empty ? null : SessionCorrelationId,
-            PeerCorrelationId == Guid.Empty ? null : PeerCorrelationId,
+            peerCorrelationId ?? (PeerCorrelationId == Guid.Empty ? null : PeerCorrelationId),
             failure, endpoint));
 
     private Channel<OutboundMessage> StartOutbound(TcpClient connection, CancellationToken cancellationToken)
@@ -355,7 +366,8 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
     }
 
-    private async Task ReceiveChatAsync(TcpClient connection, bool isHost, CancellationToken cancellationToken)
+    private async Task ReceiveChatAsync(
+        TcpClient connection, bool isHost, CancellationToken cancellationToken, Guid? peerCorrelationId = null)
     {
         var role = isHost ? RelayRole.Host : RelayRole.Joining;
         var failure = RelayFailureCategory.None;
@@ -415,7 +427,8 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         }
         finally
         {
-            Log(RelaySeverity.Information, RelayEventName.PeerDisconnected, role, "Admitted->None", failure);
+            Log(RelaySeverity.Information, RelayEventName.PeerDisconnected, role, "Admitted->None", failure,
+                peerCorrelationId: peerCorrelationId);
             connection.Dispose();
             lock (_gate)
             {

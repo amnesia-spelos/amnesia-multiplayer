@@ -445,8 +445,34 @@ public sealed class MultiplayerSessionOperationsTests
         Assert.NotEqual(RelaySeverity.Debug, admitted.Severity);
         Assert.Null(admitted.Endpoint);
         Assert.NotNull(admitted.SessionCorrelationId);
+        Assert.Equal(joining.PeerCorrelationId, admitted.PeerCorrelationId);
         var disconnected = Assert.Single(snapshot, entry => entry.Event == RelayEventName.PeerDisconnected);
         Assert.Equal(RelayFailureCategory.None, disconnected.Failure);
+        Assert.Equal(joining.PeerCorrelationId, disconnected.PeerCorrelationId);
+    }
+
+    [Fact]
+    public async Task Concurrent_Joining_Players_are_each_logged_under_their_own_correlation_identifier()
+    {
+        var port = FreePort();
+        var log = new List<RelayLogEntry>();
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port }, log: entry => { lock (log) log.Add(entry); });
+        await using var first = new TcpSessionOperations(new SessionNetworkOptions { Port = port });
+        await using var second = new TcpSessionOperations(new SessionNetworkOptions { Port = port });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+
+        await Task.WhenAll(
+            first.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken),
+            second.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken));
+        await WaitUntilAsync(() => { lock (log) return log.Count(entry => entry.Event == RelayEventName.HandshakeRejected) >= 1; });
+
+        List<RelayLogEntry> snapshot;
+        lock (log) snapshot = [.. log];
+        var admittedIds = new Guid?[] { first.PeerCorrelationId, second.PeerCorrelationId };
+        Assert.Contains(snapshot, entry => entry.Event == RelayEventName.PeerAdmitted && admittedIds.Contains(entry.PeerCorrelationId));
+        Assert.Contains(snapshot, entry => entry.Event == RelayEventName.HandshakeRejected
+            && entry.Failure == RelayFailureCategory.Capacity && admittedIds.Contains(entry.PeerCorrelationId));
     }
 
     private static int FreePort()
