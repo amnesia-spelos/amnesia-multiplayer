@@ -30,12 +30,13 @@ if (welcome is null)
 Console.WriteLine($"Connected to local game at {options.GameHost}:{options.GamePort}. {welcome}");
 
 var writeGate = new SemaphoreSlim(1, 1);
-async ValueTask DisplaySystemAsync(string message)
+async ValueTask DisplayAsync(ChatEntry entry)
 {
     await writeGate.WaitAsync(cancellation.Token);
-    try { await writer.WriteLineAsync(GameInteractionProtocol.Display(new ChatEntry("SYSTEM", message)).AsMemory(), cancellation.Token); }
+    try { await writer.WriteLineAsync(GameInteractionProtocol.Display(entry).AsMemory(), cancellation.Token); }
     finally { writeGate.Release(); }
 }
+ValueTask DisplaySystemAsync(string message) => DisplayAsync(new ChatEntry("SYSTEM", message));
 
 await using var sessions = new TcpSessionOperations(
     new SessionNetworkOptions
@@ -43,7 +44,8 @@ await using var sessions = new TcpSessionOperations(
         Port = options.RelayPort,
         JoinTimeout = TimeSpan.FromSeconds(options.JoinTimeoutSeconds)
     },
-    DisplaySystemAsync);
+    DisplaySystemAsync,
+    receiveChat: DisplayAsync);
 var orchestrator = new GamePeerOrchestrator(sessions);
 
 try

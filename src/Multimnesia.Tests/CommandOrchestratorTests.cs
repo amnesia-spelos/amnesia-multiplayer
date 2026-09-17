@@ -61,9 +61,22 @@ public sealed class CommandOrchestratorTests
     [Fact]
     public async Task Ordinary_chat_has_no_local_echo()
     {
-        var orchestrator = new GamePeerOrchestrator(new RecordingSessionOperations());
+        var operations = new RecordingSessionOperations();
+        var orchestrator = new GamePeerOrchestrator(operations);
 
         Assert.Null(await orchestrator.HandleAsync(new ChatEntry("Player", "already visible"), TestContext.Current.CancellationToken));
+        Assert.Empty(operations.SentChat);
+    }
+
+    [Fact]
+    public async Task Slash_prefixed_commands_are_not_relayed_as_ordinary_chat()
+    {
+        var operations = new RecordingSessionOperations();
+        var orchestrator = new GamePeerOrchestrator(operations, GamePeerState.Joined);
+
+        await orchestrator.HandleAsync(new ChatEntry("Player", "/dance"), TestContext.Current.CancellationToken);
+
+        Assert.Empty(operations.SentChat);
     }
 
     [Fact]
@@ -98,6 +111,8 @@ public sealed class CommandOrchestratorTests
 
     private sealed class RecordingSessionOperations : ISessionOperations
     {
+        public event Action? MultiplayerSessionEnded { add { } remove { } }
+        public List<ChatEntry> SentChat { get; } = [];
         public SessionOperationResult HostResult { get; init; } = SessionOperationResult.Succeeded;
         public SessionOperationResult JoinResult { get; init; } = SessionOperationResult.Succeeded;
         public Func<CancellationToken, Task<SessionOperationResult>>? Join { get; init; }
@@ -105,5 +120,10 @@ public sealed class CommandOrchestratorTests
         public Task<SessionOperationResult> JoinAsync(string destination, CancellationToken cancellationToken) =>
             Join?.Invoke(cancellationToken) ?? Task.FromResult(JoinResult);
         public Task LeaveAsync(GamePeerState state, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task SendChatAsync(ChatEntry entry, CancellationToken cancellationToken)
+        {
+            SentChat.Add(entry);
+            return Task.CompletedTask;
+        }
     }
 }

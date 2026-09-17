@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Threading.Channels;
 using Multimnesia.Contracts;
 
 namespace Multimnesia.Client;
@@ -15,30 +16,37 @@ public sealed class SessionNetworkOptions
 
 public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
 {
+    private const int OutboundChatCapacity = 64;
     private const string Incompatible = "The Multiplayer Session uses an incompatible protocol version.";
     private const string Full = "The Multiplayer Session is full.";
     private readonly SessionNetworkOptions _options;
     private readonly Func<string, ValueTask> _notice;
+    private readonly Func<ChatEntry, ValueTask> _receiveChat;
     private readonly Func<string, Task<IPAddress[]>> _resolver;
     private readonly object _gate = new();
     private readonly CancellationTokenSource _lifetime = new();
     private TcpListener? _listener;
     private TcpClient? _joinedConnection;
     private TcpClient? _admittedConnection;
+    private Channel<LanMessage.ChatEntry>? _joinedOutbound;
+    private Channel<LanMessage.ChatEntry>? _admittedOutbound;
     private Task? _acceptLoop;
 
     public TcpSessionOperations(
         SessionNetworkOptions options,
         Func<string, ValueTask>? notice = null,
-        Func<string, Task<IPAddress[]>>? resolver = null)
+        Func<string, Task<IPAddress[]>>? resolver = null,
+        Func<ChatEntry, ValueTask>? receiveChat = null)
     {
         _options = options;
         _notice = notice ?? (_ => ValueTask.CompletedTask);
         _resolver = resolver ?? Dns.GetHostAddressesAsync;
+        _receiveChat = receiveChat ?? (_ => ValueTask.CompletedTask);
     }
 
     public Guid SessionCorrelationId { get; private set; }
     public Guid PeerCorrelationId { get; private set; }
+    public event Action? MultiplayerSessionEnded;
 
     public Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken)
     {
@@ -89,7 +97,12 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
                 {
                     case LanMessage.AdmissionAccepted accepted when accepted.ProtocolVersion == _options.ProtocolVersion:
                         SessionCorrelationId = accepted.SessionCorrelationId;
-                        _joinedConnection = connection;
+                        lock (_gate)
+                        {
+                            _joinedConnection = connection;
+                            _joinedOutbound = StartOutbound(connection, _lifetime.Token);
+                        }
+                        _ = ReceiveChatAsync(connection, isHost: false, _lifetime.Token);
                         return SessionOperationResult.SucceededWith("Joined the Multiplayer Session.");
                     case LanMessage.AdmissionRejected rejected:
                         connection.Dispose();
@@ -116,6 +129,22 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     {
         Stop();
         return Task.CompletedTask;
+    }
+
+    public async Task SendChatAsync(ChatEntry entry, CancellationToken cancellationToken)
+    {
+        Channel<LanMessage.ChatEntry>? outbound;
+        TcpClient? connection;
+        lock (_gate)
+        {
+            outbound = _joinedOutbound ?? _admittedOutbound;
+            connection = _joinedConnection ?? _admittedConnection;
+        }
+        if (outbound is null || connection is null) return;
+        if (outbound.Writer.TryWrite(new LanMessage.ChatEntry(entry.Author, entry.Message))) return;
+
+        connection.Dispose();
+        await _notice("The remote Game Peer could not keep up with chat traffic.");
     }
 
     public ValueTask DisposeAsync()
@@ -176,7 +205,9 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
             {
                 await LanProtocol.WriteAsync(stream,
                     new LanMessage.AdmissionAccepted(_options.ProtocolVersion, SessionCorrelationId), handshake.Token);
+                lock (_gate) _admittedOutbound = StartOutbound(connection, cancellationToken);
                 await _notice("A player joined.");
+                await ReceiveChatAsync(connection, isHost: true, cancellationToken);
             }
             catch
             {
@@ -196,12 +227,81 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         }
     }
 
+    private Channel<LanMessage.ChatEntry> StartOutbound(TcpClient connection, CancellationToken cancellationToken)
+    {
+        var outbound = Channel.CreateBounded<LanMessage.ChatEntry>(new BoundedChannelOptions(OutboundChatCapacity)
+        {
+            SingleReader = true,
+            SingleWriter = true,
+            FullMode = BoundedChannelFullMode.Wait
+        });
+        _ = SendOutboundAsync(connection, outbound.Reader, cancellationToken);
+        return outbound;
+    }
+
+    private static async Task SendOutboundAsync(
+        TcpClient connection, ChannelReader<LanMessage.ChatEntry> outbound, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await foreach (var entry in outbound.ReadAllAsync(cancellationToken))
+                await LanProtocol.WriteAsync(connection.GetStream(), entry, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (Exception exception) when (exception is IOException or ObjectDisposedException) { connection.Dispose(); }
+    }
+
+    private async Task ReceiveChatAsync(TcpClient connection, bool isHost, CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                var message = await LanProtocol.ReadAsync(connection.GetStream(), cancellationToken);
+                if (message is not LanMessage.ChatEntry chat) throw new LanProtocolException("Unexpected LAN message after admission.");
+                await _receiveChat(new ChatEntry(chat.Author, chat.Message));
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (LanProtocolException)
+        {
+            await _notice("The remote Game Peer violated the Multiplayer Session protocol.");
+        }
+        catch (IOException) { }
+        finally
+        {
+            connection.Dispose();
+            lock (_gate)
+            {
+                if (isHost && ReferenceEquals(_admittedConnection, connection))
+                {
+                    _admittedConnection = null;
+                    _admittedOutbound?.Writer.TryComplete();
+                    _admittedOutbound = null;
+                }
+                if (!isHost && ReferenceEquals(_joinedConnection, connection))
+                {
+                    _joinedConnection = null;
+                    _joinedOutbound?.Writer.TryComplete();
+                    _joinedOutbound = null;
+                    MultiplayerSessionEnded?.Invoke();
+                }
+            }
+        }
+    }
+
     private void Stop()
     {
         if (!_lifetime.IsCancellationRequested) _lifetime.Cancel();
         _listener?.Stop();
         _joinedConnection?.Dispose();
-        lock (_gate) { _admittedConnection?.Dispose(); _admittedConnection = null; }
+        _joinedOutbound?.Writer.TryComplete();
+        lock (_gate)
+        {
+            _admittedConnection?.Dispose();
+            _admittedConnection = null;
+            _admittedOutbound?.Writer.TryComplete();
+        }
     }
 
     private static IEnumerable<IPAddress> UsablePrivateAddresses() =>

@@ -34,6 +34,7 @@ public sealed class GameInteractionProtocolTests
     [InlineData("EVENT:CHAT::hello")]
     [InlineData("EVENT:CHAT:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:hello")]
     [InlineData("EVENT:CHAT:Alice:")]
+    [InlineData("EVENT:CHAT:SYSTEM:forged feedback")]
     public void Invalid_chat_entries_are_rejected_whole(string line)
     {
         Assert.IsType<GameEvent.Unknown>(GameInteractionProtocol.ParseEvent(line));

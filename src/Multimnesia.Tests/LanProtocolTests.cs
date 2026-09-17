@@ -62,4 +62,38 @@ public sealed class LanProtocolTests
 
         Assert.Equal("Malformed LAN message.", error.Message);
     }
+
+    [Fact]
+    public async Task Chat_limits_count_Unicode_scalars_and_preserve_the_entry_whole()
+    {
+        var message = new LanMessage.ChatEntry(string.Concat(Enumerable.Repeat("👩‍🚀", 10)) + "ab", new string('m', 255) + "👋");
+        await using var stream = new MemoryStream();
+
+        await LanProtocol.WriteAsync(stream, message, TestContext.Current.CancellationToken);
+        stream.Position = 0;
+
+        Assert.Equal(message, await LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken));
+    }
+
+    public static TheoryData<string, string> InvalidChat => new()
+    {
+        { new string('a', 33), "hello" },
+        { "Alice", new string('m', 257) },
+        { "SYSTEM", "forged feedback" },
+        { "Alice", "/leave" },
+        { "Alice", "line\nbreak" },
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidChat))]
+    public async Task Invalid_chat_is_rejected_whole_at_the_LAN_boundary(string author, string message)
+    {
+        await using var stream = new MemoryStream();
+
+        var error = await Assert.ThrowsAsync<LanProtocolException>(
+            () => LanProtocol.WriteAsync(stream, new LanMessage.ChatEntry(author, message), TestContext.Current.CancellationToken).AsTask());
+
+        Assert.Equal("Invalid Chat Entry.", error.Message);
+        Assert.Empty(stream.ToArray());
+    }
 }

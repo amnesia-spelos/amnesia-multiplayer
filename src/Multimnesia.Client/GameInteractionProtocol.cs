@@ -15,7 +15,8 @@ public sealed record ChatEntry(string Author, string Message)
         if (authorEnd < 0) return false;
         var author = line[LocalSubmissionPrefix.Length..authorEnd].Trim();
         var message = line[(authorEnd + 1)..].Trim();
-        if (!IsValid(author, 32, rejectColon: true) || !IsValid(message, 256, rejectColon: false)) return false;
+        if (author.Equals("SYSTEM", StringComparison.OrdinalIgnoreCase) ||
+            !IsValid(author, 32, rejectColon: true) || !IsValid(message, 256, rejectColon: false)) return false;
 
         entry = new(author, message);
         return true;
