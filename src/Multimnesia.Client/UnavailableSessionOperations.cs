@@ -6,6 +6,6 @@ public sealed class UnavailableSessionOperations : ISessionOperations
         SessionOperationResult.Failed("Multiplayer connectivity is not available yet.");
 
     public Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken) => Task.FromResult(Unavailable);
-    public Task<SessionOperationResult> JoinAsync(string host, CancellationToken cancellationToken) => Task.FromResult(Unavailable);
+    public Task<SessionOperationResult> JoinAsync(string destination, CancellationToken cancellationToken) => Task.FromResult(Unavailable);
     public Task LeaveAsync(GamePeerState state, CancellationToken cancellationToken) => Task.CompletedTask;
 }

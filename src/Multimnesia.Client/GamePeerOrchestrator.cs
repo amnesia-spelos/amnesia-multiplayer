@@ -44,16 +44,17 @@ public static class PeerCommandParser
     }
 }
 
-public readonly record struct SessionOperationResult(bool Success, string? Failure)
+public readonly record struct SessionOperationResult(bool Success, string? Feedback)
 {
     public static SessionOperationResult Succeeded { get; } = new(true, null);
+    public static SessionOperationResult SucceededWith(string feedback) => new(true, feedback);
     public static SessionOperationResult Failed(string feedback) => new(false, feedback);
 }
 
 public interface ISessionOperations
 {
     Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken);
-    Task<SessionOperationResult> JoinAsync(string host, CancellationToken cancellationToken);
+    Task<SessionOperationResult> JoinAsync(string destination, CancellationToken cancellationToken);
     Task LeaveAsync(GamePeerState state, CancellationToken cancellationToken);
 }
 
@@ -79,22 +80,19 @@ public sealed class GamePeerOrchestrator(ISessionOperations operations, GamePeer
             case PeerInput.Command { Value: PeerCommand.HostCommand }:
                 return Apply(await operations.HostAsync(cancellationToken), GamePeerState.Hosting);
             case PeerInput.Command { Value: PeerCommand.Join join }:
-                return Apply(await operations.JoinAsync(join.Destination, cancellationToken), GamePeerState.Joining);
+                State = GamePeerState.Joining;
+                var joinResult = await operations.JoinAsync(join.Destination, cancellationToken);
+                State = joinResult.Success ? GamePeerState.Joined : GamePeerState.Local;
+                return joinResult.Feedback is null ? null : SystemFeedback(joinResult.Feedback);
             default:
                 throw new InvalidOperationException("Unsupported Game Peer command.");
         }
     }
 
-    public void MarkJoined()
-    {
-        if (State != GamePeerState.Joining) throw new InvalidOperationException("Only a joining Game Peer can become joined.");
-        State = GamePeerState.Joined;
-    }
-
     private ChatEntry? Apply(SessionOperationResult result, GamePeerState successState)
     {
         if (result.Success) State = successState;
-        return result.Failure is null ? null : SystemFeedback(result.Failure);
+        return result.Feedback is null ? null : SystemFeedback(result.Feedback);
     }
 
     private static ChatEntry SystemFeedback(string message) => new("SYSTEM", message);

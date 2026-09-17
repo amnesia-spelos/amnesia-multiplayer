@@ -12,7 +12,8 @@ public sealed class ConfigurationTests
 
         Assert.Equal("127.0.0.1", options.GameHost);
         Assert.Equal(5150, options.GamePort);
-        Assert.Equal("http://127.0.0.1:5000/chat", options.RelayUrl);
+        Assert.Equal(5000, options.RelayPort);
+        Assert.Equal(10, options.JoinTimeoutSeconds);
         Assert.Empty(options.Validate());
     }
 

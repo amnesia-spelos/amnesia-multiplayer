@@ -31,7 +31,7 @@ public sealed class CommandOrchestratorTests
     public static TheoryData<GamePeerState, string, GamePeerState, string?> StateCases => new()
     {
         { GamePeerState.Local, "/host", GamePeerState.Hosting, null },
-        { GamePeerState.Local, "/join host", GamePeerState.Joining, null },
+        { GamePeerState.Local, "/join host", GamePeerState.Joined, null },
         { GamePeerState.Local, "/leave", GamePeerState.Local, "You are not in a Multiplayer Session." },
         { GamePeerState.Hosting, "/host", GamePeerState.Hosting, "Leave the current Multiplayer Session first." },
         { GamePeerState.Hosting, "/join host", GamePeerState.Hosting, "Leave the current Multiplayer Session first." },
@@ -80,12 +80,30 @@ public sealed class CommandOrchestratorTests
         Assert.Equal(new ChatEntry("SYSTEM", "Multiplayer connectivity is not available yet."), feedback);
     }
 
+    [Fact]
+    public async Task Join_transitions_through_joining_until_negotiated_admission_completes()
+    {
+        var completion = new TaskCompletionSource<SessionOperationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var operations = new RecordingSessionOperations { Join = _ => completion.Task };
+        var orchestrator = new GamePeerOrchestrator(operations);
+
+        var pending = orchestrator.HandleAsync(new ChatEntry("Player", "/join game-box"), TestContext.Current.CancellationToken);
+        Assert.Equal(GamePeerState.Joining, orchestrator.State);
+        completion.SetResult(SessionOperationResult.SucceededWith("Joined the Multiplayer Session."));
+        var feedback = await pending;
+
+        Assert.Equal(GamePeerState.Joined, orchestrator.State);
+        Assert.Equal("Joined the Multiplayer Session.", feedback?.Message);
+    }
+
     private sealed class RecordingSessionOperations : ISessionOperations
     {
         public SessionOperationResult HostResult { get; init; } = SessionOperationResult.Succeeded;
         public SessionOperationResult JoinResult { get; init; } = SessionOperationResult.Succeeded;
+        public Func<CancellationToken, Task<SessionOperationResult>>? Join { get; init; }
         public Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken) => Task.FromResult(HostResult);
-        public Task<SessionOperationResult> JoinAsync(string host, CancellationToken cancellationToken) => Task.FromResult(JoinResult);
+        public Task<SessionOperationResult> JoinAsync(string destination, CancellationToken cancellationToken) =>
+            Join?.Invoke(cancellationToken) ?? Task.FromResult(JoinResult);
         public Task LeaveAsync(GamePeerState state, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }
