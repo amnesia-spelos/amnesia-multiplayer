@@ -36,13 +36,15 @@ while (!cancellation.IsCancellationRequested)
     Console.WriteLine($"Connected to local game at {options.GameHost}:{options.GamePort}. {welcome}");
 
     var writeGate = new SemaphoreSlim(1, 1);
-    async ValueTask DisplayAsync(ChatEntry entry)
+    async ValueTask WriteLineAsync(string line, CancellationToken cancellationToken)
     {
-        await writeGate.WaitAsync(cancellation.Token);
-        try { await writer.WriteLineAsync(GameInteractionProtocol.Display(entry).AsMemory(), cancellation.Token); }
+        await writeGate.WaitAsync(cancellationToken);
+        try { await writer.WriteLineAsync(line.AsMemory(), cancellationToken); }
         finally { writeGate.Release(); }
     }
+    ValueTask DisplayAsync(ChatEntry entry) => WriteLineAsync(GameInteractionProtocol.Display(entry), cancellation.Token);
     ValueTask DisplaySystemAsync(string message) => DisplayAsync(new ChatEntry("SYSTEM", message));
+    var localGameCommands = new LocalGameCommands(WriteLineAsync, Task.Delay);
 
     await using var sessions = new TcpSessionOperations(
         new SessionNetworkOptions
@@ -61,8 +63,7 @@ while (!cancellation.IsCancellationRequested)
         {
             var line = await reader.ReadLineAsync(cancellation.Token);
             if (line is null) throw new IOException("The local game closed the Game Interaction Protocol session.");
-            if (GameInteractionProtocol.ParseEvent(line) is not GameEvent.ChatSubmitted chat) continue;
-            _ = HandleCommandAsync(chat.Entry);
+            DispatchGameEvent(GameInteractionProtocol.ParseEvent(line));
         }
     }
     catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
@@ -71,6 +72,12 @@ while (!cancellation.IsCancellationRequested)
         Console.Error.WriteLine($"Local-game connection was lost: {exception.Message}");
         localGameLosses++;
         await DelayBeforeLocalGameReconnectAsync(localGameLosses, cancellation.Token);
+    }
+
+    void DispatchGameEvent(GameEvent gameEvent)
+    {
+        if (gameEvent is GameEvent.ChatSubmitted chat) _ = HandleCommandAsync(chat.Entry);
+        localGameCommands.Dispatch(gameEvent);
     }
 
     async Task HandleCommandAsync(ChatEntry entry)

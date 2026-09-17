@@ -41,6 +41,68 @@ public sealed class GameInteractionProtocolTests
     }
 
     [Fact]
+    public void Custom_story_started_events_carry_their_identifier()
+    {
+        var parsed = Assert.IsType<GameEvent.CustomStoryStarted>(
+            GameInteractionProtocol.ParseEvent("EVENT:CustomStoryStarted:mp-test-cs"));
+
+        Assert.Equal("mp-test-cs", parsed.Identifier);
+    }
+
+    [Theory]
+    [InlineData("EVENT:CustomStoryStarted:")]
+    [InlineData("EVENT:CustomStoryStarted:a:b")]
+    [InlineData("EVENT:CustomStoryStarted:a|b")]
+    [InlineData("EVENT:CustomStoryStarted:a\tb")]
+    [InlineData("EVENT:CustomStoryStartedmp-test-cs")]
+    public void Invalid_custom_story_identifiers_are_unknown(string line)
+    {
+        Assert.IsType<GameEvent.Unknown>(GameInteractionProtocol.ParseEvent(line));
+    }
+
+    [Fact]
+    public void Overlong_custom_story_identifiers_are_unknown()
+    {
+        Assert.IsType<GameEvent.Unknown>(
+            GameInteractionProtocol.ParseEvent("EVENT:CustomStoryStarted:" + new string('a', 129)));
+    }
+
+    [Theory]
+    [InlineData("RESPONSE:startcustomstory:starting", StartCustomStoryOutcome.Starting)]
+    [InlineData("RESPONSE:startcustomstory:not found", StartCustomStoryOutcome.NotFound)]
+    [InlineData("RESPONSE:startcustomstory:invalid", StartCustomStoryOutcome.Invalid)]
+    [InlineData("RESPONSE:startcustomstory:not in main menu", StartCustomStoryOutcome.NotInMainMenu)]
+    [InlineData("RESPONSE:startcustomstory:exploded", StartCustomStoryOutcome.Unrecognized)]
+    [InlineData("RESPONSE:startcustomstory:", StartCustomStoryOutcome.Unrecognized)]
+    public void Start_custom_story_responses_are_typed(string line, StartCustomStoryOutcome expected)
+    {
+        var parsed = Assert.IsType<GameEvent.StartCustomStoryResponded>(GameInteractionProtocol.ParseEvent(line));
+
+        Assert.Equal(expected, parsed.Outcome);
+    }
+
+    [Fact]
+    public void Unknown_command_warnings_are_typed()
+    {
+        Assert.IsType<GameEvent.UnknownCommandWarned>(GameInteractionProtocol.ParseEvent("WARNING:Unknown command"));
+    }
+
+    [Theory]
+    [InlineData("RESPONSE:chat:unavailable")]
+    [InlineData("EVENT:MapChanged:multiplayer-test.map")]
+    [InlineData("")]
+    public void Other_lines_remain_unknown(string line)
+    {
+        Assert.IsType<GameEvent.Unknown>(GameInteractionProtocol.ParseEvent(line));
+    }
+
+    [Fact]
+    public void Start_custom_story_command_names_the_identifier()
+    {
+        Assert.Equal("startcustomstory:mp-test-cs", GameInteractionProtocol.StartCustomStory("mp-test-cs"));
+    }
+
+    [Fact]
     public async Task Chat_commands_are_written_as_UTF8_newline_frames()
     {
         await using var stream = new MemoryStream();

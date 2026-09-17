@@ -1,4 +1,5 @@
 using System.Text;
+using Multimnesia.Contracts;
 
 namespace Multimnesia.Client;
 
@@ -37,6 +38,9 @@ public sealed record ChatEntry(string Author, string Message)
 
 public static class GameInteractionProtocol
 {
+    private const string CustomStoryStartedPrefix = "EVENT:CustomStoryStarted:";
+    private const string StartCustomStoryResponsePrefix = "RESPONSE:startcustomstory:";
+    private const string UnknownCommandWarning = "WARNING:Unknown command";
     private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     public static StreamReader CreateReader(Stream stream) =>
@@ -45,16 +49,42 @@ public static class GameInteractionProtocol
     public static StreamWriter CreateWriter(Stream stream) =>
         new(stream, Utf8, leaveOpen: true) { AutoFlush = true, NewLine = "\n" };
 
-    public static GameEvent ParseEvent(string? line) =>
-        line is not null && ChatEntry.TryParseLocalSubmission(line, out var entry)
-            ? new GameEvent.ChatSubmitted(entry)
-            : new GameEvent.Unknown(line ?? string.Empty);
+    public static GameEvent ParseEvent(string? line)
+    {
+        if (line is null) return new GameEvent.Unknown(string.Empty);
+        if (ChatEntry.TryParseLocalSubmission(line, out var entry)) return new GameEvent.ChatSubmitted(entry);
+        if (line.StartsWith(CustomStoryStartedPrefix, StringComparison.Ordinal))
+        {
+            var identifier = line[CustomStoryStartedPrefix.Length..];
+            return CustomStoryIdentifier.IsValid(identifier)
+                ? new GameEvent.CustomStoryStarted(identifier)
+                : new GameEvent.Unknown(line);
+        }
+        if (line.StartsWith(StartCustomStoryResponsePrefix, StringComparison.Ordinal))
+            return new GameEvent.StartCustomStoryResponded(line[StartCustomStoryResponsePrefix.Length..] switch
+            {
+                "starting" => StartCustomStoryOutcome.Starting,
+                "not found" => StartCustomStoryOutcome.NotFound,
+                "invalid" => StartCustomStoryOutcome.Invalid,
+                "not in main menu" => StartCustomStoryOutcome.NotInMainMenu,
+                _ => StartCustomStoryOutcome.Unrecognized
+            });
+        if (line == UnknownCommandWarning) return new GameEvent.UnknownCommandWarned();
+        return new GameEvent.Unknown(line);
+    }
 
     public static string Display(ChatEntry entry) => $"chat:{entry.Author}:{entry.Message}";
+
+    public static string StartCustomStory(string identifier) => $"startcustomstory:{identifier}";
 }
+
+public enum StartCustomStoryOutcome { Starting, NotFound, Invalid, NotInMainMenu, Unrecognized }
 
 public abstract record GameEvent
 {
     public sealed record ChatSubmitted(ChatEntry Entry) : GameEvent;
+    public sealed record CustomStoryStarted(string Identifier) : GameEvent;
+    public sealed record StartCustomStoryResponded(StartCustomStoryOutcome Outcome) : GameEvent;
+    public sealed record UnknownCommandWarned : GameEvent;
     public sealed record Unknown(string Line) : GameEvent;
 }
