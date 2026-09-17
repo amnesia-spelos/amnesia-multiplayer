@@ -1,4 +1,5 @@
 using System.Net;
+using Multimnesia.Contracts;
 
 namespace Multimnesia.Client;
 
@@ -58,6 +59,8 @@ public interface ISessionOperations
     Task<SessionOperationResult> JoinAsync(string destination, CancellationToken cancellationToken);
     Task LeaveAsync(GamePeerState state, CancellationToken cancellationToken);
     Task SendChatAsync(ChatEntry entry, CancellationToken cancellationToken);
+    Task<bool> SendCustomStoryStartedAsync(string identifier, CancellationToken cancellationToken);
+    Task SendCustomStoryStartOutcomeAsync(string identifier, SharedCustomStoryStartOutcome outcome, CancellationToken cancellationToken);
 }
 
 public sealed class GamePeerOrchestrator

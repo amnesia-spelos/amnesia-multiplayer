@@ -31,6 +31,8 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     private readonly Func<ChatEntry, ValueTask> _receiveChat;
     private readonly Func<string, Task<IPAddress[]>> _resolver;
     private readonly Action<RelayLogEntry> _log;
+    private readonly Func<string, ValueTask> _receiveCustomStoryStarted;
+    private readonly Func<string, SharedCustomStoryStartOutcome, ValueTask> _receiveCustomStoryStartOutcome;
     private readonly SemaphoreSlim _handshakeSlots = new(MaxConcurrentHandshakes, MaxConcurrentHandshakes);
     private readonly object _gate = new();
     private readonly CancellationTokenSource _lifetime = new();
@@ -46,13 +48,17 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         Func<string, ValueTask>? notice = null,
         Func<string, Task<IPAddress[]>>? resolver = null,
         Func<ChatEntry, ValueTask>? receiveChat = null,
-        Action<RelayLogEntry>? log = null)
+        Action<RelayLogEntry>? log = null,
+        Func<string, ValueTask>? receiveCustomStoryStarted = null,
+        Func<string, SharedCustomStoryStartOutcome, ValueTask>? receiveCustomStoryStartOutcome = null)
     {
         _options = options;
         _notice = notice ?? (_ => ValueTask.CompletedTask);
         _resolver = resolver ?? Dns.GetHostAddressesAsync;
         _receiveChat = receiveChat ?? (_ => ValueTask.CompletedTask);
         _log = log ?? RelayLog.ConsoleSink;
+        _receiveCustomStoryStarted = receiveCustomStoryStarted ?? (_ => ValueTask.CompletedTask);
+        _receiveCustomStoryStartOutcome = receiveCustomStoryStartOutcome ?? ((_, _) => ValueTask.CompletedTask);
     }
 
     public Guid SessionCorrelationId { get; private set; }
@@ -196,6 +202,29 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         await _notice("The remote Game Peer could not keep up with chat traffic.");
     }
 
+    public Task<bool> SendCustomStoryStartedAsync(string identifier, CancellationToken cancellationToken)
+    {
+        Channel<OutboundMessage>? outbound;
+        lock (_gate) outbound = _admittedOutbound;
+        if (outbound is null || !outbound.Writer.TryWrite(new(new LanMessage.CustomStoryStarted(identifier))))
+            return Task.FromResult(false);
+
+        Log(RelaySeverity.Information, RelayEventName.CustomStoryStartSent, RelayRole.Host, "Admitted->Admitted",
+            customStoryIdentifier: identifier);
+        return Task.FromResult(true);
+    }
+
+    public Task SendCustomStoryStartOutcomeAsync(
+        string identifier, SharedCustomStoryStartOutcome outcome, CancellationToken cancellationToken)
+    {
+        Channel<OutboundMessage>? outbound;
+        lock (_gate) outbound = _joinedOutbound;
+        if (outbound is not null && outbound.Writer.TryWrite(new(new LanMessage.CustomStoryStartOutcome(identifier, outcome))))
+            Log(RelaySeverity.Information, RelayEventName.CustomStoryStartOutcomeSent, RelayRole.Joining, "Admitted->Admitted",
+                customStoryIdentifier: identifier, customStoryStartOutcome: outcome);
+        return Task.CompletedTask;
+    }
+
     public async ValueTask DisposeAsync()
     {
         var state = _listener is not null ? GamePeerState.Hosting : _joinedConnection is not null ? GamePeerState.Joined : GamePeerState.Local;
@@ -318,12 +347,13 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     private void Log(
         RelaySeverity severity, RelayEventName @event, RelayRole role, string transition,
         RelayFailureCategory failure = RelayFailureCategory.None, IPEndPoint? endpoint = null,
-        Guid? peerCorrelationId = null) =>
+        Guid? peerCorrelationId = null, string? customStoryIdentifier = null,
+        SharedCustomStoryStartOutcome? customStoryStartOutcome = null) =>
         _log(new RelayLogEntry(
             DateTimeOffset.UtcNow, severity, @event, role, transition,
             SessionCorrelationId == Guid.Empty ? null : SessionCorrelationId,
             peerCorrelationId ?? (PeerCorrelationId == Guid.Empty ? null : PeerCorrelationId),
-            failure, endpoint));
+            failure, endpoint, customStoryIdentifier, customStoryStartOutcome));
 
     private Channel<OutboundMessage> StartOutbound(TcpClient connection, CancellationToken cancellationToken)
     {
@@ -393,6 +423,17 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
                 {
                     case LanMessage.ChatEntry chat:
                         await _receiveChat(new ChatEntry(chat.Author, chat.Message));
+                        break;
+                    case LanMessage.CustomStoryStarted started when !isHost:
+                        Log(RelaySeverity.Information, RelayEventName.CustomStoryStartReceived, role, "Admitted->Admitted",
+                            customStoryIdentifier: started.Identifier);
+                        await _receiveCustomStoryStarted(started.Identifier);
+                        break;
+                    case LanMessage.CustomStoryStartOutcome reported when isHost:
+                        Log(RelaySeverity.Information, RelayEventName.CustomStoryStartOutcomeReceived, role, "Admitted->Admitted",
+                            peerCorrelationId: peerCorrelationId, customStoryIdentifier: reported.Identifier,
+                            customStoryStartOutcome: reported.Outcome);
+                        await _receiveCustomStoryStartOutcome(reported.Identifier, reported.Outcome);
                         break;
                     case LanMessage.Heartbeat:
                         break;

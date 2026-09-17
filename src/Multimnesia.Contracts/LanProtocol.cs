@@ -12,13 +12,17 @@ public abstract record LanMessage
     public sealed record ChatEntry(string Author, string Message) : LanMessage;
     public sealed record Departure : LanMessage;
     public sealed record Heartbeat : LanMessage;
+    public sealed record CustomStoryStarted(string Identifier) : LanMessage;
+    public sealed record CustomStoryStartOutcome(string Identifier, SharedCustomStoryStartOutcome Outcome) : LanMessage;
 }
+
+public enum SharedCustomStoryStartOutcome { Started, NotFound, Invalid, NotInMainMenu, Unavailable }
 
 public sealed class LanProtocolException(string message, Exception? innerException = null) : IOException(message, innerException);
 
 public static class LanProtocol
 {
-    public const int CurrentVersion = 1;
+    public const int CurrentVersion = 2;
     public const int MaximumFrameBytes = 4096;
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
@@ -34,6 +38,13 @@ public static class LanProtocol
             LanMessage.ChatEntry => throw new LanProtocolException("Invalid Chat Entry."),
             LanMessage.Departure => new { type = "departure" },
             LanMessage.Heartbeat => new { type = "heartbeat" },
+            LanMessage.CustomStoryStarted value => new { type = "custom-story-started", identifier = ValidIdentifier(value.Identifier) },
+            LanMessage.CustomStoryStartOutcome value => new
+            {
+                type = "custom-story-start-outcome",
+                identifier = ValidIdentifier(value.Identifier),
+                outcome = OutcomeWireName(value.Outcome)
+            },
             _ => throw new LanProtocolException("Unsupported LAN message type.")
         });
         if (payload.Length > MaximumFrameBytes) throw new LanProtocolException("LAN message exceeds the maximum frame size.");
@@ -70,6 +81,9 @@ public static class LanProtocol
                 "chat-entry" => ReadChatEntry(root),
                 "departure" => new LanMessage.Departure(),
                 "heartbeat" => new LanMessage.Heartbeat(),
+                "custom-story-started" => new LanMessage.CustomStoryStarted(RequiredIdentifier(root)),
+                "custom-story-start-outcome" => new LanMessage.CustomStoryStartOutcome(
+                    RequiredIdentifier(root), ParseOutcome(RequiredString(root, "outcome", 32))),
                 _ => throw new LanProtocolException("Unknown LAN message type.")
             };
         }
@@ -101,6 +115,35 @@ public static class LanProtocol
         if (!value.TryGetGuid(out var result) || result == Guid.Empty) throw new LanProtocolException("Malformed LAN message.");
         return result;
     }
+
+    private static string RequiredIdentifier(JsonElement root)
+    {
+        var value = root.GetProperty("identifier").GetString();
+        return CustomStoryIdentifier.IsValid(value) ? value! : throw new LanProtocolException("Invalid Custom Story Identifier.");
+    }
+
+    private static string ValidIdentifier(string identifier) =>
+        CustomStoryIdentifier.IsValid(identifier) ? identifier : throw new LanProtocolException("Invalid Custom Story Identifier.");
+
+    private static string OutcomeWireName(SharedCustomStoryStartOutcome outcome) => outcome switch
+    {
+        SharedCustomStoryStartOutcome.Started => "started",
+        SharedCustomStoryStartOutcome.NotFound => "not-found",
+        SharedCustomStoryStartOutcome.Invalid => "invalid",
+        SharedCustomStoryStartOutcome.NotInMainMenu => "not-in-main-menu",
+        SharedCustomStoryStartOutcome.Unavailable => "unavailable",
+        _ => throw new LanProtocolException("Unknown Custom Story start outcome.")
+    };
+
+    private static SharedCustomStoryStartOutcome ParseOutcome(string wireName) => wireName switch
+    {
+        "started" => SharedCustomStoryStartOutcome.Started,
+        "not-found" => SharedCustomStoryStartOutcome.NotFound,
+        "invalid" => SharedCustomStoryStartOutcome.Invalid,
+        "not-in-main-menu" => SharedCustomStoryStartOutcome.NotInMainMenu,
+        "unavailable" => SharedCustomStoryStartOutcome.Unavailable,
+        _ => throw new LanProtocolException("Unknown Custom Story start outcome.")
+    };
 
     private static LanMessage.ChatEntry ReadChatEntry(JsonElement root)
     {

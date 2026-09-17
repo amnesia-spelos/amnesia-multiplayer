@@ -475,6 +475,192 @@ public sealed class MultiplayerSessionOperationsTests
             && entry.Failure == RelayFailureCategory.Capacity && admittedIds.Contains(entry.PeerCorrelationId));
     }
 
+    [Fact]
+    public async Task Shared_Custom_Story_Start_travels_to_the_Joining_Player_and_its_outcome_travels_back()
+    {
+        var port = FreePort();
+        var hostNotices = new List<string>();
+        var hostLog = new List<RelayLogEntry>();
+        var joiningLog = new List<RelayLogEntry>();
+        var receivedStarts = new List<string>();
+        var receivedOutcomes = new List<(string, SharedCustomStoryStartOutcome)>();
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            notice => { lock (hostNotices) hostNotices.Add(notice); return ValueTask.CompletedTask; },
+            log: entry => { lock (hostLog) hostLog.Add(entry); },
+            receiveCustomStoryStartOutcome: (identifier, outcome) =>
+            {
+                lock (receivedOutcomes) receivedOutcomes.Add((identifier, outcome));
+                return ValueTask.CompletedTask;
+            });
+        await using var joining = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            log: entry => { lock (joiningLog) joiningLog.Add(entry); },
+            receiveCustomStoryStarted: identifier =>
+            {
+                lock (receivedStarts) receivedStarts.Add(identifier);
+                return ValueTask.CompletedTask;
+            });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        await joining.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => { lock (hostNotices) return hostNotices.Contains("A player joined."); });
+
+        Assert.True(await host.SendCustomStoryStartedAsync("mp-test-cs", TestContext.Current.CancellationToken));
+        await WaitUntilAsync(() => { lock (receivedStarts) return receivedStarts.Count > 0; });
+        await joining.SendCustomStoryStartOutcomeAsync("mp-test-cs", SharedCustomStoryStartOutcome.Started, TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => { lock (receivedOutcomes) return receivedOutcomes.Count > 0; });
+
+        lock (receivedStarts) Assert.Equal(["mp-test-cs"], receivedStarts);
+        lock (receivedOutcomes) Assert.Equal([("mp-test-cs", SharedCustomStoryStartOutcome.Started)], receivedOutcomes);
+        lock (hostLog)
+        {
+            Assert.Contains(hostLog, entry => entry.Event == RelayEventName.CustomStoryStartSent
+                && entry.Role == RelayRole.Host && entry.CustomStoryIdentifier == "mp-test-cs");
+            Assert.Contains(hostLog, entry => entry.Event == RelayEventName.CustomStoryStartOutcomeReceived
+                && entry.CustomStoryIdentifier == "mp-test-cs" && entry.CustomStoryStartOutcome == SharedCustomStoryStartOutcome.Started);
+        }
+        lock (joiningLog)
+        {
+            Assert.Contains(joiningLog, entry => entry.Event == RelayEventName.CustomStoryStartReceived
+                && entry.Role == RelayRole.Joining && entry.CustomStoryIdentifier == "mp-test-cs");
+            Assert.Contains(joiningLog, entry => entry.Event == RelayEventName.CustomStoryStartOutcomeSent
+                && entry.CustomStoryIdentifier == "mp-test-cs" && entry.CustomStoryStartOutcome == SharedCustomStoryStartOutcome.Started);
+        }
+    }
+
+    [Fact]
+    public async Task Custom_Story_starts_are_relayed_only_while_a_Joining_Player_is_admitted()
+    {
+        var port = FreePort();
+        var hostNotices = new List<string>();
+        await using var local = new TcpSessionOperations(new SessionNetworkOptions { Port = FreePort() });
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            notice => { lock (hostNotices) hostNotices.Add(notice); return ValueTask.CompletedTask; });
+        await using var joining = new TcpSessionOperations(new SessionNetworkOptions { Port = port });
+
+        Assert.False(await local.SendCustomStoryStartedAsync("mp-test-cs", TestContext.Current.CancellationToken));
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        Assert.False(await host.SendCustomStoryStartedAsync("mp-test-cs", TestContext.Current.CancellationToken));
+        await joining.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => { lock (hostNotices) return hostNotices.Contains("A player joined."); });
+        Assert.False(await joining.SendCustomStoryStartedAsync("mp-test-cs", TestContext.Current.CancellationToken));
+
+        await joining.LeaveAsync(GamePeerState.Joined, TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => { lock (hostNotices) return hostNotices.Contains("A player left."); });
+        Assert.False(await host.SendCustomStoryStartedAsync("mp-test-cs", TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task A_Joining_Player_sending_a_Custom_Story_start_violates_the_protocol()
+    {
+        var port = FreePort();
+        var notices = new List<string>();
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            notice => { lock (notices) notices.Add(notice); return ValueTask.CompletedTask; });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        using var offender = new TcpClient(AddressFamily.InterNetwork);
+        await offender.ConnectAsync(IPAddress.Loopback, port, TestContext.Current.CancellationToken);
+        var stream = offender.GetStream();
+        await LanProtocol.WriteAsync(stream,
+            new LanMessage.JoinRequest(LanProtocol.CurrentVersion, Guid.NewGuid()), TestContext.Current.CancellationToken);
+        Assert.IsType<LanMessage.AdmissionAccepted>(await LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken));
+
+        await LanProtocol.WriteAsync(stream, new LanMessage.CustomStoryStarted("mp-test-cs"), TestContext.Current.CancellationToken);
+
+        await WaitUntilAsync(() => { lock (notices) return notices.Contains("The remote Game Peer violated the Multiplayer Session protocol."); });
+    }
+
+    [Fact]
+    public async Task A_Session_Host_sending_a_Custom_Story_start_outcome_returns_the_Joining_Player_to_Local()
+    {
+        var port = FreePort();
+        var notices = new List<string>();
+        using var relay = new TcpListener(IPAddress.Loopback, port);
+        relay.Start();
+        var relayTask = Task.Run(async () =>
+        {
+            using var connection = await relay.AcceptTcpClientAsync(TestContext.Current.CancellationToken);
+            var stream = connection.GetStream();
+            Assert.IsType<LanMessage.JoinRequest>(await LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken));
+            await LanProtocol.WriteAsync(stream,
+                new LanMessage.AdmissionAccepted(LanProtocol.CurrentVersion, Guid.NewGuid()), TestContext.Current.CancellationToken);
+            await Task.Delay(50, TestContext.Current.CancellationToken);
+            await LanProtocol.WriteAsync(stream,
+                new LanMessage.CustomStoryStartOutcome("mp-test-cs", SharedCustomStoryStartOutcome.Started),
+                TestContext.Current.CancellationToken);
+        }, TestContext.Current.CancellationToken);
+        await using var operations = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            notice => { lock (notices) notices.Add(notice); return ValueTask.CompletedTask; });
+        var joining = new GamePeerOrchestrator(operations);
+
+        await joining.HandleAsync(new ChatEntry("Player", "/join 127.0.0.1"), TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => joining.State == GamePeerState.Local);
+
+        lock (notices) Assert.Contains("The remote Game Peer violated the Multiplayer Session protocol.", notices);
+        await relayTask;
+    }
+
+    [Fact]
+    public async Task A_Custom_Story_start_before_admission_is_not_accepted_as_a_join_request()
+    {
+        var port = FreePort();
+        var receivedOutcomes = 0;
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            receiveCustomStoryStartOutcome: (_, _) => { Interlocked.Increment(ref receivedOutcomes); return ValueTask.CompletedTask; });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        using var offender = new TcpClient(AddressFamily.InterNetwork);
+        await offender.ConnectAsync(IPAddress.Loopback, port, TestContext.Current.CancellationToken);
+
+        await LanProtocol.WriteAsync(offender.GetStream(),
+            new LanMessage.CustomStoryStartOutcome("mp-test-cs", SharedCustomStoryStartOutcome.Started), TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, await offender.GetStream().ReadAsync(new byte[1], TestContext.Current.CancellationToken));
+        Assert.Equal(0, receivedOutcomes);
+    }
+
+    [Fact]
+    public async Task A_Custom_Story_start_instead_of_admission_fails_the_join()
+    {
+        var port = FreePort();
+        var receivedStarts = 0;
+        using var relay = new TcpListener(IPAddress.Loopback, port);
+        relay.Start();
+        var relayTask = Task.Run(async () =>
+        {
+            using var connection = await relay.AcceptTcpClientAsync(TestContext.Current.CancellationToken);
+            var stream = connection.GetStream();
+            Assert.IsType<LanMessage.JoinRequest>(await LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken));
+            await LanProtocol.WriteAsync(stream, new LanMessage.CustomStoryStarted("mp-test-cs"), TestContext.Current.CancellationToken);
+        }, TestContext.Current.CancellationToken);
+        await using var operations = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            receiveCustomStoryStarted: _ => { Interlocked.Increment(ref receivedStarts); return ValueTask.CompletedTask; });
+
+        var result = await operations.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Equal(0, receivedStarts);
+        await relayTask;
+    }
+
+    [Fact]
+    public async Task Version_1_Game_Peers_are_rejected_as_incompatible()
+    {
+        var port = FreePort();
+        await using var host = new TcpSessionOperations(new SessionNetworkOptions { Port = port });
+        await using var joining = new TcpSessionOperations(new SessionNetworkOptions { Port = port, ProtocolVersion = 1 });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+
+        var result = await joining.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken);
+
+        Assert.False(result.Success);
+        Assert.Equal("The Multiplayer Session uses an incompatible protocol version.", result.Feedback);
+    }
+
     private static int FreePort()
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);

@@ -45,6 +45,7 @@ while (!cancellation.IsCancellationRequested)
     ValueTask DisplayAsync(ChatEntry entry) => WriteLineAsync(GameInteractionProtocol.Display(entry), cancellation.Token);
     ValueTask DisplaySystemAsync(string message) => DisplayAsync(new ChatEntry("SYSTEM", message));
     var localGameCommands = new LocalGameCommands(WriteLineAsync, Task.Delay);
+    SharedCustomStoryStart sharedStart = null!;
 
     await using var sessions = new TcpSessionOperations(
         new SessionNetworkOptions
@@ -54,8 +55,15 @@ while (!cancellation.IsCancellationRequested)
         },
         DisplaySystemAsync,
         receiveChat: DisplayAsync,
-        log: RelayLog.ConsoleSinkAt(logLevel));
+        log: RelayLog.ConsoleSinkAt(logLevel),
+        // Not awaited: the exchange with the local game must not stall reading Heartbeats from the Session Host.
+        receiveCustomStoryStarted: identifier =>
+        {
+            _ = RunIgnoringDisconnectAsync(sharedStart.HandleHostStartAsync(identifier, cancellation.Token));
+            return ValueTask.CompletedTask;
+        });
     var orchestrator = new GamePeerOrchestrator(sessions);
+    sharedStart = new SharedCustomStoryStart(sessions, localGameCommands.StartCustomStoryAsync, DisplaySystemAsync);
 
     try
     {
@@ -76,17 +84,21 @@ while (!cancellation.IsCancellationRequested)
 
     void DispatchGameEvent(GameEvent gameEvent)
     {
-        if (gameEvent is GameEvent.ChatSubmitted chat) _ = HandleCommandAsync(chat.Entry);
+        if (gameEvent is GameEvent.ChatSubmitted chat) _ = RunIgnoringDisconnectAsync(HandleCommandAsync(chat.Entry));
+        if (gameEvent is GameEvent.CustomStoryStarted started)
+            _ = RunIgnoringDisconnectAsync(sharedStart.HandleLocalStartAsync(started.Identifier, cancellation.Token));
         localGameCommands.Dispatch(gameEvent);
     }
 
     async Task HandleCommandAsync(ChatEntry entry)
     {
-        try
-        {
-            var feedback = await orchestrator.HandleAsync(entry, cancellation.Token);
-            if (feedback is not null) await DisplaySystemAsync(feedback.Message);
-        }
+        var feedback = await orchestrator.HandleAsync(entry, cancellation.Token);
+        if (feedback is not null) await DisplaySystemAsync(feedback.Message);
+    }
+
+    async Task RunIgnoringDisconnectAsync(Task operation)
+    {
+        try { await operation; }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
         catch (IOException) { }
     }

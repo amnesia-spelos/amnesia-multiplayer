@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using Multimnesia.Contracts;
 
 namespace Multimnesia.Client;
 
@@ -10,7 +11,17 @@ public enum RelayRole { Host, Joining }
 
 public enum RelayFailureCategory { None, Protocol, Timeout, Capacity, Flood, Io }
 
-public enum RelayEventName { HandshakeAttempted, HandshakeRejected, PeerAdmitted, PeerDisconnected }
+public enum RelayEventName
+{
+    HandshakeAttempted,
+    HandshakeRejected,
+    PeerAdmitted,
+    PeerDisconnected,
+    CustomStoryStartSent,
+    CustomStoryStartReceived,
+    CustomStoryStartOutcomeSent,
+    CustomStoryStartOutcomeReceived
+}
 
 public sealed record RelayLogEntry(
     DateTimeOffset Timestamp,
@@ -21,7 +32,9 @@ public sealed record RelayLogEntry(
     Guid? SessionCorrelationId,
     Guid? PeerCorrelationId,
     RelayFailureCategory Failure = RelayFailureCategory.None,
-    IPEndPoint? Endpoint = null);
+    IPEndPoint? Endpoint = null,
+    string? CustomStoryIdentifier = null,
+    SharedCustomStoryStartOutcome? CustomStoryStartOutcome = null);
 
 public static class RelayLog
 {
@@ -43,6 +56,8 @@ public static class RelayLog
         sessionCorrelationId = entry.SessionCorrelationId,
         peerCorrelationId = entry.PeerCorrelationId,
         failure = entry.Failure.ToString(),
-        endpoint = entry.Severity == RelaySeverity.Debug ? entry.Endpoint?.ToString() : null
+        endpoint = entry.Severity == RelaySeverity.Debug ? entry.Endpoint?.ToString() : null,
+        customStoryIdentifier = entry.CustomStoryIdentifier,
+        customStoryStartOutcome = entry.CustomStoryStartOutcome?.ToString()
     }, SerializerOptions));
 }

@@ -1,4 +1,5 @@
 using Multimnesia.Client;
+using Multimnesia.Contracts;
 
 namespace Multimnesia.Tests;
 
@@ -161,5 +162,8 @@ public sealed class CommandOrchestratorTests
             SentChat.Add(entry);
             return Task.CompletedTask;
         }
+        public Task<bool> SendCustomStoryStartedAsync(string identifier, CancellationToken cancellationToken) => Task.FromResult(false);
+        public Task SendCustomStoryStartOutcomeAsync(
+            string identifier, SharedCustomStoryStartOutcome outcome, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }
