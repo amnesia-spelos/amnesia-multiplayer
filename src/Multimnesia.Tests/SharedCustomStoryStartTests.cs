@@ -48,21 +48,52 @@ public sealed class SharedCustomStoryStartTests
     }
 
     [Theory]
-    [InlineData(StartCustomStoryExchangeOutcome.NotFound, SharedCustomStoryStartOutcome.NotFound)]
-    [InlineData(StartCustomStoryExchangeOutcome.Invalid, SharedCustomStoryStartOutcome.Invalid)]
-    [InlineData(StartCustomStoryExchangeOutcome.NotInMainMenu, SharedCustomStoryStartOutcome.NotInMainMenu)]
-    [InlineData(StartCustomStoryExchangeOutcome.AlreadyPending, SharedCustomStoryStartOutcome.NotInMainMenu)]
-    [InlineData(StartCustomStoryExchangeOutcome.TimedOut, SharedCustomStoryStartOutcome.Unavailable)]
-    [InlineData(StartCustomStoryExchangeOutcome.Unrecognized, SharedCustomStoryStartOutcome.Unavailable)]
-    public async Task Joining_Player_reports_a_failed_start_to_the_Session_Host(
-        StartCustomStoryExchangeOutcome local, SharedCustomStoryStartOutcome reported)
+    [InlineData(StartCustomStoryExchangeOutcome.NotFound, SharedCustomStoryStartOutcome.NotFound,
+        "Custom Story mp-test-cs could not start for the Joining Player: it is not installed.")]
+    [InlineData(StartCustomStoryExchangeOutcome.Invalid, SharedCustomStoryStartOutcome.Invalid,
+        "Custom Story mp-test-cs could not start for the Joining Player: the installed Custom Story is invalid.")]
+    [InlineData(StartCustomStoryExchangeOutcome.NotInMainMenu, SharedCustomStoryStartOutcome.NotInMainMenu,
+        "Custom Story mp-test-cs could not start for the Joining Player: their game is not in the main menu.")]
+    [InlineData(StartCustomStoryExchangeOutcome.AlreadyPending, SharedCustomStoryStartOutcome.NotInMainMenu,
+        "Custom Story mp-test-cs could not start for the Joining Player: their game is not in the main menu.")]
+    [InlineData(StartCustomStoryExchangeOutcome.TimedOut, SharedCustomStoryStartOutcome.Unavailable,
+        "Custom Story mp-test-cs could not start for the Joining Player: their game does not support Custom Story starts or did not respond.")]
+    [InlineData(StartCustomStoryExchangeOutcome.Unrecognized, SharedCustomStoryStartOutcome.Unavailable,
+        "Custom Story mp-test-cs could not start for the Joining Player: their game does not support Custom Story starts or did not respond.")]
+    public async Task Joining_Player_reports_a_failed_start_to_the_Session_Host_and_sees_why(
+        StartCustomStoryExchangeOutcome local, SharedCustomStoryStartOutcome reported, string feedback)
     {
         _localOutcome = local;
 
         await Create().HandleHostStartAsync("mp-test-cs", TestContext.Current.CancellationToken);
 
         Assert.Equal([("mp-test-cs", reported)], _sessions.SentOutcomes);
-        Assert.DoesNotContain("The host started Custom Story mp-test-cs.", _displayed);
+        Assert.Equal([feedback], _displayed);
+    }
+
+    [Theory]
+    [InlineData(SharedCustomStoryStartOutcome.NotFound,
+        "Custom Story mp-test-cs could not start for the Joining Player: it is not installed.")]
+    [InlineData(SharedCustomStoryStartOutcome.Invalid,
+        "Custom Story mp-test-cs could not start for the Joining Player: the installed Custom Story is invalid.")]
+    [InlineData(SharedCustomStoryStartOutcome.NotInMainMenu,
+        "Custom Story mp-test-cs could not start for the Joining Player: their game is not in the main menu.")]
+    [InlineData(SharedCustomStoryStartOutcome.Unavailable,
+        "Custom Story mp-test-cs could not start for the Joining Player: their game does not support Custom Story starts or did not respond.")]
+    public async Task Session_Host_sees_why_a_start_failed_for_the_Joining_Player(
+        SharedCustomStoryStartOutcome outcome, string feedback)
+    {
+        await Create().HandleOutcomeAsync("mp-test-cs", outcome);
+
+        Assert.Equal([feedback], _displayed);
+    }
+
+    [Fact]
+    public async Task Session_Host_sees_nothing_further_when_the_start_succeeded()
+    {
+        await Create().HandleOutcomeAsync("mp-test-cs", SharedCustomStoryStartOutcome.Started);
+
+        Assert.Empty(_displayed);
     }
 
     private sealed class FakeSessionOperations : ISessionOperations

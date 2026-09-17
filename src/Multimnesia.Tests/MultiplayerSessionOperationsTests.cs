@@ -529,6 +529,65 @@ public sealed class MultiplayerSessionOperationsTests
     }
 
     [Fact]
+    public async Task A_failed_Shared_Custom_Story_Start_is_logged_as_a_warning_and_the_session_keeps_working()
+    {
+        var port = FreePort();
+        var hostNotices = new List<string>();
+        var hostLog = new List<RelayLogEntry>();
+        var joiningLog = new List<RelayLogEntry>();
+        var receivedStarts = new List<string>();
+        var receivedOutcomes = new List<(string, SharedCustomStoryStartOutcome)>();
+        var hostChat = new List<ChatEntry>();
+        var joiningChat = new List<ChatEntry>();
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            notice => { lock (hostNotices) hostNotices.Add(notice); return ValueTask.CompletedTask; },
+            receiveChat: entry => { lock (hostChat) hostChat.Add(entry); return ValueTask.CompletedTask; },
+            log: entry => { lock (hostLog) hostLog.Add(entry); },
+            receiveCustomStoryStartOutcome: (identifier, outcome) =>
+            {
+                lock (receivedOutcomes) receivedOutcomes.Add((identifier, outcome));
+                return ValueTask.CompletedTask;
+            });
+        await using var joining = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            receiveChat: entry => { lock (joiningChat) joiningChat.Add(entry); return ValueTask.CompletedTask; },
+            log: entry => { lock (joiningLog) joiningLog.Add(entry); },
+            receiveCustomStoryStarted: identifier =>
+            {
+                lock (receivedStarts) receivedStarts.Add(identifier);
+                return ValueTask.CompletedTask;
+            });
+        var hostPeer = new GamePeerOrchestrator(host);
+        var joiningPeer = new GamePeerOrchestrator(joining);
+        await hostPeer.HandleAsync(new ChatEntry("Host", "/host"), TestContext.Current.CancellationToken);
+        await joiningPeer.HandleAsync(new ChatEntry("Joiner", "/join 127.0.0.1"), TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => { lock (hostNotices) return hostNotices.Contains("A player joined."); });
+
+        Assert.True(await host.SendCustomStoryStartedAsync("mp-test-cs", TestContext.Current.CancellationToken));
+        await WaitUntilAsync(() => { lock (receivedStarts) return receivedStarts.Count == 1; });
+        await joining.SendCustomStoryStartOutcomeAsync("mp-test-cs", SharedCustomStoryStartOutcome.NotFound, TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => { lock (receivedOutcomes) return receivedOutcomes.Count == 1; });
+
+        await hostPeer.HandleAsync(new ChatEntry("Host", "still here"), TestContext.Current.CancellationToken);
+        await joiningPeer.HandleAsync(new ChatEntry("Joiner", "me too"), TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => { lock (hostChat) lock (joiningChat) return hostChat.Count == 1 && joiningChat.Count == 1; });
+        Assert.True(await host.SendCustomStoryStartedAsync("mp-test-cs", TestContext.Current.CancellationToken));
+        await WaitUntilAsync(() => { lock (receivedStarts) return receivedStarts.Count == 2; });
+
+        Assert.Equal(GamePeerState.Hosting, hostPeer.State);
+        Assert.Equal(GamePeerState.Joined, joiningPeer.State);
+        lock (hostChat) Assert.Equal([new ChatEntry("Joiner", "me too")], hostChat);
+        lock (joiningChat) Assert.Equal([new ChatEntry("Host", "still here")], joiningChat);
+        lock (hostLog)
+            Assert.Contains(hostLog, entry => entry.Event == RelayEventName.CustomStoryStartOutcomeReceived
+                && entry.Severity == RelaySeverity.Warning && entry.CustomStoryStartOutcome == SharedCustomStoryStartOutcome.NotFound);
+        lock (joiningLog)
+            Assert.Contains(joiningLog, entry => entry.Event == RelayEventName.CustomStoryStartOutcomeSent
+                && entry.Severity == RelaySeverity.Warning && entry.CustomStoryStartOutcome == SharedCustomStoryStartOutcome.NotFound);
+    }
+
+    [Fact]
     public async Task Custom_Story_starts_are_relayed_only_while_a_Joining_Player_is_admitted()
     {
         var port = FreePort();

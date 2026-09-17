@@ -27,7 +27,24 @@ public sealed class SharedCustomStoryStart(
             _ => SharedCustomStoryStartOutcome.Unavailable
         };
         await sessions.SendCustomStoryStartOutcomeAsync(identifier, outcome, cancellationToken);
-        if (outcome == SharedCustomStoryStartOutcome.Started)
-            await displaySystem($"The host started Custom Story {identifier}.");
+        await displaySystem(outcome == SharedCustomStoryStartOutcome.Started
+            ? $"The host started Custom Story {identifier}."
+            : FailureFeedback(identifier, outcome));
     }
+
+    // Session Host: the Joining Player reported how its start went.
+    public async Task HandleOutcomeAsync(string identifier, SharedCustomStoryStartOutcome outcome)
+    {
+        if (outcome != SharedCustomStoryStartOutcome.Started)
+            await displaySystem(FailureFeedback(identifier, outcome));
+    }
+
+    private static string FailureFeedback(string identifier, SharedCustomStoryStartOutcome outcome) =>
+        $"Custom Story {identifier} could not start for the Joining Player: " + outcome switch
+        {
+            SharedCustomStoryStartOutcome.NotFound => "it is not installed.",
+            SharedCustomStoryStartOutcome.Invalid => "the installed Custom Story is invalid.",
+            SharedCustomStoryStartOutcome.NotInMainMenu => "their game is not in the main menu.",
+            _ => "their game does not support Custom Story starts or did not respond."
+        };
 }

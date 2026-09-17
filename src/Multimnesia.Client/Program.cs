@@ -61,6 +61,12 @@ while (!cancellation.IsCancellationRequested)
         {
             _ = RunIgnoringDisconnectAsync(sharedStart.HandleHostStartAsync(identifier, cancellation.Token));
             return ValueTask.CompletedTask;
+        },
+        // Not awaited: the Session Host's game may be frozen loading, and writing to it must not stall reading Heartbeats.
+        receiveCustomStoryStartOutcome: (identifier, outcome) =>
+        {
+            _ = RunIgnoringDisconnectAsync(sharedStart.HandleOutcomeAsync(identifier, outcome));
+            return ValueTask.CompletedTask;
         });
     var orchestrator = new GamePeerOrchestrator(sessions);
     sharedStart = new SharedCustomStoryStart(sessions, localGameCommands.StartCustomStoryAsync, DisplaySystemAsync);

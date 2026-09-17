@@ -220,7 +220,7 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         Channel<OutboundMessage>? outbound;
         lock (_gate) outbound = _joinedOutbound;
         if (outbound is not null && outbound.Writer.TryWrite(new(new LanMessage.CustomStoryStartOutcome(identifier, outcome))))
-            Log(RelaySeverity.Information, RelayEventName.CustomStoryStartOutcomeSent, RelayRole.Joining, "Admitted->Admitted",
+            Log(OutcomeSeverity(outcome), RelayEventName.CustomStoryStartOutcomeSent, RelayRole.Joining, "Admitted->Admitted",
                 customStoryIdentifier: identifier, customStoryStartOutcome: outcome);
         return Task.CompletedTask;
     }
@@ -355,6 +355,9 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
             peerCorrelationId ?? (PeerCorrelationId == Guid.Empty ? null : PeerCorrelationId),
             failure, endpoint, customStoryIdentifier, customStoryStartOutcome));
 
+    private static RelaySeverity OutcomeSeverity(SharedCustomStoryStartOutcome outcome) =>
+        outcome == SharedCustomStoryStartOutcome.Started ? RelaySeverity.Information : RelaySeverity.Warning;
+
     private Channel<OutboundMessage> StartOutbound(TcpClient connection, CancellationToken cancellationToken)
     {
         var outbound = Channel.CreateBounded<OutboundMessage>(new BoundedChannelOptions(OutboundChatCapacity)
@@ -430,7 +433,7 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
                         await _receiveCustomStoryStarted(started.Identifier);
                         break;
                     case LanMessage.CustomStoryStartOutcome reported when isHost:
-                        Log(RelaySeverity.Information, RelayEventName.CustomStoryStartOutcomeReceived, role, "Admitted->Admitted",
+                        Log(OutcomeSeverity(reported.Outcome), RelayEventName.CustomStoryStartOutcomeReceived, role, "Admitted->Admitted",
                             peerCorrelationId: peerCorrelationId, customStoryIdentifier: reported.Identifier,
                             customStoryStartOutcome: reported.Outcome);
                         await _receiveCustomStoryStartOutcome(reported.Identifier, reported.Outcome);
