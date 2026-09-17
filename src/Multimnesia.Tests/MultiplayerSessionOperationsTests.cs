@@ -359,6 +359,96 @@ public sealed class MultiplayerSessionOperationsTests
         Assert.StartsWith("Hosting failed:", result.Feedback);
     }
 
+    [Fact]
+    public async Task Handshake_attempts_beyond_the_concurrency_cap_are_rejected_immediately()
+    {
+        var port = FreePort();
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port, HandshakeTimeout = TimeSpan.FromSeconds(5) });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+
+        var stalled = new List<TcpClient>();
+        try
+        {
+            for (var i = 0; i < TcpSessionOperations.MaxConcurrentHandshakes; i++)
+            {
+                var client = new TcpClient(AddressFamily.InterNetwork);
+                await client.ConnectAsync(IPAddress.Loopback, port, TestContext.Current.CancellationToken);
+                stalled.Add(client);
+            }
+
+            using var overflow = new TcpClient(AddressFamily.InterNetwork);
+            await overflow.ConnectAsync(IPAddress.Loopback, port, TestContext.Current.CancellationToken);
+            var buffer = new byte[1];
+            await WaitUntilAsync(() =>
+            {
+                try { return overflow.Client.Poll(0, SelectMode.SelectRead) && overflow.Client.Receive(buffer, SocketFlags.Peek) == 0; }
+                catch (SocketException) { return true; }
+            });
+        }
+        finally { foreach (var client in stalled) client.Dispose(); }
+    }
+
+    [Fact]
+    public async Task An_admitted_peer_flooding_valid_messages_is_disconnected_without_ending_the_session()
+    {
+        var port = FreePort();
+        var hostNotices = new List<string>();
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            message => { lock (hostNotices) hostNotices.Add(message); return ValueTask.CompletedTask; });
+        await using var replacement = new TcpSessionOperations(new SessionNetworkOptions { Port = port });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+
+        using var offender = new TcpClient(AddressFamily.InterNetwork);
+        await offender.ConnectAsync(IPAddress.Loopback, port, TestContext.Current.CancellationToken);
+        var stream = offender.GetStream();
+        await LanProtocol.WriteAsync(stream,
+            new LanMessage.JoinRequest(LanProtocol.CurrentVersion, Guid.NewGuid()), TestContext.Current.CancellationToken);
+        Assert.IsType<LanMessage.AdmissionAccepted>(await LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken));
+
+        try
+        {
+            for (var i = 0; i < TcpSessionOperations.MaxInboundMessagesPerWindow + 5; i++)
+                await LanProtocol.WriteAsync(stream, new LanMessage.Heartbeat(), TestContext.Current.CancellationToken);
+        }
+        catch (IOException) { }
+
+        await WaitUntilAsync(() => { lock (hostNotices) return hostNotices.Any(notice => notice.Contains("rate limit", StringComparison.Ordinal)); });
+        var result = await replacement.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken);
+
+        Assert.True(result.Success);
+        lock (hostNotices) Assert.DoesNotContain(hostNotices, notice => notice.Contains("heartbeat", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Structured_logs_capture_role_and_correlation_without_leaking_endpoints_above_debug()
+    {
+        var port = FreePort();
+        var log = new List<RelayLogEntry>();
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port }, log: entry => { lock (log) log.Add(entry); });
+        await using var joining = new TcpSessionOperations(new SessionNetworkOptions { Port = port });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        await joining.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => { lock (log) return log.Any(entry => entry.Event == RelayEventName.PeerAdmitted); });
+
+        await joining.LeaveAsync(GamePeerState.Joined, TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => { lock (log) return log.Any(entry => entry.Event == RelayEventName.PeerDisconnected); });
+
+        List<RelayLogEntry> snapshot;
+        lock (log) snapshot = [.. log];
+        Assert.Contains(snapshot, entry =>
+            entry.Event == RelayEventName.HandshakeAttempted && entry.Severity == RelaySeverity.Debug && entry.Endpoint is not null);
+        var admitted = Assert.Single(snapshot, entry => entry.Event == RelayEventName.PeerAdmitted);
+        Assert.Equal(RelayRole.Host, admitted.Role);
+        Assert.NotEqual(RelaySeverity.Debug, admitted.Severity);
+        Assert.Null(admitted.Endpoint);
+        Assert.NotNull(admitted.SessionCorrelationId);
+        var disconnected = Assert.Single(snapshot, entry => entry.Event == RelayEventName.PeerDisconnected);
+        Assert.Equal(RelayFailureCategory.None, disconnected.Failure);
+    }
+
     private static int FreePort()
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);

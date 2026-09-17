@@ -23,3 +23,7 @@ _Avoid_: Server, authority
 **Joining Player**:
 The second player whose Game Peer joins the Session Host's Multiplayer Session over the local network.
 _Avoid_: Client, guest
+
+## Trusted-LAN boundary
+
+The Game Interaction Protocol connection between a Game Peer and its local game is loopback-only and never crosses the network. The Multiplayer Relay's LAN listener is intended for a private, firewalled network between trusted computers: it is unauthenticated, so the Session Host must control access at the firewall, not the protocol. The LAN wire protocol (`LanProtocol`) carries only bounded, structurally validated Chat Entries, Join/Admission negotiation, Heartbeats, and Departure notices; it has no message type that names or executes an arbitrary remote script or command, so a peer on the LAN cannot use it to run code on the other machine.
