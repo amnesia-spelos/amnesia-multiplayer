@@ -73,6 +73,10 @@ public static class GameInteractionProtocol
         return new GameEvent.Unknown(line);
     }
 
+    // Replies that LocalGameCommands turns into an Unrecognized start, which the Joining Player reports as unavailable.
+    public static bool IsUnrecognizedReply(GameEvent gameEvent) => gameEvent is
+        GameEvent.StartCustomStoryResponded { Outcome: StartCustomStoryOutcome.Unrecognized } or GameEvent.UnknownCommandWarned;
+
     public static string Display(ChatEntry entry) => $"chat:{entry.Author}:{entry.Message}";
 
     public static string StartCustomStory(string identifier) => $"startcustomstory:{identifier}";

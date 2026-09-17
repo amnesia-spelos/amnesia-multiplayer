@@ -71,7 +71,16 @@ while (!cancellation.IsCancellationRequested)
         {
             var line = await reader.ReadLineAsync(cancellation.Token);
             if (line is null) throw new IOException("The local game closed the Game Interaction Protocol session.");
-            DispatchGameEvent(GameInteractionProtocol.ParseEvent(line));
+            var gameEvent = GameInteractionProtocol.ParseEvent(line);
+            if (GameInteractionProtocol.IsUnrecognizedReply(gameEvent))
+                Console.WriteLine(JsonSerializer.Serialize(new
+                {
+                    timestamp = DateTimeOffset.UtcNow,
+                    severity = "Warning",
+                    @event = "UnrecognizedGameReply",
+                    line
+                }));
+            DispatchGameEvent(gameEvent);
         }
     }
     catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }

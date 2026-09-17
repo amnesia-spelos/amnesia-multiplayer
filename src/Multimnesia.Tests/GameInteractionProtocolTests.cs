@@ -88,6 +88,18 @@ public sealed class GameInteractionProtocolTests
     }
 
     [Theory]
+    [InlineData("RESPONSE:startcustomstory:exploded", true)]
+    [InlineData("WARNING:Unknown command", true)]
+    [InlineData("RESPONSE:startcustomstory:starting", false)]
+    [InlineData("RESPONSE:startcustomstory:not in main menu", false)]
+    [InlineData("RESPONSE:chat:message displayed", false)]
+    [InlineData("EVENT:CustomStoryStarted:mp-test-cs", false)]
+    public void Replies_that_make_a_start_unavailable_are_recognized_for_logging(string line, bool expected)
+    {
+        Assert.Equal(expected, GameInteractionProtocol.IsUnrecognizedReply(GameInteractionProtocol.ParseEvent(line)));
+    }
+
+    [Theory]
     [InlineData("RESPONSE:chat:unavailable")]
     [InlineData("EVENT:MapChanged:multiplayer-test.map")]
     [InlineData("")]
