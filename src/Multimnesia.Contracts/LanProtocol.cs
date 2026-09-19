@@ -16,7 +16,7 @@ public abstract record LanMessage
     public sealed record CustomStoryStartOutcome(string Identifier, SharedCustomStoryStartOutcome Outcome) : LanMessage;
     // The fields of a `STATE localpose` State Update, unchanged in meaning (ADR 0003).
     public sealed record Pose(
-        ulong TimeMs, uint TeleportCounter, double X, double Y, double Z, double Yaw, double Pitch, bool Crouch, string Map) : LanMessage;
+        ulong TimeMs, uint TeleportCounter, double X, double Y, double Z, double Yaw, double Pitch, bool Crouch, bool Lantern, string Map) : LanMessage;
 }
 
 public enum SharedCustomStoryStartOutcome { Started, NotFound, Invalid, NotInMainMenu, Unavailable }
@@ -25,7 +25,7 @@ public sealed class LanProtocolException(string message, Exception? innerExcepti
 
 public static class LanProtocol
 {
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 4;
     public const int MaximumFrameBytes = 4096;
     // Keeps a Pose's numbers within the game's 15-digit, 4-decimal line format; real positions and angles are far smaller.
     public const double MaximumPoseMagnitude = 1e9;
@@ -63,6 +63,7 @@ public static class LanProtocol
                 yaw = value.Yaw,
                 pitch = value.Pitch,
                 crouch = value.Crouch,
+                lantern = value.Lantern,
                 map = value.Map
             },
             LanMessage.Pose => throw new LanProtocolException("Invalid Pose."),
@@ -191,6 +192,7 @@ public static class LanProtocol
             root.GetProperty("yaw").GetDouble(),
             root.GetProperty("pitch").GetDouble(),
             root.GetProperty("crouch").GetBoolean(),
+            root.GetProperty("lantern").GetBoolean(),
             root.GetProperty("map").GetString()!);
         return IsValid(pose) ? pose : throw new LanProtocolException("Invalid Pose.");
     }

@@ -725,8 +725,8 @@ public sealed class MultiplayerSessionOperationsTests
         Assert.Equal("The Multiplayer Session uses an incompatible protocol version.", result.Feedback);
     }
 
-    private static readonly LanMessage.Pose HostPose = new(1000, 1, 1.25, 2.5, -3.75, 90, -45, false, "custom_stories/mp-test-cs/maps/start.map");
-    private static readonly LanMessage.Pose JoiningPose = new(2000, 4, -1, 0, 7.5, -12.5, 10, true, "custom_stories/mp-test-cs/maps/start.map");
+    private static readonly LanMessage.Pose HostPose = new(1000, 1, 1.25, 2.5, -3.75, 90, -45, false, true, "custom_stories/mp-test-cs/maps/start.map");
+    private static readonly LanMessage.Pose JoiningPose = new(2000, 4, -1, 0, 7.5, -12.5, 10, true, false, "custom_stories/mp-test-cs/maps/start.map");
 
     [Fact]
     public async Task Presence_of_the_other_player_is_reported_for_both_roles()
@@ -891,7 +891,7 @@ public sealed class MultiplayerSessionOperationsTests
         using var peer = await AdmitRawPeerAsync(port);
 
         await WriteRawFrameAsync(peer.GetStream(),
-            "{\"type\":\"pose\",\"timeMs\":1,\"teleportCounter\":0,\"x\":1e20,\"y\":0,\"z\":0,\"yaw\":0,\"pitch\":0,\"crouch\":false,\"map\":\"maps/a.map\"}");
+            "{\"type\":\"pose\",\"timeMs\":1,\"teleportCounter\":0,\"x\":1e20,\"y\":0,\"z\":0,\"yaw\":0,\"pitch\":0,\"crouch\":false,\"lantern\":false,\"map\":\"maps/a.map\"}");
 
         await WaitUntilAsync(() => { lock (notices) return notices.Contains("The remote Game Peer violated the Multiplayer Session protocol."); });
         await WaitUntilAsync(() => !host.IsOtherPlayerPresent);

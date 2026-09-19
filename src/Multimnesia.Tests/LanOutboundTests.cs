@@ -5,7 +5,7 @@ namespace Multimnesia.Tests;
 
 public sealed class LanOutboundTests
 {
-    private static LanMessage.Pose PoseAt(ulong timeMs) => new(timeMs, 0, 1, 2, 3, 90, 0, false, "maps/a.map");
+    private static LanMessage.Pose PoseAt(ulong timeMs) => new(timeMs, 0, 1, 2, 3, 90, 0, false, false, "maps/a.map");
 
     [Fact]
     public async Task An_unsent_Pose_is_replaced_by_a_newer_one()

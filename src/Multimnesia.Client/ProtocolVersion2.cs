@@ -25,7 +25,7 @@ public sealed record ProtocolNegotiation(string Outcome, int? Version, IReadOnly
 
 // The local player's Pose as a Protocol Version 2 `localpose` State Update reports it: feet position, body yaw and camera pitch in degrees.
 public sealed record LocalPose(
-    ulong TimeMs, uint TeleportCounter, double X, double Y, double Z, double Yaw, double Pitch, bool Crouch, string Map);
+    ulong TimeMs, uint TeleportCounter, double X, double Y, double Z, double Yaw, double Pitch, bool Crouch, bool Lantern, string Map);
 
 // The Protocol Version 2 line format of the amnesia-tdd-tcp contract: single-space fields, an optional path last, "C"-locale numbers.
 public static class ProtocolVersion2Line

@@ -182,9 +182,9 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         await run;
     }
 
-    private const string LocalPoseState = "STATE localpose 1000 1 1.2500 2.5000 -3.7500 90.0000 -45.0000 0 custom_stories/mp-test-cs/maps/start.map";
+    private const string LocalPoseState = "STATE localpose 1000 1 1.2500 2.5000 -3.7500 90.0000 -45.0000 0 1 custom_stories/mp-test-cs/maps/start.map";
     private static readonly LanMessage.Pose ReceivedPose = new(
-        123456, 3, 1.25, -2.5, 3.75, 90, -45, true, "custom_stories/My Story: Part 2/maps/cellar one.map");
+        123456, 3, 1.25, -2.5, 3.75, 90, -45, true, false, "custom_stories/My Story: Part 2/maps/cellar one.map");
 
     private async Task<FakeGame> ConnectWithSharedPoseAsync()
     {
@@ -206,14 +206,14 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         await WaitUntilAsync(() => _sessions.SentPoses.Count > 0);
         await _callbacks.ReceivePose(ReceivedPose);
         Assert.Equal(
-            "avatarpose partner 123456 3 1.2500 -2.5000 3.7500 90.0000 -45.0000 1 custom_stories/My Story: Part 2/maps/cellar one.map",
+            "avatarpose partner 123456 3 1.2500 -2.5000 3.7500 90.0000 -45.0000 1 0 custom_stories/My Story: Part 2/maps/cellar one.map",
             await game.ReadLineAsync());
         _sessions.SetPresent(false);
 
         Assert.Equal("avatarremove partner", await game.ReadLineAsync());
         Assert.Equal("localpose unsubscribe", await game.ReadLineAsync());
         Assert.Equal(
-            [new LanMessage.Pose(1000, 1, 1.25, 2.5, -3.75, 90, -45, false, "custom_stories/mp-test-cs/maps/start.map")],
+            [new LanMessage.Pose(1000, 1, 1.25, 2.5, -3.75, 90, -45, false, true, "custom_stories/mp-test-cs/maps/start.map")],
             _sessions.SentPoses);
     }
 

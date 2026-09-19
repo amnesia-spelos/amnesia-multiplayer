@@ -60,7 +60,7 @@ public sealed class SharedPose
     public void HandleLocalPose(LocalPose pose)
     {
         if (IsGranted)
-            _sessions.SendPose(new(pose.TimeMs, pose.TeleportCounter, pose.X, pose.Y, pose.Z, pose.Yaw, pose.Pitch, pose.Crouch, pose.Map));
+            _sessions.SendPose(new(pose.TimeMs, pose.TeleportCounter, pose.X, pose.Y, pose.Z, pose.Yaw, pose.Pitch, pose.Crouch, pose.Lantern, pose.Map));
     }
 
     // Latest-wins: replaces any received Pose not yet written to the local game. Never blocks.

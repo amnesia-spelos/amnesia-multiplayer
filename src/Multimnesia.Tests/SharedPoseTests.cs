@@ -13,11 +13,11 @@ public sealed class SharedPoseTests
     private const string Remove = "avatarremove partner";
     private const string Unsubscribe = "localpose unsubscribe";
     private static readonly ProtocolNegotiation Granted = new("ok", 2, ["avatars", "localpose"]);
-    private static readonly LocalPose Local = new(1000, 1, 1.25, 2.5, -3.75, 90, -45, false, "custom_stories/mp-test-cs/maps/start.map");
+    private static readonly LocalPose Local = new(1000, 1, 1.25, 2.5, -3.75, 90, -45, false, true, "custom_stories/mp-test-cs/maps/start.map");
     private static readonly LanMessage.Pose Remote = new(
-        123456, 3, 1.25, -2.5, 3.75, 90, -45, true, "custom_stories/My Story: Part 2/maps/cellar one.map");
+        123456, 3, 1.25, -2.5, 3.75, 90, -45, false, true, "custom_stories/My Story: Part 2/maps/cellar one.map");
     private const string RemoteLine =
-        "avatarpose partner 123456 3 1.2500 -2.5000 3.7500 90.0000 -45.0000 1 custom_stories/My Story: Part 2/maps/cellar one.map";
+        "avatarpose partner 123456 3 1.2500 -2.5000 3.7500 90.0000 -45.0000 0 1 custom_stories/My Story: Part 2/maps/cellar one.map";
 
     private readonly FakeSessionOperations _sessions = new();
     private readonly RecordingGame _game = new();
@@ -83,8 +83,8 @@ public sealed class SharedPoseTests
 
         Assert.Equal(
             [
-                new LanMessage.Pose(1000, 1, 1.25, 2.5, -3.75, 90, -45, false, "custom_stories/mp-test-cs/maps/start.map"),
-                new LanMessage.Pose(1033, 1, 1.25, 2.5, -3.75, 90, -45, false, "custom_stories/mp-test-cs/maps/start.map")
+                new LanMessage.Pose(1000, 1, 1.25, 2.5, -3.75, 90, -45, false, true, "custom_stories/mp-test-cs/maps/start.map"),
+                new LanMessage.Pose(1033, 1, 1.25, 2.5, -3.75, 90, -45, false, true, "custom_stories/mp-test-cs/maps/start.map")
             ],
             _sessions.SentPoses);
     }

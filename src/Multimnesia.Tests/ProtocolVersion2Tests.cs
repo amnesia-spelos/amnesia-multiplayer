@@ -10,27 +10,38 @@ public sealed class ProtocolVersion2Tests
     public void Local_pose_State_Updates_carry_every_field_and_the_whole_map_path()
     {
         var parsed = Assert.IsType<GameEvent.LocalPoseReported>(GameInteractionProtocol.ParseEvent(
-            "STATE localpose 123456 3 1.2500 -2.5000 3.7500 90.0000 -45.0000 1 custom_stories/My Story: Part 2/maps/cellar one.map"));
+            "STATE localpose 123456 3 1.2500 -2.5000 3.7500 90.0000 -45.0000 1 1 custom_stories/My Story: Part 2/maps/cellar one.map"));
 
         Assert.Equal(
-            new LocalPose(123456, 3, 1.25, -2.5, 3.75, 90, -45, true, "custom_stories/My Story: Part 2/maps/cellar one.map"),
+            new LocalPose(123456, 3, 1.25, -2.5, 3.75, 90, -45, true, true, "custom_stories/My Story: Part 2/maps/cellar one.map"),
             parsed.Pose);
+    }
+
+    [Fact]
+    public void Local_pose_State_Updates_read_the_raised_lantern_after_the_crouch_flag()
+    {
+        var parsed = Assert.IsType<GameEvent.LocalPoseReported>(GameInteractionProtocol.ParseEvent(
+            "STATE localpose 1000 1 1.0000 2.0000 3.0000 4.0000 5.0000 0 1 custom_stories/My Story: Part 2/maps/cellar one.map"));
+
+        Assert.False(parsed.Pose.Crouch);
+        Assert.True(parsed.Pose.Lantern);
+        Assert.Equal("custom_stories/My Story: Part 2/maps/cellar one.map", parsed.Pose.Map);
     }
 
     [Fact]
     public void Local_pose_State_Updates_use_the_full_time_and_teleport_counter_ranges()
     {
         var parsed = Assert.IsType<GameEvent.LocalPoseReported>(GameInteractionProtocol.ParseEvent(
-            "STATE localpose 18446744073709551615 4294967295 0.0000 0.0000 0.0000 0.0000 0.0000 0 maps/a.map"));
+            "STATE localpose 18446744073709551615 4294967295 0.0000 0.0000 0.0000 0.0000 0.0000 0 0 maps/a.map"));
 
-        Assert.Equal(new LocalPose(ulong.MaxValue, uint.MaxValue, 0, 0, 0, 0, 0, false, "maps/a.map"), parsed.Pose);
+        Assert.Equal(new LocalPose(ulong.MaxValue, uint.MaxValue, 0, 0, 0, 0, 0, false, false, "maps/a.map"), parsed.Pose);
     }
 
     [Fact]
     public void Local_pose_map_paths_keep_trailing_spaces()
     {
         var parsed = Assert.IsType<GameEvent.LocalPoseReported>(GameInteractionProtocol.ParseEvent(
-            "STATE localpose 1 0 1.0000 2.0000 3.0000 4.0000 5.0000 0 maps/a.map "));
+            "STATE localpose 1 0 1.0000 2.0000 3.0000 4.0000 5.0000 0 0 maps/a.map "));
 
         Assert.Equal("maps/a.map ", parsed.Pose.Map);
     }
@@ -41,11 +52,11 @@ public sealed class ProtocolVersion2Tests
         UnderCommaDecimalLocale(() =>
         {
             var parsed = Assert.IsType<GameEvent.LocalPoseReported>(GameInteractionProtocol.ParseEvent(
-                "STATE localpose 1000 1 1.2500 -42.0001 7 90.0000 -45.5000 0 maps/a.map"));
+                "STATE localpose 1000 1 1.2500 -42.0001 7 90.0000 -45.5000 0 0 maps/a.map"));
 
-            Assert.Equal(new LocalPose(1000, 1, 1.25, -42.0001, 7, 90, -45.5, false, "maps/a.map"), parsed.Pose);
+            Assert.Equal(new LocalPose(1000, 1, 1.25, -42.0001, 7, 90, -45.5, false, false, "maps/a.map"), parsed.Pose);
             Assert.IsType<GameEvent.Unknown>(GameInteractionProtocol.ParseEvent(
-                "STATE localpose 1000 1 1,2500 0.0000 0.0000 0.0000 0.0000 0 maps/a.map"));
+                "STATE localpose 1000 1 1,2500 0.0000 0.0000 0.0000 0.0000 0 0 maps/a.map"));
         });
     }
 
@@ -58,16 +69,19 @@ public sealed class ProtocolVersion2Tests
     }
 
     [Theory]
-    [InlineData("STATE localpose 1 0 1.0000 2.0000 3.0000 4.0000 5.0000 0")]
-    [InlineData("STATE localpose 1 0 1.0000 2.0000 3.0000 4.0000 5.0000 0 ")]
-    [InlineData("STATE localpose 1  0 1.0000 2.0000 3.0000 4.0000 5.0000 0 maps/a.map")]
-    [InlineData("STATE localpose -1 0 1.0000 2.0000 3.0000 4.0000 5.0000 0 maps/a.map")]
-    [InlineData("STATE localpose 18446744073709551616 0 1.0000 2.0000 3.0000 4.0000 5.0000 0 maps/a.map")]
-    [InlineData("STATE localpose 1 4294967296 1.0000 2.0000 3.0000 4.0000 5.0000 0 maps/a.map")]
-    [InlineData("STATE localpose 1 +1 1.0000 2.0000 3.0000 4.0000 5.0000 0 maps/a.map")]
-    [InlineData("STATE localpose 1 0 1.0000 2.0000 3.0000 4.0000 5.0000 2 maps/a.map")]
-    [InlineData("STATE localpose 1 0 1.0000 2.0000 3.0000 4.0000 nan 0 maps/a.map")]
-    [InlineData("STATE localposex 1 0 1.0000 2.0000 3.0000 4.0000 5.0000 0 maps/a.map")]
+    [InlineData("STATE localpose 1 0 1.0000 2.0000 3.0000 4.0000 5.0000 0 0")]
+    [InlineData("STATE localpose 1 0 1.0000 2.0000 3.0000 4.0000 5.0000 0 0 ")]
+    [InlineData("STATE localpose 1  0 1.0000 2.0000 3.0000 4.0000 5.0000 0 0 maps/a.map")]
+    [InlineData("STATE localpose -1 0 1.0000 2.0000 3.0000 4.0000 5.0000 0 0 maps/a.map")]
+    [InlineData("STATE localpose 18446744073709551616 0 1.0000 2.0000 3.0000 4.0000 5.0000 0 0 maps/a.map")]
+    [InlineData("STATE localpose 1 4294967296 1.0000 2.0000 3.0000 4.0000 5.0000 0 0 maps/a.map")]
+    [InlineData("STATE localpose 1 +1 1.0000 2.0000 3.0000 4.0000 5.0000 0 0 maps/a.map")]
+    [InlineData("STATE localpose 1 0 1.0000 2.0000 3.0000 4.0000 5.0000 2 0 maps/a.map")]
+    [InlineData("STATE localpose 1 0 1.0000 2.0000 3.0000 4.0000 5.0000 0 2 maps/a.map")]
+    [InlineData("STATE localpose 1 0 1.0000 2.0000 3.0000 4.0000 5.0000 0 true maps/a.map")]
+    [InlineData("STATE localpose 1 0 1.0000 2.0000 3.0000 4.0000 5.0000 0 maps/a.map")]
+    [InlineData("STATE localpose 1 0 1.0000 2.0000 3.0000 4.0000 nan 0 0 maps/a.map")]
+    [InlineData("STATE localposex 1 0 1.0000 2.0000 3.0000 4.0000 5.0000 0 0 maps/a.map")]
     public void Malformed_local_pose_State_Updates_are_unknown(string line)
     {
         Assert.IsType<GameEvent.Unknown>(GameInteractionProtocol.ParseEvent(line));

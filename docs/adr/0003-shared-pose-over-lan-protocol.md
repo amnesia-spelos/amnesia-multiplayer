@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Amends the `LanProtocol` invariant stated in ADR 0001 and ADR 0002.
+Accepted. Amends the `LanProtocol` invariant stated in ADR 0001 and ADR 0002. Amended below for the raised lantern (issue #24).
 
 ## Context
 
@@ -31,3 +31,7 @@ Pose sending is latest-wins: an unsent Pose is replaced by a newer one rather th
 - Pose traffic shares the session connection's liveness: a lost connection ends both the Multiplayer Session and the Shared Pose together, with no separate channel to fail independently.
 - If TCP proves inadequate on real networks (for example Wi-Fi loss causing visible stalls), moving Poses to a datagram channel requires a new decision record that supersedes this one; the `pose` message shape is chosen so it could be carried unchanged.
 - Further gameplay synchronization (props, interactions, scripts) still requires its own decision record.
+
+## Amendment: the raised lantern
+
+amnesia-spelos/amnesia-tdd-tcp#40 added a `<lantern>` flag after `<crouch>` in both `STATE localpose` and `avatarpose`, changing Protocol Version 2 in place because it had not been released. The `pose` message becomes `pose { timeMs, teleportCounter, x, y, z, yaw, pitch, crouch, lantern, map }`, with `lantern` a boolean required when read, and `LanProtocol` becomes version 4. The bump makes a version 3 Game Peer fail admission as incompatible instead of being admitted and then dropped at its first `pose`, which a mismatched build on one of the two LAN computers would otherwise cause.

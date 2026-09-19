@@ -89,11 +89,11 @@ public static class GameInteractionProtocol
         return new GameEvent.Unknown(line);
     }
 
-    // STATE localpose <timeMs> <teleportCounter> <x> <y> <z> <yaw> <pitch> <crouch> <map>
+    // STATE localpose <timeMs> <teleportCounter> <x> <y> <z> <yaw> <pitch> <crouch> <lantern> <map>
     private static bool TryParseLocalPose(string line, out LocalPose pose)
     {
         pose = default!;
-        if (!ProtocolVersion2Line.TrySplit(line, fixedFieldCount: 10, hasPath: true, out var fields) ||
+        if (!ProtocolVersion2Line.TrySplit(line, fixedFieldCount: 11, hasPath: true, out var fields) ||
             !ulong.TryParse(fields[2], NumberStyles.None, CultureInfo.InvariantCulture, out var timeMs) ||
             !uint.TryParse(fields[3], NumberStyles.None, CultureInfo.InvariantCulture, out var teleportCounter) ||
             !ProtocolVersion2Line.TryParseNumber(fields[4], out var x) ||
@@ -101,9 +101,10 @@ public static class GameInteractionProtocol
             !ProtocolVersion2Line.TryParseNumber(fields[6], out var z) ||
             !ProtocolVersion2Line.TryParseNumber(fields[7], out var yaw) ||
             !ProtocolVersion2Line.TryParseNumber(fields[8], out var pitch) ||
-            fields[9] is not ("0" or "1")) return false;
+            fields[9] is not ("0" or "1") ||
+            fields[10] is not ("0" or "1")) return false;
 
-        pose = new(timeMs, teleportCounter, x, y, z, yaw, pitch, fields[9] == "1", fields[10]);
+        pose = new(timeMs, teleportCounter, x, y, z, yaw, pitch, fields[9] == "1", fields[10] == "1", fields[11]);
         return true;
     }
 
@@ -123,7 +124,7 @@ public static class GameInteractionProtocol
 
     public static string AvatarRemove(string avatarIdentifier) => $"avatarremove {avatarIdentifier}";
 
-    // avatarpose <id> <timeMs> <teleportCounter> <x> <y> <z> <yaw> <pitch> <crouch> <map>
+    // avatarpose <id> <timeMs> <teleportCounter> <x> <y> <z> <yaw> <pitch> <crouch> <lantern> <map>
     public static string AvatarPose(string avatarIdentifier, LanMessage.Pose pose) => string.Join(' ',
         "avatarpose", avatarIdentifier,
         pose.TimeMs.ToString(CultureInfo.InvariantCulture),
@@ -134,6 +135,7 @@ public static class GameInteractionProtocol
         ProtocolVersion2Line.FormatNumber(pose.Yaw),
         ProtocolVersion2Line.FormatNumber(pose.Pitch),
         pose.Crouch ? "1" : "0",
+        pose.Lantern ? "1" : "0",
         pose.Map);
 
     public static string SubscribeLocalPose(int hz) => $"localpose subscribe {hz.ToString(CultureInfo.InvariantCulture)}";
