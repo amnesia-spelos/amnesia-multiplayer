@@ -28,6 +28,10 @@ _Avoid_: Client, guest
 The Session Host's fresh start of a Custom Story, reproduced on the Joining Player's game within the same Multiplayer Session.
 _Avoid_: Story sync, map sync, remote start
 
+**Shared Pose**:
+A player's Pose, continuously reproduced as an Avatar in the other player's game within the same Multiplayer Session.
+_Avoid_: Movement sync, position sync, remote player, ghost
+
 ## Trusted-LAN boundary
 
 The Game Interaction Protocol connection between a Game Peer and its local game is loopback-only and never crosses the network. The Multiplayer Relay's LAN listener is intended for a private, firewalled network between trusted computers: it is unauthenticated, so the Session Host must control access at the firewall, not the protocol. The LAN wire protocol (`LanProtocol`) carries only bounded, structurally validated Chat Entries, Join/Admission negotiation, Heartbeats, Departure notices, and Shared Custom Story Starts with their outcomes. A Shared Custom Story Start may name an installed Custom Story by its Custom Story Identifier, but the protocol has no message type that names or executes an arbitrary remote script or command, so a peer on the LAN cannot use it to run code on the other machine.
