@@ -56,7 +56,7 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         _notice = notice ?? (_ => ValueTask.CompletedTask);
         _resolver = resolver ?? Dns.GetHostAddressesAsync;
         _receiveChat = receiveChat ?? (_ => ValueTask.CompletedTask);
-        _log = log ?? RelayLog.ConsoleSink;
+        _log = log ?? (_ => { });
         _receiveCustomStoryStarted = receiveCustomStoryStarted ?? (_ => ValueTask.CompletedTask);
         _receiveCustomStoryStartOutcome = receiveCustomStoryStartOutcome ?? ((_, _) => ValueTask.CompletedTask);
     }

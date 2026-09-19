@@ -19,7 +19,7 @@ public sealed record LocalGameLogEntry(
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
     };
 
-    public static void ConsoleSink(LocalGameLogEntry entry) => Console.WriteLine(JsonSerializer.Serialize(new
+    public static string Format(LocalGameLogEntry entry) => JsonSerializer.Serialize(new
     {
         timestamp = entry.Timestamp,
         severity = entry.Severity.ToString(),
@@ -29,7 +29,7 @@ public sealed record LocalGameLogEntry(
         protocolVersion = entry.Negotiation?.Version,
         capabilities = entry.Negotiation?.Capabilities,
         sharedPose = entry.Negotiation?.GrantsSharedPose
-    }, SerializerOptions));
+    }, SerializerOptions);
 }
 
 // What a Multiplayer Session reports to this game Session.
@@ -43,7 +43,8 @@ public sealed record SessionCallbacks(
 public sealed class LocalGameSession(
     Stream gameStream,
     Func<SessionCallbacks, ISessionOperations> createSessions,
-    Action<LocalGameLogEntry> log)
+    Action<LocalGameLogEntry> log,
+    string? connectedNotice = null)
 {
     public const string AvatarsUnsupportedNotice = "Your game does not support Avatars; movement will not be shared.";
 
@@ -130,6 +131,8 @@ public sealed class LocalGameSession(
 
             // Bypasses the gate: every other writer waits there until the negotiation is answered.
             await writer.WriteLineAsync(GameInteractionProtocol.NegotiateSharedPose.AsMemory(), cancellationToken);
+            // Queued at the gate before the negotiation can settle, so it is the first chat line after it.
+            if (connectedNotice is not null) _ = RunIgnoringDisconnectAsync(DisplaySystemAsync(connectedNotice).AsTask());
             while (!cancellationToken.IsCancellationRequested)
             {
                 var line = await reader.ReadLineAsync(cancellationToken)

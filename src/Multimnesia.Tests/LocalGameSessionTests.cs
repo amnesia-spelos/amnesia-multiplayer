@@ -120,6 +120,22 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task The_connected_notice_is_the_first_chat_line_after_the_negotiation()
+    {
+        await using var game = await FakeGame.StartAsync();
+        var session = new LocalGameSession(
+            game.PeerStream, callbacks => { _callbacks = callbacks; return _sessions; }, _ => { }, connectedNotice: "Version line.");
+        _ = session.RunAsync(_cancellation.Token);
+        await game.SendAsync("Welcome to the Amnesia TCP server!");
+        Assert.Equal(NegotiateSharedPose, await game.ReadLineAsync());
+
+        await game.SendAsync("WARNING:Unknown command");
+
+        Assert.Equal("chat:SYSTEM:Version line.", await game.ReadLineAsync());
+        Assert.Equal(AvatarsUnsupportedNotice, await game.ReadLineAsync());
+    }
+
+    [Fact]
     public async Task Chat_and_the_Shared_Custom_Story_Start_keep_working_on_an_older_game()
     {
         var (game, _, _) = await ConnectAsync();

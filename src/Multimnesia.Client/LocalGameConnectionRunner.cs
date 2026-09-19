@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Multimnesia.Client;
 
 public enum ConnectionLogSeverity { Information, Warning }
@@ -7,7 +9,16 @@ public sealed record GameConnectionStatus(
     DateTimeOffset Timestamp,
     ConnectionLogSeverity Severity,
     GameConnectionEvent Event,
-    int Attempt);
+    int Attempt)
+{
+    public static string Format(GameConnectionStatus status) => JsonSerializer.Serialize(new
+    {
+        timestamp = status.Timestamp,
+        severity = status.Severity.ToString(),
+        @event = status.Event.ToString(),
+        status.Attempt
+    });
+}
 
 public static class LocalGameReconnectPolicy
 {

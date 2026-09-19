@@ -29,11 +29,21 @@ dotnet publish .\src\Multimnesia.Client\Multimnesia.Client.csproj --configuratio
 
 This is an ordinary directory publish. Trimming and single-file publishing are intentionally not enabled. Copy `artifacts\game-peer` to both PCs.
 
+## Versioning
+
+Game Peer versions follow SemVer as `0.MINOR.PATCH` while the project is in alpha:
+
+- Each codenamed milestone bumps the minor version; fixes to that milestone bump the patch version under the same codename. The current release is `v0.1.0`, codename "Whisper".
+- There is no `-alpha` suffix. Instead, GitHub releases are marked pre-release.
+- Release titles and archive names include the codename, for example `amnesia-multiplayer-v0.1.0-whisper-win-x64.zip`.
+
+The version and codename are defined once, in `src/Directory.Build.props`, and stamped into the executable's file version. When the Game Peer first connects to its local game, chat shows `Amnesia Multiplayer v0.1.0 "Whisper" connected.` Game Peers do not compare versions with each other; the `LanProtocol` version check at admission decides compatibility.
+
 ## Setup
 
 1. On both PCs, install the test Custom Story: copy the `resources\mp-test-cs` folder from this repository into the game's `custom_stories` folder, keeping the folder name `mp-test-cs`. It appears in the Custom Stories menu as "Amnesia Multiplayer Test".
 2. On both PCs, start the modified game and stay in the main menu.
-3. On both PCs, start `Multimnesia.Client.exe`. It connects to the local game over the Game Interaction Protocol and remains a console application whose console is used only for operational logs; all player interaction happens through the game's own chat.
+3. On both PCs, start `Multimnesia.Client.exe`. It connects to the local game over the Game Interaction Protocol and remains a console application whose console is used only for operational logs (also written to a log file, see [Reporting a problem](#reporting-a-problem)); all player interaction happens through the game's own chat.
 4. If the local game connection cannot be established, the Game Peer keeps running and retries with bounded backoff, logging the initial failure, restrained retry status, and recovery. Hosting and joining are unavailable until that connection succeeds.
 
 ## Starting a Custom Story together
@@ -104,7 +114,7 @@ Safe defaults work for both Game Peers on one PC. Configuration can be supplied 
 | `GamePort` | `5150` | Local Game Interaction Protocol port. |
 | `RelayPort` | `5000` | TCP port the in-process Multiplayer Relay listens on when hosting, and connects to when joining. |
 | `JoinTimeoutSeconds` | `10` | Overall deadline for a `/join` attempt, including trying every resolved address. |
-| `LogLevel` | `Information` | Minimum severity console-logged: `Debug`, `Information`, `Warning`, or `Error`. `Debug` additionally logs remote endpoints. |
+| `LogLevel` | `Information` | Minimum severity logged to the console and the log file: `Debug`, `Information`, `Warning`, or `Error`. `Debug` additionally logs remote endpoints. |
 
 Ordinary play requires no configuration beyond these defaults; no relay URL or bind address needs to be supplied. Override any setting from the command line, for example:
 
@@ -130,6 +140,15 @@ Allow inbound TCP traffic to the configured Multiplayer Relay port (5000 by defa
 - **`Custom Story <id> could not start for the Joining Player: their game does not support Custom Story starts or did not respond.`** — the Joining Player's `Amnesia.exe` predates Custom Story start support, or their game did not reply within 5 seconds. Install a current build from `amnesia-tdd-tcp`; the Joining Player's Game Peer console logs any unrecognized reply.
 - **Local-game connection errors** — confirm the modified `Amnesia.exe` from `amnesia-tdd-tcp` is running and listening on `GamePort` before starting the Game Peer; it retries automatically once the game becomes reachable.
 - Set `LogLevel` to `Debug` to see per-connection endpoints and handshake attempts while diagnosing a LAN issue; never share `Debug` logs outside your own troubleshooting, as they include peer IP addresses.
+
+## Reporting a problem
+
+When reporting a problem, attach both logs from each affected PC:
+
+- **Game Peer log**: every run writes `logs\game-peer-yyyyMMdd-HHmmss.log` beside `Multimnesia.Client.exe`, named after the run's local start time. The newest 10 are kept. Each file starts with the Game Peer version and codename, the `LanProtocol` version, and the OS version, followed by the same entries as the console at the configured `LogLevel`. If the `logs` folder cannot be written, for example because the Game Peer is in a read-only folder, the Game Peer says so on its console and keeps running without a log file.
+- **Game log**: the game writes its own `hpl.log` to `Documents\Amnesia\Main\hpl.log` in your user profile. It is overwritten on every game start, so copy it before restarting the game.
+
+At the default `Information` level the Game Peer log contains no IP addresses. Logs recorded at `Debug` do; see the warning under [Troubleshooting](#troubleshooting).
 
 ## Two-computer verification walkthrough
 
@@ -170,6 +189,6 @@ This milestone is a chat, session, and Shared Custom Story Start vertical slice.
 - more than one Joining Player;
 - discovery or matchmaking;
 - persistent player identity;
-- chat persistence (this milestone does not persist logs either; operators may redirect console output when diagnosing a session).
+- chat persistence.
 
 The architecture does not preclude any of the above being built later, but none of it is in scope now.
