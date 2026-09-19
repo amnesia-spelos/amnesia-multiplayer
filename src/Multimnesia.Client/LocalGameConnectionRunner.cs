@@ -18,6 +18,16 @@ public static class LocalGameReconnectPolicy
     }
 }
 
+public static class LocalGameSocket
+{
+    public static async ValueTask<Stream> ConnectAsync(string host, int port, CancellationToken cancellationToken)
+    {
+        var game = new System.Net.Sockets.TcpClient();
+        try { await game.ConnectAsync(host, port, cancellationToken); return game.GetStream(); }
+        catch { game.Dispose(); throw; }
+    }
+}
+
 public sealed class LocalGameConnector(
     Func<CancellationToken, ValueTask<Stream>> connect,
     Func<TimeSpan, CancellationToken, Task> delay,
