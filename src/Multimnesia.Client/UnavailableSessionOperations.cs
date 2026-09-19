@@ -5,7 +5,9 @@ namespace Multimnesia.Client;
 public sealed class UnavailableSessionOperations : ISessionOperations
 {
     public event Action? MultiplayerSessionEnded { add { } remove { } }
+    public event Action? OtherPlayerPresenceChanged { add { } remove { } }
     public bool IsJoined => false;
+    public bool IsOtherPlayerPresent => false;
     private static readonly SessionOperationResult Unavailable =
         SessionOperationResult.Failed("Multiplayer connectivity is not available yet.");
 
@@ -16,4 +18,5 @@ public sealed class UnavailableSessionOperations : ISessionOperations
     public Task<bool> SendCustomStoryStartedAsync(string identifier, CancellationToken cancellationToken) => Task.FromResult(false);
     public Task SendCustomStoryStartOutcomeAsync(
         string identifier, SharedCustomStoryStartOutcome outcome, CancellationToken cancellationToken) => Task.CompletedTask;
+    public void SendPose(LanMessage.Pose pose) { }
 }

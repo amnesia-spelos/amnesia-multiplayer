@@ -42,6 +42,7 @@ public static class GameInteractionProtocol
     private const string CustomStoryStartedPrefix = "EVENT:CustomStoryStarted:";
     private const string StartCustomStoryResponsePrefix = "RESPONSE:startcustomstory:";
     private const string UnknownCommandWarning = "WARNING:Unknown command";
+    private const string PongResponse = "RESPONSE:ping:pong";
     private const string LocalPoseStatePrefix = "STATE localpose ";
     // Legacy Responses continue with ':' instead.
     private const string Version2ResponsePrefix = "RESPONSE ";
@@ -74,6 +75,7 @@ public static class GameInteractionProtocol
                 _ => StartCustomStoryOutcome.Unrecognized
             });
         if (line == UnknownCommandWarning) return new GameEvent.UnknownCommandWarned();
+        if (line == PongResponse) return new GameEvent.Ponged();
         if (line.StartsWith(LocalPoseStatePrefix, StringComparison.Ordinal))
             return TryParseLocalPose(line, out var pose) ? new GameEvent.LocalPoseReported(pose) : new GameEvent.Unknown(line);
         if (line.StartsWith(Version2ResponsePrefix, StringComparison.Ordinal))
@@ -115,6 +117,31 @@ public static class GameInteractionProtocol
 
     // The first Command of every game Session; the Shared Pose needs both Capabilities.
     public const string NegotiateSharedPose = $"protocol 2 {ProtocolNegotiation.Avatars} {ProtocolNegotiation.LocalPose}";
+
+    // Uses the default model, with collision on.
+    public static string AvatarCreate(string avatarIdentifier) => $"avatarcreate {avatarIdentifier}";
+
+    public static string AvatarRemove(string avatarIdentifier) => $"avatarremove {avatarIdentifier}";
+
+    // avatarpose <id> <timeMs> <teleportCounter> <x> <y> <z> <yaw> <pitch> <crouch> <map>
+    public static string AvatarPose(string avatarIdentifier, LanMessage.Pose pose) => string.Join(' ',
+        "avatarpose", avatarIdentifier,
+        pose.TimeMs.ToString(CultureInfo.InvariantCulture),
+        pose.TeleportCounter.ToString(CultureInfo.InvariantCulture),
+        ProtocolVersion2Line.FormatNumber(pose.X),
+        ProtocolVersion2Line.FormatNumber(pose.Y),
+        ProtocolVersion2Line.FormatNumber(pose.Z),
+        ProtocolVersion2Line.FormatNumber(pose.Yaw),
+        ProtocolVersion2Line.FormatNumber(pose.Pitch),
+        pose.Crouch ? "1" : "0",
+        pose.Map);
+
+    public static string SubscribeLocalPose(int hz) => $"localpose subscribe {hz.ToString(CultureInfo.InvariantCulture)}";
+
+    public const string UnsubscribeLocalPose = "localpose unsubscribe";
+
+    // A legacy Command; the game answers it after processing every line written before it.
+    public const string Ping = "ping";
 }
 
 public enum StartCustomStoryOutcome { Starting, NotFound, Invalid, NotInMainMenu, Unrecognized }
@@ -125,6 +152,7 @@ public abstract record GameEvent
     public sealed record CustomStoryStarted(string Identifier) : GameEvent;
     public sealed record StartCustomStoryResponded(StartCustomStoryOutcome Outcome) : GameEvent;
     public sealed record UnknownCommandWarned : GameEvent;
+    public sealed record Ponged : GameEvent;
     public sealed record LocalPoseReported(LocalPose Pose) : GameEvent;
     public sealed record Responded(string Keyword, string Outcome, IReadOnlyList<string> Fields) : GameEvent;
     public sealed record Unknown(string Line) : GameEvent;

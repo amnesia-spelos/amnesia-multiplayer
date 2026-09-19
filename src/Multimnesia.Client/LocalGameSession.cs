@@ -37,7 +37,8 @@ public sealed record SessionCallbacks(
     Func<string, ValueTask> DisplaySystem,
     Func<ChatEntry, ValueTask> ReceiveChat,
     Func<string, ValueTask> ReceiveCustomStoryStarted,
-    Func<string, SharedCustomStoryStartOutcome, ValueTask> ReceiveCustomStoryStartOutcome);
+    Func<string, SharedCustomStoryStartOutcome, ValueTask> ReceiveCustomStoryStartOutcome,
+    Func<LanMessage.Pose, ValueTask> ReceivePose);
 
 // One Game Interaction Protocol Session with the local game: from its greeting until the connection is lost.
 public sealed class LocalGameSession(
@@ -108,6 +109,7 @@ public sealed class LocalGameSession(
         ValueTask DisplaySystemAsync(string message) => DisplayAsync(new ChatEntry("SYSTEM", message));
         var localGameCommands = new LocalGameCommands(WriteLineAsync, Task.Delay);
         SharedCustomStoryStart sharedStart = null!;
+        SharedPose sharedPose = null!;
 
         var sessions = createSessions(new SessionCallbacks(
             DisplaySystemAsync,
@@ -123,11 +125,18 @@ public sealed class LocalGameSession(
             {
                 _ = RunIgnoringDisconnectAsync(sharedStart.HandleOutcomeAsync(identifier, outcome));
                 return ValueTask.CompletedTask;
+            },
+            // Never blocks: the Pose is written to the local game later, and only the newest one.
+            pose =>
+            {
+                sharedPose.HandleReceivedPose(pose);
+                return ValueTask.CompletedTask;
             }));
         try
         {
             var orchestrator = new GamePeerOrchestrator(sessions);
             sharedStart = new SharedCustomStoryStart(sessions, localGameCommands.StartCustomStoryAsync, DisplaySystemAsync);
+            sharedPose = new SharedPose(sessions, WriteLineAsync, _negotiation.Task, cancellationToken);
 
             // Bypasses the gate: every other writer waits there until the negotiation is answered.
             await writer.WriteLineAsync(GameInteractionProtocol.NegotiateSharedPose.AsMemory(), cancellationToken);
@@ -147,6 +156,8 @@ public sealed class LocalGameSession(
                     Log(ConnectionLogSeverity.Warning, LocalGameEventName.UnrecognizedGameReply, line);
 
                 if (gameEvent is GameEvent.ChatSubmitted chat) _ = RunIgnoringDisconnectAsync(HandleCommandAsync(orchestrator, chat.Entry));
+                if (gameEvent is GameEvent.LocalPoseReported reported) sharedPose.HandleLocalPose(reported.Pose);
+                if (gameEvent is GameEvent.Ponged) sharedPose.HandlePong();
                 // Not awaited, but it records the event before its first await, so events are observed in the order the game sent them.
                 _ = RunIgnoringDisconnectAsync(sharedStart.HandleLocalGameEventAsync(gameEvent, cancellationToken));
                 localGameCommands.Dispatch(gameEvent);

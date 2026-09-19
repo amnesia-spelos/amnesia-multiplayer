@@ -182,6 +182,80 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         await run;
     }
 
+    private const string LocalPoseState = "STATE localpose 1000 1 1.2500 2.5000 -3.7500 90.0000 -45.0000 0 custom_stories/mp-test-cs/maps/start.map";
+    private static readonly LanMessage.Pose ReceivedPose = new(
+        123456, 3, 1.25, -2.5, 3.75, 90, -45, true, "custom_stories/My Story: Part 2/maps/cellar one.map");
+
+    private async Task<FakeGame> ConnectWithSharedPoseAsync()
+    {
+        var (game, _, _) = await ConnectAsync();
+        Assert.Equal(NegotiateSharedPose, await game.ReadLineAsync());
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose");
+        _sessions.SetPresent(true);
+        Assert.Equal("avatarcreate partner", await game.ReadLineAsync());
+        Assert.Equal("localpose subscribe 30", await game.ReadLineAsync());
+        return game;
+    }
+
+    [Fact]
+    public async Task The_Shared_Pose_runs_between_the_local_game_and_the_other_player_while_they_are_present()
+    {
+        await using var game = await ConnectWithSharedPoseAsync();
+
+        await game.SendAsync(LocalPoseState);
+        await WaitUntilAsync(() => _sessions.SentPoses.Count > 0);
+        await _callbacks.ReceivePose(ReceivedPose);
+        Assert.Equal(
+            "avatarpose partner 123456 3 1.2500 -2.5000 3.7500 90.0000 -45.0000 1 custom_stories/My Story: Part 2/maps/cellar one.map",
+            await game.ReadLineAsync());
+        _sessions.SetPresent(false);
+
+        Assert.Equal("avatarremove partner", await game.ReadLineAsync());
+        Assert.Equal("localpose unsubscribe", await game.ReadLineAsync());
+        Assert.Equal(
+            [new LanMessage.Pose(1000, 1, 1.25, 2.5, -3.75, 90, -45, false, "custom_stories/mp-test-cs/maps/start.map")],
+            _sessions.SentPoses);
+    }
+
+    [Fact]
+    public async Task Received_Poses_do_not_hold_back_chat_while_the_local_game_is_frozen_loading()
+    {
+        await using var game = await ConnectWithSharedPoseAsync();
+
+        for (ulong time = 0; time < 10_000; time++) await _callbacks.ReceivePose(ReceivedPose with { TimeMs = time });
+        await _callbacks.ReceiveChat(new ChatEntry("Bob", "still loading?")).AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+
+        var ahead = new List<string>();
+        for (var line = await game.ReadLineAsync(); line != "chat:Bob:still loading?"; line = await game.ReadLineAsync())
+            ahead.Add(line!);
+        Assert.True(ahead.Count <= SharedPose.MaxUnconfirmedPoses + 1, $"{ahead.Count} lines were written ahead of the chat.");
+    }
+
+    [Fact]
+    public async Task Received_Poses_keep_flowing_while_the_local_game_answers_its_pings()
+    {
+        await using var game = await ConnectWithSharedPoseAsync();
+
+        const int poses = SharedPose.MaxUnconfirmedPoses * 3;
+        for (ulong time = 1; time <= poses; time++)
+        {
+            await _callbacks.ReceivePose(ReceivedPose with { TimeMs = time });
+            var line = await game.ReadLineAsync();
+            if (line == "ping")
+            {
+                await game.SendAsync("RESPONSE:ping:pong");
+                line = await game.ReadLineAsync();
+            }
+            Assert.StartsWith($"avatarpose partner {time} ", line);
+        }
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        while (!condition()) await Task.Delay(10, timeout.Token);
+    }
+
     [Fact]
     public async Task The_loopback_socket_to_the_game_disables_Nagle()
     {
@@ -251,6 +325,19 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
     private sealed class FakeSessionOperations : ISessionOperations
     {
         public event Action? MultiplayerSessionEnded { add { } remove { } }
+        private bool _present;
+        public event Action? OtherPlayerPresenceChanged;
+        public bool IsOtherPlayerPresent => Volatile.Read(ref _present);
+        public List<LanMessage.Pose> SentPoses { get { lock (_sentPoses) return [.. _sentPoses]; } }
+        private readonly List<LanMessage.Pose> _sentPoses = [];
+
+        public void SetPresent(bool present)
+        {
+            Volatile.Write(ref _present, present);
+            OtherPlayerPresenceChanged?.Invoke();
+        }
+
+        public void SendPose(LanMessage.Pose pose) { lock (_sentPoses) _sentPoses.Add(pose); }
         public bool IsJoined => true;
         public List<(string, SharedCustomStoryStartOutcome)> SentOutcomes { get; } = [];
         public Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken) => throw new NotSupportedException();

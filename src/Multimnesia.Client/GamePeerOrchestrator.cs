@@ -55,13 +55,19 @@ public readonly record struct SessionOperationResult(bool Success, string? Feedb
 public interface ISessionOperations
 {
     event Action? MultiplayerSessionEnded;
+    // Raised after the other player may have joined or gone, for either role; must not block.
+    event Action? OtherPlayerPresenceChanged;
     bool IsJoined { get; }
+    // A Session Host with an admitted Joining Player, or a Joining Player joined to a Session Host.
+    bool IsOtherPlayerPresent { get; }
     Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken);
     Task<SessionOperationResult> JoinAsync(string destination, CancellationToken cancellationToken);
     Task LeaveAsync(GamePeerState state, CancellationToken cancellationToken);
     Task SendChatAsync(ChatEntry entry, CancellationToken cancellationToken);
     Task<bool> SendCustomStoryStartedAsync(string identifier, CancellationToken cancellationToken);
     Task SendCustomStoryStartOutcomeAsync(string identifier, SharedCustomStoryStartOutcome outcome, CancellationToken cancellationToken);
+    // Latest-wins: replaces any Pose not yet sent to the other player.
+    void SendPose(LanMessage.Pose pose);
 }
 
 public sealed class GamePeerOrchestrator
