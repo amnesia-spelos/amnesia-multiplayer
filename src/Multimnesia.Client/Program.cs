@@ -17,12 +17,9 @@ var logLevel = options.ParsedLogLevel;
 using var cancellation = new CancellationTokenSource();
 Console.CancelKeyPress += (_, eventArgs) => { eventArgs.Cancel = true; cancellation.Cancel(); };
 
-var localGameLosses = 0;
-while (!cancellation.IsCancellationRequested)
-{
-    await using var gameStream = await ConnectToLocalGameAsync(options, cancellation.Token);
-    if (gameStream is null) break;
-    var session = new LocalGameSession(
+await LocalGameSession.RunReconnectingAsync(
+    token => ConnectToLocalGameAsync(options, token),
+    gameStream => new LocalGameSession(
         gameStream,
         callbacks => new TcpSessionOperations(
             new SessionNetworkOptions
@@ -41,30 +38,12 @@ while (!cancellation.IsCancellationRequested)
                 Console.WriteLine($"Connected to local game at {options.GameHost}:{options.GamePort}. {entry.Line}");
             else
                 LocalGameLogEntry.ConsoleSink(entry);
-        });
-    try
-    {
-        await session.RunAsync(cancellation.Token);
-    }
-    catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
-    catch (IOException exception)
-    {
-        Console.Error.WriteLine($"Local-game connection was lost: {exception.Message}");
-        localGameLosses++;
-        await DelayBeforeLocalGameReconnectAsync(localGameLosses, cancellation.Token);
-    }
-}
+        }),
+    (attempt, token) => Task.Delay(LocalGameReconnectPolicy.DelayForAttempt(
+        attempt, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(30)), token),
+    exception => Console.Error.WriteLine($"Local-game connection was lost: {exception.Message}"),
+    cancellation.Token);
 return 0;
-
-static async Task DelayBeforeLocalGameReconnectAsync(int attempt, CancellationToken cancellationToken)
-{
-    try
-    {
-        await Task.Delay(LocalGameReconnectPolicy.DelayForAttempt(
-            attempt, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(30)), cancellationToken);
-    }
-    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-}
 
 static Task<Stream?> ConnectToLocalGameAsync(GamePeerOptions options, CancellationToken cancellationToken)
 {

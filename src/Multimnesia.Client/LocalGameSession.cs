@@ -1,23 +1,35 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using Multimnesia.Contracts;
 
 namespace Multimnesia.Client;
 
-public enum LocalGameEventName { Connected, UnrecognizedGameReply }
+public enum LocalGameEventName { Connected, ProtocolNegotiated, UnrecognizedGameReply }
 
 public sealed record LocalGameLogEntry(
     DateTimeOffset Timestamp,
     ConnectionLogSeverity Severity,
     LocalGameEventName Event,
-    string? Line = null)
+    string? Line = null,
+    ProtocolNegotiation? Negotiation = null)
 {
+    private static readonly JsonSerializerOptions SerializerOptions = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    };
+
     public static void ConsoleSink(LocalGameLogEntry entry) => Console.WriteLine(JsonSerializer.Serialize(new
     {
         timestamp = entry.Timestamp,
         severity = entry.Severity.ToString(),
         @event = entry.Event.ToString(),
-        line = entry.Line
-    }));
+        line = entry.Line,
+        outcome = entry.Negotiation?.Outcome,
+        protocolVersion = entry.Negotiation?.Version,
+        capabilities = entry.Negotiation?.Capabilities,
+        sharedPose = entry.Negotiation?.GrantsSharedPose
+    }, SerializerOptions));
 }
 
 // What a Multiplayer Session reports to this game Session.
@@ -33,6 +45,43 @@ public sealed class LocalGameSession(
     Func<SessionCallbacks, ISessionOperations> createSessions,
     Action<LocalGameLogEntry> log)
 {
+    public const string AvatarsUnsupportedNotice = "Your game does not support Avatars; movement will not be shared.";
+
+    // Completes when the local game answers the negotiation; every other write waits for it.
+    private readonly TaskCompletionSource<ProtocolNegotiation> _negotiation = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    // Null until the local game answers the negotiation.
+    public ProtocolNegotiation? Negotiation => _negotiation.Task.IsCompletedSuccessfully ? _negotiation.Task.Result : null;
+
+    public bool IsSharedPoseAvailable => Negotiation?.GrantsSharedPose == true;
+
+    // Runs one game Session per connection until cancelled or no connection can be made.
+    public static async Task RunReconnectingAsync(
+        Func<CancellationToken, Task<Stream?>> connect,
+        Func<Stream, LocalGameSession> createSession,
+        Func<int, CancellationToken, Task> delayAfterLoss,
+        Action<IOException> reportLoss,
+        CancellationToken cancellationToken)
+    {
+        var losses = 0;
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            await using var gameStream = await connect(cancellationToken);
+            if (gameStream is null) break;
+            try
+            {
+                await createSession(gameStream).RunAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+            catch (IOException exception)
+            {
+                reportLoss(exception);
+                try { await delayAfterLoss(++losses, cancellationToken); }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+            }
+        }
+    }
+
     // Returns when cancelled; throws IOException when the local game connection is lost.
     public async Task RunAsync(CancellationToken cancellationToken)
     {
@@ -43,10 +92,15 @@ public sealed class LocalGameSession(
         Log(ConnectionLogSeverity.Information, LocalGameEventName.Connected, welcome);
 
         var writeGate = new SemaphoreSlim(1, 1);
+        // Writers queue on the gate first, so lines held back by the negotiation keep their order.
         async ValueTask WriteLineAsync(string line, CancellationToken token)
         {
             await writeGate.WaitAsync(token);
-            try { await writer.WriteLineAsync(line.AsMemory(), token); }
+            try
+            {
+                await _negotiation.Task.WaitAsync(token);
+                await writer.WriteLineAsync(line.AsMemory(), token);
+            }
             finally { writeGate.Release(); }
         }
         ValueTask DisplayAsync(ChatEntry entry) => WriteLineAsync(GameInteractionProtocol.Display(entry), cancellationToken);
@@ -74,11 +128,18 @@ public sealed class LocalGameSession(
             var orchestrator = new GamePeerOrchestrator(sessions);
             sharedStart = new SharedCustomStoryStart(sessions, localGameCommands.StartCustomStoryAsync, DisplaySystemAsync);
 
+            // Bypasses the gate: every other writer waits there until the negotiation is answered.
+            await writer.WriteLineAsync(GameInteractionProtocol.NegotiateSharedPose.AsMemory(), cancellationToken);
             while (!cancellationToken.IsCancellationRequested)
             {
                 var line = await reader.ReadLineAsync(cancellationToken)
                     ?? throw new IOException("The local game closed the Game Interaction Protocol session.");
                 var gameEvent = GameInteractionProtocol.ParseEvent(line);
+                if (!_negotiation.Task.IsCompleted && TryNegotiate(gameEvent) is { } negotiation)
+                {
+                    Settle(negotiation);
+                    continue;
+                }
                 if (GameInteractionProtocol.IsUnrecognizedReply(gameEvent))
                     Log(ConnectionLogSeverity.Warning, LocalGameEventName.UnrecognizedGameReply, line);
 
@@ -91,7 +152,17 @@ public sealed class LocalGameSession(
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
         finally
         {
+            // Writes still waiting for a negotiation that will never arrive fail like writes to a lost connection.
+            _negotiation.TrySetException(new IOException("The local game Session ended before negotiating."));
             if (sessions is IAsyncDisposable disposable) await disposable.DisposeAsync();
+        }
+
+        void Settle(ProtocolNegotiation negotiation)
+        {
+            Log(negotiation.GrantsSharedPose ? ConnectionLogSeverity.Information : ConnectionLogSeverity.Warning,
+                LocalGameEventName.ProtocolNegotiated, negotiation: negotiation);
+            _negotiation.TrySetResult(negotiation);
+            if (!negotiation.GrantsSharedPose) _ = RunIgnoringDisconnectAsync(DisplaySystemAsync(AvatarsUnsupportedNotice).AsTask());
         }
 
         async Task HandleCommandAsync(GamePeerOrchestrator orchestrator, ChatEntry entry)
@@ -108,6 +179,15 @@ public sealed class LocalGameSession(
         }
     }
 
-    private void Log(ConnectionLogSeverity severity, LocalGameEventName eventName, string? line = null) =>
-        log(new(DateTimeOffset.UtcNow, severity, eventName, line));
+    // Nothing but the negotiation was written yet, so an unknown-command warning can only answer it.
+    private static ProtocolNegotiation? TryNegotiate(GameEvent gameEvent) => gameEvent switch
+    {
+        GameEvent.Responded { Keyword: "protocol" } responded => ProtocolNegotiation.FromResponse(responded),
+        GameEvent.UnknownCommandWarned => ProtocolNegotiation.UnknownCommand,
+        _ => null
+    };
+
+    private void Log(
+        ConnectionLogSeverity severity, LocalGameEventName eventName, string? line = null, ProtocolNegotiation? negotiation = null) =>
+        log(new(DateTimeOffset.UtcNow, severity, eventName, line, negotiation));
 }

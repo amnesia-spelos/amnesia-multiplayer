@@ -22,7 +22,8 @@ public static class LocalGameSocket
 {
     public static async ValueTask<Stream> ConnectAsync(string host, int port, CancellationToken cancellationToken)
     {
-        var game = new System.Net.Sockets.TcpClient();
+        // Poses and chat are small lines; Nagle's algorithm would hold them back.
+        var game = new System.Net.Sockets.TcpClient { NoDelay = true };
         try { await game.ConnectAsync(host, port, cancellationToken); return game.GetStream(); }
         catch { game.Dispose(); throw; }
     }
