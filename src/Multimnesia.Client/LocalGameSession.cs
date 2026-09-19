@@ -4,7 +4,7 @@ using Multimnesia.Contracts;
 
 namespace Multimnesia.Client;
 
-public enum LocalGameEventName { Connected, ProtocolNegotiated, UnrecognizedGameReply }
+public enum LocalGameEventName { Connected, ProtocolNegotiated, UnrecognizedGameReply, AvatarCreated, SharedPoseCommandFailed }
 
 public sealed record LocalGameLogEntry(
     DateTimeOffset Timestamp,
@@ -136,7 +136,9 @@ public sealed class LocalGameSession(
         {
             var orchestrator = new GamePeerOrchestrator(sessions);
             sharedStart = new SharedCustomStoryStart(sessions, localGameCommands.StartCustomStoryAsync, DisplaySystemAsync);
-            sharedPose = new SharedPose(sessions, WriteLineAsync, _negotiation.Task, cancellationToken);
+            sharedPose = new SharedPose(
+                sessions, WriteLineAsync, DisplaySystemAsync, (severity, eventName, line) => Log(severity, eventName, line),
+                _negotiation.Task, cancellationToken);
 
             // Bypasses the gate: every other writer waits there until the negotiation is answered.
             await writer.WriteLineAsync(GameInteractionProtocol.NegotiateSharedPose.AsMemory(), cancellationToken);
@@ -158,6 +160,7 @@ public sealed class LocalGameSession(
                 if (gameEvent is GameEvent.ChatSubmitted chat) _ = RunIgnoringDisconnectAsync(HandleCommandAsync(orchestrator, chat.Entry));
                 if (gameEvent is GameEvent.LocalPoseReported reported) sharedPose.HandleLocalPose(reported.Pose);
                 if (gameEvent is GameEvent.Ponged) sharedPose.HandlePong();
+                if (gameEvent is GameEvent.Responded responded) _ = RunIgnoringDisconnectAsync(sharedPose.HandleResponseAsync(responded).AsTask());
                 // Not awaited, but it records the event before its first await, so events are observed in the order the game sent them.
                 _ = RunIgnoringDisconnectAsync(sharedStart.HandleLocalGameEventAsync(gameEvent, cancellationToken));
                 localGameCommands.Dispatch(gameEvent);

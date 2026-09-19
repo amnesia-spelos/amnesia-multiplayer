@@ -25,7 +25,8 @@ public sealed class SharedPoseTests
     private SharedPose CreateSharedPose(ProtocolNegotiation? negotiation = null) => CreateSharedPose(_sessions, _game, negotiation);
 
     private static SharedPose CreateSharedPose(ISessionOperations sessions, RecordingGame game, ProtocolNegotiation? negotiation = null) =>
-        new(sessions, game.WriteLineAsync, Task.FromResult(negotiation ?? Granted), TestContext.Current.CancellationToken);
+        new(sessions, game.WriteLineAsync, game.DisplaySystemAsync, game.Log, Task.FromResult(negotiation ?? Granted),
+            TestContext.Current.CancellationToken);
 
     [Fact]
     public async Task The_other_player_becoming_present_creates_the_Avatar_and_subscribes_to_the_local_Pose()
@@ -65,6 +66,8 @@ public sealed class SharedPoseTests
         await Task.Delay(50, TestContext.Current.CancellationToken);
 
         Assert.Empty(_game.Lines);
+        Assert.Empty(_game.Notices);
+        Assert.Empty(_game.Logged);
         Assert.Empty(_sessions.SentPoses);
     }
 
@@ -222,6 +225,175 @@ public sealed class SharedPoseTests
         Assert.Equal([Remove, Unsubscribe], joiningGame.Lines[joiningLines..]);
     }
 
+    [Fact]
+    public async Task The_Joining_Player_removes_the_Avatar_when_the_Session_Host_ends_the_Multiplayer_Session()
+    {
+        var port = FreePort();
+        var joiningGame = new RecordingGame();
+        await using var host = new TcpSessionOperations(new SessionNetworkOptions { Port = port });
+        await using var joining = new TcpSessionOperations(new SessionNetworkOptions { Port = port });
+        CreateSharedPose(joining, joiningGame);
+        var hostPeer = new GamePeerOrchestrator(host);
+        await hostPeer.HandleAsync(new ChatEntry("Host", "/host"), TestContext.Current.CancellationToken);
+        await new GamePeerOrchestrator(joining).HandleAsync(new ChatEntry("Joiner", "/join 127.0.0.1"), TestContext.Current.CancellationToken);
+        await joiningGame.WaitForLinesAsync(2);
+
+        await hostPeer.HandleAsync(new ChatEntry("Host", "/leave"), TestContext.Current.CancellationToken);
+
+        await joiningGame.WaitForLinesAsync(4);
+        Assert.Equal([Create, Subscribe, Remove, Unsubscribe], joiningGame.Lines);
+    }
+
+    [Fact]
+    public async Task The_Session_Host_removes_the_Avatar_when_the_connection_is_lost_and_creates_a_fresh_one_for_a_replacement()
+    {
+        var port = FreePort();
+        var hostGame = new RecordingGame();
+        await using var host = new TcpSessionOperations(new SessionNetworkOptions { Port = port });
+        await using var replacement = new TcpSessionOperations(new SessionNetworkOptions { Port = port });
+        CreateSharedPose(host, hostGame);
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        using (await AdmitRawPeerAsync(port)) await hostGame.WaitForLinesAsync(2);
+
+        await hostGame.WaitForLinesAsync(4);
+        Assert.True((await replacement.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken)).Success);
+
+        await hostGame.WaitForLinesAsync(6);
+        Assert.Equal([Create, Subscribe, Remove, Unsubscribe, Create, Subscribe], hostGame.Lines);
+    }
+
+    [Fact]
+    public async Task The_Session_Host_removes_the_Avatar_when_the_Joining_Player_falls_silent()
+    {
+        var port = FreePort();
+        var hostGame = new RecordingGame();
+        await using var host = new TcpSessionOperations(new SessionNetworkOptions
+        {
+            Port = port, HeartbeatInterval = TimeSpan.FromMilliseconds(20), HeartbeatTimeout = TimeSpan.FromMilliseconds(100)
+        });
+        CreateSharedPose(host, hostGame);
+        await host.HostAsync(TestContext.Current.CancellationToken);
+
+        using var silent = await AdmitRawPeerAsync(port);
+
+        await hostGame.WaitForLinesAsync(4);
+        Assert.Equal([Create, Subscribe, Remove, Unsubscribe], hostGame.Lines);
+    }
+
+    [Fact]
+    public async Task A_player_replaced_before_their_Avatar_was_removed_still_gets_a_fresh_Avatar()
+    {
+        CreateSharedPose();
+        var release = _game.HoldWrites();
+        _sessions.SetPresent(true);
+        await _game.WaitForHeldWriteAsync();
+
+        _sessions.SetPresent(false);
+        _sessions.SetPresent(true);
+        release();
+
+        await _game.WaitForLinesAsync(4);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        Assert.Equal([Create, Subscribe, Remove, Create], _game.Lines);
+    }
+
+    // A new local game Session has no Avatars, like the game after a reconnect.
+    [Fact]
+    public async Task A_new_local_game_Session_recreates_the_Avatar_for_an_other_player_still_present_once_granted()
+    {
+        _sessions.SetPresent(true);
+        var negotiation = new TaskCompletionSource<ProtocolNegotiation>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var sharedPose = new SharedPose(_sessions, _game.WriteLineAsync, _game.DisplaySystemAsync, _game.Log, negotiation.Task,
+            TestContext.Current.CancellationToken);
+        sharedPose.HandleReceivedPose(Remote);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        Assert.Empty(_game.Lines);
+
+        negotiation.SetResult(Granted);
+
+        await _game.WaitForLinesAsync(3);
+        Assert.Equal([Create, Subscribe, RemoteLine], _game.Lines);
+    }
+
+    [Theory]
+    [InlineData("ok")]
+    [InlineData("exists")]
+    public async Task An_avatarcreate_that_succeeded_or_found_the_Avatar_existing_is_logged_as_created(string outcome)
+    {
+        var sharedPose = CreateSharedPose();
+
+        await sharedPose.HandleResponseAsync(new GameEvent.Responded("avatarcreate", outcome, ["partner"]));
+
+        Assert.Equal(
+            [(ConnectionLogSeverity.Information, LocalGameEventName.AvatarCreated, $"RESPONSE avatarcreate {outcome} partner")],
+            _game.Logged);
+        Assert.Empty(_game.Notices);
+    }
+
+    [Fact]
+    public async Task A_missing_Avatar_model_is_explained_once_and_the_Shared_Pose_continues()
+    {
+        var sharedPose = CreateSharedPose();
+        _sessions.SetPresent(true);
+        await _game.WaitForLinesAsync(2);
+
+        await sharedPose.HandleResponseAsync(new GameEvent.Responded("avatarcreate", "model-not-found", ["partner"]));
+        await sharedPose.HandleResponseAsync(new GameEvent.Responded("avatarcreate", "model-not-found", ["partner"]));
+        sharedPose.HandleReceivedPose(Remote);
+        sharedPose.HandleLocalPose(Local);
+
+        Assert.Equal([SharedPose.AvatarModelMissingNotice], _game.Notices);
+        Assert.All(_game.Logged, entry => Assert.Equal(
+            (ConnectionLogSeverity.Warning, LocalGameEventName.SharedPoseCommandFailed, "RESPONSE avatarcreate model-not-found partner"), entry));
+        await _game.WaitForLinesAsync(3);
+        Assert.Equal(RemoteLine, _game.Lines[2]);
+        Assert.Single(_sessions.SentPoses);
+    }
+
+    [Theory]
+    [InlineData("avatarcreate", "limit", new[] { "partner" })]
+    [InlineData("avatarcreate", "invalid", new string[0])]
+    [InlineData("avatarpose", "not-found", new[] { "partner" })]
+    [InlineData("avatarpose", "invalid", new[] { "partner" })]
+    [InlineData("avatarpose", "invalid", new string[0])]
+    [InlineData("avatarremove", "not-found", new[] { "partner" })]
+    [InlineData("localpose", "invalid", new string[0])]
+    public async Task Other_Shared_Pose_failures_are_logged_and_never_shown_in_chat(string keyword, string outcome, string[] fields)
+    {
+        var sharedPose = CreateSharedPose();
+
+        await sharedPose.HandleResponseAsync(new GameEvent.Responded(keyword, outcome, fields));
+
+        var line = string.Join(' ', ["RESPONSE", keyword, outcome, .. fields]);
+        Assert.Equal([(ConnectionLogSeverity.Warning, LocalGameEventName.SharedPoseCommandFailed, line)], _game.Logged);
+        Assert.Empty(_game.Notices);
+    }
+
+    [Theory]
+    [InlineData("avatarremove", "ok", new[] { "partner" })]
+    [InlineData("localpose", "ok", new[] { "subscribe", "30" })]
+    [InlineData("localpose", "ok", new[] { "unsubscribe" })]
+    [InlineData("protocol", "ok", new[] { "2" })]
+    public async Task Other_Responses_are_neither_logged_nor_shown(string keyword, string outcome, string[] fields)
+    {
+        var sharedPose = CreateSharedPose();
+
+        await sharedPose.HandleResponseAsync(new GameEvent.Responded(keyword, outcome, fields));
+
+        Assert.Empty(_game.Logged);
+        Assert.Empty(_game.Notices);
+    }
+
+    private static async Task<TcpClient> AdmitRawPeerAsync(int port)
+    {
+        var peer = new TcpClient(AddressFamily.InterNetwork);
+        await peer.ConnectAsync(IPAddress.Loopback, port, TestContext.Current.CancellationToken);
+        await LanProtocol.WriteAsync(peer.GetStream(),
+            new LanMessage.JoinRequest(LanProtocol.CurrentVersion, Guid.NewGuid()), TestContext.Current.CancellationToken);
+        Assert.IsType<LanMessage.AdmissionAccepted>(await LanProtocol.ReadAsync(peer.GetStream(), TestContext.Current.CancellationToken));
+        return peer;
+    }
+
     private static int FreePort()
     {
         using var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -235,7 +407,23 @@ public sealed class SharedPoseTests
         private TaskCompletionSource? _hold;
         private readonly TaskCompletionSource _held = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        private readonly List<string> _notices = [];
+        private readonly List<(ConnectionLogSeverity Severity, LocalGameEventName Event, string Line)> _log = [];
+
         public List<string> Lines { get { lock (_lines) return [.. _lines]; } }
+        public List<string> Notices { get { lock (_notices) return [.. _notices]; } }
+        public List<(ConnectionLogSeverity Severity, LocalGameEventName Event, string Line)> Logged { get { lock (_log) return [.. _log]; } }
+
+        public ValueTask DisplaySystemAsync(string message)
+        {
+            lock (_notices) _notices.Add(message);
+            return ValueTask.CompletedTask;
+        }
+
+        public void Log(ConnectionLogSeverity severity, LocalGameEventName gameEvent, string line)
+        {
+            lock (_log) _log.Add((severity, gameEvent, line));
+        }
 
         public async ValueTask WriteLineAsync(string line, CancellationToken cancellationToken)
         {
@@ -266,16 +454,18 @@ public sealed class SharedPoseTests
 
     private sealed class FakeSessionOperations : ISessionOperations
     {
-        private bool _present;
+        private int _arrivalCount;
+        private int _currentArrival;
         public event Action? MultiplayerSessionEnded { add { } remove { } }
         public event Action? OtherPlayerPresenceChanged;
         public bool IsJoined => false;
-        public bool IsOtherPlayerPresent => Volatile.Read(ref _present);
+        public int OtherPlayerArrival => Volatile.Read(ref _currentArrival);
         public List<LanMessage.Pose> SentPoses { get; } = [];
 
+        // Becoming present again is a new arrival.
         public void SetPresent(bool present)
         {
-            Volatile.Write(ref _present, present);
+            Volatile.Write(ref _currentArrival, present ? Interlocked.Increment(ref _arrivalCount) : 0);
             OtherPlayerPresenceChanged?.Invoke();
         }
 

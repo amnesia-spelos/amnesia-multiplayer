@@ -4,39 +4,52 @@ namespace Multimnesia.Client;
 
 // Shows the other player as the Avatar `partner` in the local game, and streams the local Pose to them (ADR 0003).
 // Active only while the other player is present and the local game granted both Capabilities.
+// One per local game Session: the game drops its Avatars and subscription when that Session ends.
 public sealed class SharedPose
 {
     public const string AvatarIdentifier = "partner";
     public const int LocalPoseRateHz = 30;
+    public const string AvatarModelMissingNotice = "The Avatar model is not installed; the other player will be invisible.";
     // A game frozen loading reads nothing, so Poses it has not confirmed with a pong are capped at about a second's worth,
     // and never fill the socket ahead of chat. A paused or background game still answers, so its Avatar keeps moving.
     public const int MaxUnconfirmedPoses = 30;
     public const int PingEveryPoses = 10;
     private const int NoPingPending = -1;
+    private const int NoAvatar = 0;
 
     private readonly ISessionOperations _sessions;
     private readonly Func<string, CancellationToken, ValueTask> _writeLine;
+    private readonly Func<string, ValueTask> _displaySystem;
+    private readonly Action<ConnectionLogSeverity, LocalGameEventName, string> _log;
     private readonly Task<ProtocolNegotiation> _negotiation;
     private readonly CancellationToken _cancellationToken;
     private LanMessage.Pose? _receivedPose;
     // Poses written that the local game has not yet confirmed, and how many of them the pending ping confirms.
     private int _unconfirmedPoses;
     private int _posesConfirmedByPing = NoPingPending;
-    // 1 while a worker is writing to the local game; only that worker reads or writes _avatarCreated.
+    private int _modelMissingNoticeShown;
+    // 1 while a worker is writing to the local game; only that worker reads or writes _avatarArrival.
     private int _working;
-    private bool _avatarCreated;
+    // The OtherPlayerArrival the Avatar was created for, or NoAvatar.
+    private int _avatarArrival = NoAvatar;
 
     public SharedPose(
         ISessionOperations sessions,
         Func<string, CancellationToken, ValueTask> writeLine,
+        Func<string, ValueTask> displaySystem,
+        Action<ConnectionLogSeverity, LocalGameEventName, string> log,
         Task<ProtocolNegotiation> negotiation,
         CancellationToken cancellationToken)
     {
         _sessions = sessions;
         _writeLine = writeLine;
+        _displaySystem = displaySystem;
+        _log = log;
         _negotiation = negotiation;
         _cancellationToken = cancellationToken;
         sessions.OtherPlayerPresenceChanged += Update;
+        // After a local game reconnect, the other player may already be present.
+        Update();
     }
 
     private bool IsGranted => _negotiation.IsCompletedSuccessfully && _negotiation.Result.GrantsSharedPose;
@@ -66,6 +79,27 @@ public sealed class SharedPose
         Update();
     }
 
+    // Failures are logged, never shown in chat, except a missing Avatar model, which is explained once.
+    // The game reports an avatarpose failure once per streak, so failing Poses do not flood the log.
+    public ValueTask HandleResponseAsync(GameEvent.Responded response)
+    {
+        var line = string.Join(' ', ["RESPONSE", response.Keyword, response.Outcome, .. response.Fields]);
+        switch (response)
+        {
+            case { Keyword: "avatarcreate", Outcome: "ok" or "exists" }:
+                _log(ConnectionLogSeverity.Information, LocalGameEventName.AvatarCreated, line);
+                break;
+            case { Keyword: "avatarcreate", Outcome: "model-not-found" }:
+                _log(ConnectionLogSeverity.Warning, LocalGameEventName.SharedPoseCommandFailed, line);
+                if (Interlocked.Exchange(ref _modelMissingNoticeShown, 1) == 0) return _displaySystem(AvatarModelMissingNotice);
+                break;
+            case { Keyword: "avatarcreate" or "avatarremove" or "avatarpose" or "localpose", Outcome: not "ok" }:
+                _log(ConnectionLogSeverity.Warning, LocalGameEventName.SharedPoseCommandFailed, line);
+                break;
+        }
+        return ValueTask.CompletedTask;
+    }
+
     private void Update()
     {
         if (Interlocked.CompareExchange(ref _working, 1, 0) == 0) _ = WorkAsync();
@@ -79,23 +113,23 @@ public sealed class SharedPose
             if (!(await _negotiation.WaitAsync(_cancellationToken)).GrantsSharedPose) return;
             while (true)
             {
-                var present = _sessions.IsOtherPlayerPresent;
-                if (present != _avatarCreated)
+                var arrival = _sessions.OtherPlayerArrival;
+                if (arrival != _avatarArrival)
                 {
-                    _avatarCreated = present;
-                    if (present)
-                    {
-                        await _writeLine(GameInteractionProtocol.AvatarCreate(AvatarIdentifier), _cancellationToken);
-                        await _writeLine(GameInteractionProtocol.SubscribeLocalPose(LocalPoseRateHz), _cancellationToken);
-                    }
-                    else
-                    {
+                    var previous = _avatarArrival;
+                    _avatarArrival = arrival;
+                    // A replacement gets a fresh Avatar: its Poses do not continue the timeline of the player who left.
+                    if (previous != NoAvatar)
                         await _writeLine(GameInteractionProtocol.AvatarRemove(AvatarIdentifier), _cancellationToken);
+                    if (arrival != NoAvatar)
+                        await _writeLine(GameInteractionProtocol.AvatarCreate(AvatarIdentifier), _cancellationToken);
+                    if (previous == NoAvatar)
+                        await _writeLine(GameInteractionProtocol.SubscribeLocalPose(LocalPoseRateHz), _cancellationToken);
+                    else if (arrival == NoAvatar)
                         await _writeLine(GameInteractionProtocol.UnsubscribeLocalPose, _cancellationToken);
-                    }
                     continue;
                 }
-                if (!_avatarCreated) Interlocked.Exchange(ref _receivedPose, null);
+                if (_avatarArrival == NoAvatar) Interlocked.Exchange(ref _receivedPose, null);
                 else if (CanWritePose && Interlocked.Exchange(ref _receivedPose, null) is { } pose)
                 {
                     await _writeLine(GameInteractionProtocol.AvatarPose(AvatarIdentifier, pose), _cancellationToken);
@@ -108,8 +142,8 @@ public sealed class SharedPose
 
                 Volatile.Write(ref _working, 0);
                 // Work offered after the checks above but before the release would otherwise wait for the next Update.
-                var pending = _sessions.IsOtherPlayerPresent != _avatarCreated ||
-                    Volatile.Read(ref _receivedPose) is not null && (!_avatarCreated || CanWritePose);
+                var pending = _sessions.OtherPlayerArrival != _avatarArrival ||
+                    Volatile.Read(ref _receivedPose) is not null && (_avatarArrival == NoAvatar || CanWritePose);
                 if (!pending || Interlocked.CompareExchange(ref _working, 1, 0) != 0) return;
             }
         }

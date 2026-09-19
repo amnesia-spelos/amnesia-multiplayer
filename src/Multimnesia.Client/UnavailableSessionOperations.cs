@@ -7,7 +7,7 @@ public sealed class UnavailableSessionOperations : ISessionOperations
     public event Action? MultiplayerSessionEnded { add { } remove { } }
     public event Action? OtherPlayerPresenceChanged { add { } remove { } }
     public bool IsJoined => false;
-    public bool IsOtherPlayerPresent => false;
+    public int OtherPlayerArrival => 0;
     private static readonly SessionOperationResult Unavailable =
         SessionOperationResult.Failed("Multiplayer connectivity is not available yet.");
 

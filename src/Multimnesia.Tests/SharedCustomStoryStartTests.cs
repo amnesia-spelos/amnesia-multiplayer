@@ -192,7 +192,7 @@ public sealed class SharedCustomStoryStartTests
     {
         public event Action? MultiplayerSessionEnded { add { } remove { } }
         public event Action? OtherPlayerPresenceChanged { add { } remove { } }
-        public bool IsOtherPlayerPresent => false;
+        public int OtherPlayerArrival => 0;
         public void SendPose(LanMessage.Pose pose) { }
         public bool JoiningPlayerAdmitted { get; set; }
         public bool IsJoined { get; set; }

@@ -150,7 +150,7 @@ public sealed class CommandOrchestratorTests
     {
         public event Action? MultiplayerSessionEnded { add { } remove { } }
         public event Action? OtherPlayerPresenceChanged { add { } remove { } }
-        public bool IsOtherPlayerPresent => false;
+        public int OtherPlayerArrival => 0;
         public void SendPose(LanMessage.Pose pose) { }
         public bool IsJoined => false;
         public List<ChatEntry> SentChat { get; } = [];

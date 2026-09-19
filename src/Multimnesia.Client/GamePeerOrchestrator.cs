@@ -58,8 +58,9 @@ public interface ISessionOperations
     // Raised after the other player may have joined or gone, for either role; must not block.
     event Action? OtherPlayerPresenceChanged;
     bool IsJoined { get; }
-    // A Session Host with an admitted Joining Player, or a Joining Player joined to a Session Host.
-    bool IsOtherPlayerPresent { get; }
+    // Non-zero while a Session Host has an admitted Joining Player, or a Joining Player is joined to a Session Host.
+    // It changes with each arrival, so a replacement Joining Player is told apart from the one who left.
+    int OtherPlayerArrival { get; }
     Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken);
     Task<SessionOperationResult> JoinAsync(string destination, CancellationToken cancellationToken);
     Task LeaveAsync(GamePeerState state, CancellationToken cancellationToken);

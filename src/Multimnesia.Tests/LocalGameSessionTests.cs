@@ -250,6 +250,59 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         }
     }
 
+    [Fact]
+    public async Task After_a_local_game_reconnect_the_Avatar_is_recreated_and_received_Poses_drive_it_again()
+    {
+        _sessions.SetPresent(true);
+        var games = new Queue<FakeGame>([await FakeGame.StartAsync(), await FakeGame.StartAsync()]);
+        var first = games.Peek();
+        await using var second = games.Last();
+        var run = LocalGameSession.RunReconnectingAsync(
+            _ => Task.FromResult<Stream?>(games.TryDequeue(out var game) ? game.PeerStream : null),
+            CreateSession,
+            (_, _) => Task.CompletedTask,
+            _ => { },
+            _cancellation.Token);
+        await using (first)
+        {
+            await first.SendAsync("Welcome");
+            Assert.Equal(NegotiateSharedPose, await first.ReadLineAsync());
+            await first.SendAsync("RESPONSE protocol ok 2 avatars localpose");
+            Assert.Equal("avatarcreate partner", await first.ReadLineAsync());
+            Assert.Equal("localpose subscribe 30", await first.ReadLineAsync());
+        }
+
+        await second.SendAsync("Welcome");
+        Assert.Equal(NegotiateSharedPose, await second.ReadLineAsync());
+        await second.SendAsync("RESPONSE protocol ok 2 avatars localpose");
+
+        Assert.Equal("avatarcreate partner", await second.ReadLineAsync());
+        Assert.Equal("localpose subscribe 30", await second.ReadLineAsync());
+        await _callbacks.ReceivePose(ReceivedPose);
+        Assert.StartsWith("avatarpose partner 123456 ", await second.ReadLineAsync());
+        await _cancellation.CancelAsync();
+        await run;
+    }
+
+    [Fact]
+    public async Task A_missing_Avatar_model_is_shown_once_in_chat_and_avatarpose_failures_never()
+    {
+        await using var game = await ConnectWithSharedPoseAsync();
+
+        await game.SendAsync("RESPONSE avatarpose not-found partner");
+        await game.SendAsync("RESPONSE avatarcreate model-not-found partner");
+        await game.SendAsync("RESPONSE avatarcreate model-not-found partner");
+        await game.SendAsync("RESPONSE avatarpose invalid partner");
+
+        Assert.Equal("chat:SYSTEM:The Avatar model is not installed; the other player will be invisible.", await game.ReadLineAsync());
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(300)));
+        lock (_log)
+            Assert.Equal(
+                ["RESPONSE avatarpose not-found partner", "RESPONSE avatarcreate model-not-found partner",
+                 "RESPONSE avatarcreate model-not-found partner", "RESPONSE avatarpose invalid partner"],
+                _log.Where(entry => entry.Event == LocalGameEventName.SharedPoseCommandFailed).Select(entry => entry.Line));
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
@@ -325,15 +378,15 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
     private sealed class FakeSessionOperations : ISessionOperations
     {
         public event Action? MultiplayerSessionEnded { add { } remove { } }
-        private bool _present;
+        private int _arrival;
         public event Action? OtherPlayerPresenceChanged;
-        public bool IsOtherPlayerPresent => Volatile.Read(ref _present);
+        public int OtherPlayerArrival => Volatile.Read(ref _arrival);
         public List<LanMessage.Pose> SentPoses { get { lock (_sentPoses) return [.. _sentPoses]; } }
         private readonly List<LanMessage.Pose> _sentPoses = [];
 
         public void SetPresent(bool present)
         {
-            Volatile.Write(ref _present, present);
+            Volatile.Write(ref _arrival, present ? 1 : 0);
             OtherPlayerPresenceChanged?.Invoke();
         }
 

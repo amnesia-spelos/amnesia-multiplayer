@@ -44,6 +44,8 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     private LanOutbound? _joinedOutbound;
     private LanOutbound? _admittedOutbound;
     private Task? _acceptLoop;
+    // Counts the other players who became present; guarded by _gate.
+    private int _arrivals;
 
     public TcpSessionOperations(
         SessionNetworkOptions options,
@@ -68,13 +70,18 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     public Guid SessionCorrelationId { get; private set; }
     public Guid PeerCorrelationId { get; private set; }
     public event Action? MultiplayerSessionEnded;
-    // Raised after the other player may have become present or gone; read IsOtherPlayerPresent for the current state.
+    // Raised after the other player may have become present or gone; read OtherPlayerArrival for the current state.
     public event Action? OtherPlayerPresenceChanged;
 
     public bool IsJoined { get { lock (_gate) return _joinedConnection is not null; } }
 
+    public bool IsOtherPlayerPresent => OtherPlayerArrival != 0;
+
     // Hosting with an admitted Joining Player, or joined to a Session Host.
-    public bool IsOtherPlayerPresent { get { lock (_gate) return _admittedOutbound is not null || _joinedOutbound is not null; } }
+    public int OtherPlayerArrival
+    {
+        get { lock (_gate) return _admittedOutbound is not null || _joinedOutbound is not null ? _arrivals : 0; }
+    }
 
     public Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken)
     {
@@ -133,6 +140,7 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
                         {
                             _joinedConnection = connection;
                             _joinedOutbound = StartOutbound(connection, _lifetime.Token);
+                            _arrivals++;
                         }
                         OtherPlayerPresenceChanged?.Invoke();
                         Log(RelaySeverity.Information, RelayEventName.PeerAdmitted, RelayRole.Joining, "Attempting->Admitted");
@@ -341,7 +349,11 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
             {
                 await LanProtocol.WriteAsync(stream,
                     new LanMessage.AdmissionAccepted(_options.ProtocolVersion, SessionCorrelationId), handshake.Token);
-                lock (_gate) _admittedOutbound = StartOutbound(connection, cancellationToken);
+                lock (_gate)
+                {
+                    _admittedOutbound = StartOutbound(connection, cancellationToken);
+                    _arrivals++;
+                }
                 OtherPlayerPresenceChanged?.Invoke();
                 Log(RelaySeverity.Information, RelayEventName.PeerAdmitted, RelayRole.Host, "Attempting->Admitted",
                     peerCorrelationId: join.PeerCorrelationId);
