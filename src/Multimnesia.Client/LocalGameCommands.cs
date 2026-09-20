@@ -37,7 +37,8 @@ public sealed class LocalGameCommands(
         }
     }
 
-    // The Game Peer issues no other Command an older game could reject, so an unknown-command warning answers the pending start.
+    // After the negotiation, which LocalGameSession answers itself, the Game Peer issues no other Command an older game
+    // could reject, so an unknown-command warning answers the pending start.
     public void Dispatch(GameEvent gameEvent)
     {
         StartCustomStoryExchangeOutcome? outcome = gameEvent switch

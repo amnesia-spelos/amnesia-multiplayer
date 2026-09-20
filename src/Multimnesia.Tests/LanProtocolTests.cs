@@ -98,9 +98,122 @@ public sealed class LanProtocolTests
     }
 
     [Fact]
-    public void Protocol_version_is_2_for_the_Shared_Custom_Story_Start()
+    public void Protocol_version_is_4_for_the_raised_lantern_in_the_Shared_Pose()
     {
-        Assert.Equal(2, LanProtocol.CurrentVersion);
+        Assert.Equal(4, LanProtocol.CurrentVersion);
+    }
+
+    public static TheoryData<LanMessage.Pose> Poses => new()
+    {
+        new LanMessage.Pose(123456, 3, 1.25, -2.5, 3.75, 90, -45, true, false, "custom_stories/My Story: Part 2/maps/cellar one.map"),
+        new LanMessage.Pose(ulong.MaxValue, uint.MaxValue, 0, 0, 0, 0, 0, false, true, "maps/a.map "),
+        new LanMessage.Pose(0, 0, -LanProtocol.MaximumPoseMagnitude, LanProtocol.MaximumPoseMagnitude, 0.1, -179.9999, 89.5, false, false,
+            "custom_stories/Příběh 👻/maps/" + new string('m', LanProtocol.MaximumPoseMapScalars - 29)),
+    };
+
+    [Theory]
+    [MemberData(nameof(Poses))]
+    public async Task Poses_round_trip(LanMessage.Pose pose)
+    {
+        await using var stream = new MemoryStream();
+
+        await LanProtocol.WriteAsync(stream, pose, TestContext.Current.CancellationToken);
+        stream.Position = 0;
+
+        Assert.Equal(pose, await LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task Poses_use_their_wire_names()
+    {
+        await using var stream = new MemoryStream();
+
+        await LanProtocol.WriteAsync(stream,
+            new LanMessage.Pose(1000, 2, 1.5, -2, 3, 90, -45, true, false, "maps/a.map"), TestContext.Current.CancellationToken);
+
+        Assert.Equal(
+            "{\"type\":\"pose\",\"timeMs\":1000,\"teleportCounter\":2,\"x\":1.5,\"y\":-2,\"z\":3,\"yaw\":90,\"pitch\":-45,\"crouch\":true,\"lantern\":false,\"map\":\"maps/a.map\"}",
+            Encoding.UTF8.GetString(stream.ToArray(), 4, (int)stream.Length - 4));
+    }
+
+    private static LanMessage.Pose ValidPose => new(1000, 2, 1.5, -2, 3, 90, -45, true, false, "maps/a.map");
+
+    public static TheoryData<LanMessage.Pose> InvalidPoses => new()
+    {
+        ValidPose with { X = double.NaN },
+        ValidPose with { Y = double.PositiveInfinity },
+        ValidPose with { Z = double.NegativeInfinity },
+        ValidPose with { Yaw = LanProtocol.MaximumPoseMagnitude * 2 },
+        ValidPose with { Pitch = -LanProtocol.MaximumPoseMagnitude * 2 },
+        ValidPose with { Map = "" },
+        ValidPose with { Map = "maps/a\n.map" },
+        ValidPose with { Map = "maps/a\t.map" },
+        ValidPose with { Map = new string('m', LanProtocol.MaximumPoseMapScalars + 1) },
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidPoses))]
+    public async Task Invalid_Poses_are_rejected_when_written(LanMessage.Pose pose)
+    {
+        await using var stream = new MemoryStream();
+
+        Assert.False(LanProtocol.IsValid(pose));
+        await Assert.ThrowsAsync<LanProtocolException>(
+            () => LanProtocol.WriteAsync(stream, pose, TestContext.Current.CancellationToken).AsTask());
+        Assert.Empty(stream.ToArray());
+    }
+
+    private const string PoseFields = "\"x\":1.5,\"y\":-2,\"z\":3,\"yaw\":90,\"pitch\":-45,\"crouch\":true,\"lantern\":false";
+
+    public static TheoryData<string> InvalidPoseFrames => new()
+    {
+        "{\"type\":\"pose\",\"teleportCounter\":2," + PoseFields + ",\"map\":\"maps/a.map\"}",
+        "{\"type\":\"pose\",\"timeMs\":-1,\"teleportCounter\":2," + PoseFields + ",\"map\":\"maps/a.map\"}",
+        "{\"type\":\"pose\",\"timeMs\":18446744073709551616,\"teleportCounter\":2," + PoseFields + ",\"map\":\"maps/a.map\"}",
+        "{\"type\":\"pose\",\"timeMs\":1.5,\"teleportCounter\":2," + PoseFields + ",\"map\":\"maps/a.map\"}",
+        "{\"type\":\"pose\",\"timeMs\":\"1000\",\"teleportCounter\":2," + PoseFields + ",\"map\":\"maps/a.map\"}",
+        "{\"type\":\"pose\",\"timeMs\":1000,\"teleportCounter\":4294967296," + PoseFields + ",\"map\":\"maps/a.map\"}",
+        "{\"type\":\"pose\",\"timeMs\":1000,\"teleportCounter\":-1," + PoseFields + ",\"map\":\"maps/a.map\"}",
+        "{\"type\":\"pose\",\"timeMs\":1000,\"teleportCounter\":2,\"x\":1e400,\"y\":-2,\"z\":3,\"yaw\":90,\"pitch\":-45,\"crouch\":true,\"lantern\":false,\"map\":\"maps/a.map\"}",
+        "{\"type\":\"pose\",\"timeMs\":1000,\"teleportCounter\":2,\"x\":1e20,\"y\":-2,\"z\":3,\"yaw\":90,\"pitch\":-45,\"crouch\":true,\"lantern\":false,\"map\":\"maps/a.map\"}",
+        "{\"type\":\"pose\",\"timeMs\":1000,\"teleportCounter\":2,\"x\":\"NaN\",\"y\":-2,\"z\":3,\"yaw\":90,\"pitch\":-45,\"crouch\":true,\"lantern\":false,\"map\":\"maps/a.map\"}",
+        "{\"type\":\"pose\",\"timeMs\":1000,\"teleportCounter\":2,\"y\":-2,\"z\":3,\"yaw\":90,\"pitch\":-45,\"crouch\":true,\"lantern\":false,\"map\":\"maps/a.map\"}",
+        "{\"type\":\"pose\",\"timeMs\":1000,\"teleportCounter\":2,\"x\":1.5,\"y\":-2,\"z\":3,\"yaw\":90,\"pitch\":-45,\"crouch\":1,\"lantern\":false,\"map\":\"maps/a.map\"}",
+        "{\"type\":\"pose\",\"timeMs\":1000,\"teleportCounter\":2,\"x\":1.5,\"y\":-2,\"z\":3,\"yaw\":90,\"pitch\":-45,\"crouch\":true,\"map\":\"maps/a.map\"}",
+        "{\"type\":\"pose\",\"timeMs\":1000,\"teleportCounter\":2,\"x\":1.5,\"y\":-2,\"z\":3,\"yaw\":90,\"pitch\":-45,\"crouch\":true,\"lantern\":1,\"map\":\"maps/a.map\"}",
+        "{\"type\":\"pose\",\"timeMs\":1000,\"teleportCounter\":2," + PoseFields + "}",
+        "{\"type\":\"pose\",\"timeMs\":1000,\"teleportCounter\":2," + PoseFields + ",\"map\":\"\"}",
+        "{\"type\":\"pose\",\"timeMs\":1000,\"teleportCounter\":2," + PoseFields + ",\"map\":\"maps/a\\u0007.map\"}",
+        "{\"type\":\"pose\",\"timeMs\":1000,\"teleportCounter\":2," + PoseFields + ",\"map\":\"" + new string('m', LanProtocol.MaximumPoseMapScalars + 1) + "\"}",
+        "{\"type\":\"pose\",\"timeMs\":1000,\"teleportCounter\":2," + PoseFields + ",\"map\":42}",
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidPoseFrames))]
+    public async Task Invalid_Poses_are_rejected_when_read(string json)
+    {
+        var payload = Encoding.UTF8.GetBytes(json);
+        var bytes = new byte[payload.Length + 4];
+        BinaryPrimitives.WriteInt32BigEndian(bytes, payload.Length);
+        payload.CopyTo(bytes.AsSpan(4));
+        await using var stream = new MemoryStream(bytes);
+
+        await Assert.ThrowsAsync<LanProtocolException>(
+            () => LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken).AsTask());
+    }
+
+    [Fact]
+    public async Task The_largest_Pose_fits_in_one_frame_whatever_its_map_characters()
+    {
+        await using var stream = new MemoryStream();
+        const double extreme = -LanProtocol.MaximumPoseMagnitude;
+        var pose = new LanMessage.Pose(ulong.MaxValue, uint.MaxValue, extreme, extreme, extreme, extreme, extreme, true, true,
+            string.Concat(Enumerable.Repeat("👻", LanProtocol.MaximumPoseMapScalars)));
+
+        await LanProtocol.WriteAsync(stream, pose, TestContext.Current.CancellationToken);
+        stream.Position = 0;
+
+        Assert.Equal(pose, await LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken));
     }
 
     public static TheoryData<LanMessage> CustomStoryMessages => new()
