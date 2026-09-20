@@ -1,0 +1,76 @@
+Amnesia Multiplayer - install, run, uninstall
+============================================
+
+This archive extracts into your Amnesia: The Dark Descent folder, the one that
+already contains Amnesia.exe. It replaces Amnesia.exe with a modified build that
+can talk to the Game Peer, and adds everything else beside it. VERSION.txt
+records exactly which builds are in this archive.
+
+Read this first
+---------------
+The Multiplayer Relay is unauthenticated and unencrypted. Use it only between
+trusted computers on a trusted, private network. Never forward its port on your
+router and never expose it to the internet.
+
+Both players need the same archive, the same Amnesia version, and the same
+Custom Story installed under the same folder name.
+
+Install (do this on both PCs)
+-----------------------------
+1. Back up the original Amnesia.exe: in your Amnesia folder, copy Amnesia.exe to
+   Amnesia.exe.backup. You need it to go back to single player.
+
+2. Extract this archive into the Amnesia folder, overwriting Amnesia.exe when
+   asked. The folder then contains:
+
+       Amnesia.exe                        (the modified build)
+       Start Multiplayer.bat
+       INSTALL.txt
+       VERSION.txt
+       multiplayer\                       (the Game Peer)
+       custom_stories\mp-test-cs\         (the test Custom Story)
+       entities\multiplayer\skeleton_spelos\   (the Avatar model)
+
+3. Allow the Multiplayer Relay through Windows Firewall on the PC that hosts:
+   inbound TCP port 5000, on the PRIVATE network profile only. Do not add a
+   public-network rule, and do not open port 5150 - that one is loopback-only
+   traffic between the game and the Game Peer on the same PC.
+
+Run
+---
+Double-click "Start Multiplayer.bat" in the Amnesia folder. It starts the game
+and then the Game Peer, which gets its own console window and retries until the
+game is listening. The game's chat shows
+
+    Amnesia Multiplayer v... connected.
+
+once they find each other. Everything else happens in the game's chat:
+
+    One player types   /host              and reads out the address it prints.
+    The other types    /join <address>    and stays in the main menu.
+    The host then opens Custom Stories, picks "Amnesia Multiplayer Test", and
+    presses Start. Both games load it, and each player sees the other.
+
+Type /leave to end the session. Close the Game Peer console window when done.
+
+Reporting a problem
+-------------------
+Send both logs from both PCs:
+
+    multiplayer\logs\game-peer-*.log    the newest file; one is written per run
+    Documents\Amnesia\Main\hpl.log      the game's own log; copy it before you
+                                        restart the game, which overwrites it
+
+Uninstall
+---------
+1. Restore the original Amnesia.exe from your backup.
+2. Delete these from the Amnesia folder:
+
+       Start Multiplayer.bat
+       INSTALL.txt
+       VERSION.txt
+       multiplayer\
+       custom_stories\mp-test-cs\
+       entities\multiplayer\skeleton_spelos\
+
+3. Remove the firewall rule for port 5000, if you added one.

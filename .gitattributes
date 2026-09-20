@@ -1,0 +1,2 @@
+scripts/release-files/*.bat text eol=crlf
+scripts/release-files/*.txt text eol=crlf
