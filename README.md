@@ -5,12 +5,14 @@ This repository contains the Game Peer application for a trusted-LAN, two-player
 > [!WARNING]
 > The Multiplayer Relay is unauthenticated and unencrypted. Run it only between trusted computers on a trusted, private LAN. Never expose its port to the internet or configure router port forwarding for it.
 
+Players do not build any of this: a release archive contains the modified `Amnesia.exe`, the Game Peer, and the game content, laid out to extract into the Amnesia folder. See its `INSTALL.txt`, and `docs/RELEASING.md` for how that archive is produced.
+
 ## Prerequisites
 
 - Windows x64 on both PCs.
 - Amnesia: The Dark Descent installed on both PCs.
 - The same game version on both PCs.
-- The modified `Amnesia.exe` produced by [`amnesia-tdd-tcp`](https://github.com/amnesia-spelos/amnesia-tdd-tcp), with its Game Interaction Protocol listening locally on port 5150. It must include Custom Story start support (`startcustomstory:<id>` and `EVENT:CustomStoryStarted:<id>`); with an older `Amnesia.exe`, chat still works, but the Session Host's starts are never shared, and starts shared with a Joining Player fail as unsupported.
+- The modified `Amnesia.exe` produced by [`amnesia-tdd-tcp`](https://github.com/amnesia-spelos/amnesia-tdd-tcp), with its Game Interaction Protocol listening locally on port 5150. It must include Custom Story start support (`startcustomstory:<id>` and `EVENT:CustomStoryStarted:<id>`); with an older `Amnesia.exe`, chat still works, but the Session Host's starts are never shared, and starts shared with a Joining Player fail as unsupported. It must also support Game Interaction Protocol Version 2 with the `avatars` and `localpose` Capabilities for the Shared Pose; without them, the rest keeps working and the player is told movement will not be shared.
 - The same Custom Story installed on both PCs under the same folder name (its Custom Story Identifier). Custom Story versions are not compared.
 - For development, the .NET 10 SDK. Published self-contained builds do not require a separately installed .NET runtime.
 
@@ -29,11 +31,23 @@ dotnet publish .\src\Multimnesia.Client\Multimnesia.Client.csproj --configuratio
 
 This is an ordinary directory publish. Trimming and single-file publishing are intentionally not enabled. Copy `artifacts\game-peer` to both PCs.
 
+To produce a release archive instead of a bare Game Peer folder, run `.\scripts\package-release.ps1`; `docs/RELEASING.md` holds the full release checklist.
+
+## Versioning
+
+Game Peer versions follow SemVer as `0.MINOR.PATCH` while the project is in alpha:
+
+- Each codenamed milestone bumps the minor version; fixes to that milestone bump the patch version under the same codename. The current release is `v0.1.0`, codename "Whisper".
+- There is no `-alpha` suffix. Instead, GitHub releases are marked pre-release.
+- Release titles and archive names include the codename, for example `amnesia-multiplayer-v0.1.0-whisper-win-x64.zip`.
+
+The version and codename are defined once, in `src/Directory.Build.props`, and stamped into the executable's file version. When the Game Peer first connects to its local game, chat shows `Amnesia Multiplayer v0.1.0 "Whisper" connected.` Game Peers do not compare versions with each other; the `LanProtocol` version check at admission decides compatibility.
+
 ## Setup
 
-1. On both PCs, install the test Custom Story: copy the `resources\mp-test-cs` folder from this repository into the game's `custom_stories` folder, keeping the folder name `mp-test-cs`. It appears in the Custom Stories menu as "Amnesia Multiplayer Test".
+1. On both PCs, install this repository's game content: the `resources` folder mirrors the game root, so copy `resources\custom_stories\mp-test-cs` and `resources\entities\multiplayer\skeleton_spelos` to the same relative paths under the Amnesia folder, keeping their folder names. The test Custom Story appears in the Custom Stories menu as "Amnesia Multiplayer Test"; the entity is the skeleton Avatar model. (A release archive already contains both.)
 2. On both PCs, start the modified game and stay in the main menu.
-3. On both PCs, start `Multimnesia.Client.exe`. It connects to the local game over the Game Interaction Protocol and remains a console application whose console is used only for operational logs; all player interaction happens through the game's own chat.
+3. On both PCs, start `Multimnesia.Client.exe`. It connects to the local game over the Game Interaction Protocol and remains a console application whose console is used only for operational logs (also written to a log file, see [Reporting a problem](#reporting-a-problem)); all player interaction happens through the game's own chat.
 4. If the local game connection cannot be established, the Game Peer keeps running and retries with bounded backoff, logging the initial failure, restrained retry status, and recovery. Hosting and joining are unavailable until that connection succeeds.
 
 ## Starting a Custom Story together
@@ -50,6 +64,18 @@ The Session Host's Game Peer shares this Shared Custom Story Start with the Join
 - The Joining Player's own starts are not shared. A Custom Story the Joining Player starts themselves stays local.
 - Returning to the main menu, quitting, Continue, Load Game, death reloads, and map changes are not shared.
 - If the Joining Player's game cannot start the Custom Story, both players see why in chat and the Multiplayer Session stays up.
+
+## Seeing each other move
+
+Once both players are in the Custom Story, each Game Peer streams its own player's Pose to the other, which shows it as an Avatar — the skeleton model from `resources\entities\multiplayer\skeleton_spelos` — in its own game. This is the Shared Pose. It needs nothing from the players: it starts when the second player is admitted and stops when either leaves.
+
+- The Avatar moves smoothly between the Poses that arrive, faces where that player is facing, and has collision: you bump into the other player rather than walking through them.
+- A teleport or a map start snaps the Avatar into place instead of gliding it there.
+- The Shared Pose is active only in a two-player Multiplayer Session. Hosting alone or merely joined, nothing is sent.
+- It requires an `Amnesia.exe` that supports Avatars. If yours does not, you see `Your game does not support Avatars; movement will not be shared.` once, and chat and Custom Story starts keep working.
+- If the skeleton entity is not installed, you see `The Avatar model is not installed; the other player will be invisible.` and the Multiplayer Session continues.
+
+Avatars are not animated: an Avatar slides upright and makes no footsteps, and enemies ignore it. See [Expected behavior and limitations](#expected-behavior-and-limitations).
 
 ## Player commands
 
@@ -104,7 +130,7 @@ Safe defaults work for both Game Peers on one PC. Configuration can be supplied 
 | `GamePort` | `5150` | Local Game Interaction Protocol port. |
 | `RelayPort` | `5000` | TCP port the in-process Multiplayer Relay listens on when hosting, and connects to when joining. |
 | `JoinTimeoutSeconds` | `10` | Overall deadline for a `/join` attempt, including trying every resolved address. |
-| `LogLevel` | `Information` | Minimum severity console-logged: `Debug`, `Information`, `Warning`, or `Error`. `Debug` additionally logs remote endpoints. |
+| `LogLevel` | `Information` | Minimum severity logged to the console and the log file: `Debug`, `Information`, `Warning`, or `Error`. `Debug` additionally logs remote endpoints. |
 
 Ordinary play requires no configuration beyond these defaults; no relay URL or bind address needs to be supplied. Override any setting from the command line, for example:
 
@@ -131,6 +157,15 @@ Allow inbound TCP traffic to the configured Multiplayer Relay port (5000 by defa
 - **Local-game connection errors** — confirm the modified `Amnesia.exe` from `amnesia-tdd-tcp` is running and listening on `GamePort` before starting the Game Peer; it retries automatically once the game becomes reachable.
 - Set `LogLevel` to `Debug` to see per-connection endpoints and handshake attempts while diagnosing a LAN issue; never share `Debug` logs outside your own troubleshooting, as they include peer IP addresses.
 
+## Reporting a problem
+
+When reporting a problem, attach both logs from each affected PC:
+
+- **Game Peer log**: every run writes `logs\game-peer-yyyyMMdd-HHmmss.log` beside `Multimnesia.Client.exe`, named after the run's local start time. The newest 10 are kept. Each file starts with the Game Peer version and codename, the `LanProtocol` version, and the OS version, followed by the same entries as the console at the configured `LogLevel`. If the `logs` folder cannot be written, for example because the Game Peer is in a read-only folder, the Game Peer says so on its console and keeps running without a log file.
+- **Game log**: the game writes its own `hpl.log` to `Documents\Amnesia\Main\hpl.log` in your user profile. It is overwritten on every game start, so copy it before restarting the game.
+
+At the default `Information` level the Game Peer log contains no IP addresses. Logs recorded at `Debug` do; see the warning under [Troubleshooting](#troubleshooting).
+
 ## Two-computer verification walkthrough
 
 This is the record of the manual walkthrough required before considering a build release-ready. Repeat it after any change to session orchestration, the LAN protocol, or the Multiplayer Relay.
@@ -155,21 +190,42 @@ For the Shared Custom Story Start, install `mp-test-cs` on both PCs and start ea
 
 A build is considered verified only when every step above produces the documented outcome on real hardware, in addition to the automated test suite passing.
 
+### Whisper walkthrough (from the release archive)
+
+Run this one from the extracted release archive on two PCs, never from a dev build: it is what makes a release publishable (`docs/RELEASING.md`). It covers the Shared Pose and the release packaging; the steps above still cover chat, sessions, and the Shared Custom Story Start.
+
+1. On both PCs, back up `Amnesia.exe` and extract the archive into the Amnesia folder as its `INSTALL.txt` describes, then add the private-network firewall rule on the PC that will host.
+2. On both PCs, double-click `Start Multiplayer.bat` in the Amnesia folder. Confirm the game starts, the Game Peer gets its own console window, and the game's chat shows `Amnesia Multiplayer v0.1.0 "Whisper" connected.` — the version each PC is running.
+3. On PC A, `/host`. On PC B, `/join <PC A's LAN address>`. On PC A, start "Amnesia Multiplayer Test". Confirm both games load the map.
+4. Walk around on both PCs. Confirm each player sees the other as the skeleton Avatar, moving smoothly rather than jumping between positions, turned the way that player is facing, and that walking into the Avatar blocks rather than passing through it.
+5. Confirm ordinary chat still works both ways while moving.
+6. Trigger a placement that is not ordinary walking — the map start itself, or a `TeleportPlayer` — and confirm the Avatar snaps to the new position rather than gliding across the level to it.
+7. On PC B, `/leave`. Confirm PC A's Avatar disappears. `/join` again and have PC A start the Custom Story again; confirm both Avatars come back.
+8. With both players in game, close and restart PC B's game (leaving both Game Peers running). Confirm PC B's Game Peer reconnects, and after PC A starts the Custom Story again, both players see each other again.
+9. On both PCs, confirm `multiplayer\logs\game-peer-*.log` exists, that its newest file starts with the version, codename, `LanProtocol` version, and OS, and that the session events from this walkthrough are in it.
+
+If either PC's game is an older build without Avatar support, that player sees `Your game does not support Avatars; movement will not be shared.` and chat and Custom Story starts keep working. If the skeleton entity is missing from a game folder, that player sees `The Avatar model is not installed; the other player will be invisible.` Both are degraded modes, not failures of the walkthrough — but a release archive extracted correctly should produce neither.
+
 ## Expected behavior and limitations
 
-This milestone is a chat, session, and Shared Custom Story Start vertical slice. It deliberately excludes:
+Whisper is a vertical slice: two players host, join, chat, start the same Custom Story together, and see each other move. What that slice does *not* cover:
 
-- movement or other game-state synchronization beyond the Session Host's Custom Story start;
-- catch-up for late joiners, sharing the Joining Player's own starts, and checking that both PCs have the same Custom Story version;
-- arbitrary script execution;
-- UDP or another gameplay transport;
-- authentication, encryption, or internet exposure;
-- IPv6;
-- reconnect/resume or host migration;
-- multiple simultaneous Multiplayer Sessions;
-- more than one Joining Player;
-- discovery or matchmaking;
-- persistent player identity;
-- chat persistence (this milestone does not persist logs either; operators may redirect console output when diagnosing a session).
+- **Custom Stories only.** The main game is not supported.
+- **Map changes and returning to the main menu are not shared.** Only the Session Host's fresh Custom Story start is. Continue, Load Game, death reloads, quitting, and every map transition after the start are local.
+- **An Avatar stays frozen at its last Pose when its player returns to the main menu.** The game sends no Poses from the main menu and reports no map-left event, so the other player keeps seeing a motionless Avatar where that player last stood. Start the Custom Story again to resynchronize.
+- **Enemies ignore the Joining Player.** Enemy AI is aware only of the player in its own game.
+- Avatar animation, head pitch, crouch visuals, and footstep sounds: an Avatar slides upright and does not animate.
+- Props, doors, levers, inventory, and scripts: every world interaction stays local to the game it happened in.
+- Catch-up for late joiners, sharing the Joining Player's own starts, and checking that both PCs have the same Custom Story version.
+- Arbitrary script execution.
+- UDP or another gameplay transport.
+- Authentication, encryption, or internet exposure.
+- IPv6.
+- Reconnect/resume of a Multiplayer Session, or host migration. (The Game Peer does reconnect to its own local game.)
+- Multiple simultaneous Multiplayer Sessions, and more than one Joining Player.
+- Discovery or matchmaking.
+- Persistent player identity.
+- Chat persistence.
+- Auto-update: a new version means extracting a new archive.
 
 The architecture does not preclude any of the above being built later, but none of it is in scope now.

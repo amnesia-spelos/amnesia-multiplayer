@@ -14,6 +14,9 @@ public abstract record LanMessage
     public sealed record Heartbeat : LanMessage;
     public sealed record CustomStoryStarted(string Identifier) : LanMessage;
     public sealed record CustomStoryStartOutcome(string Identifier, SharedCustomStoryStartOutcome Outcome) : LanMessage;
+    // The fields of a `STATE localpose` State Update, unchanged in meaning (ADR 0003).
+    public sealed record Pose(
+        ulong TimeMs, uint TeleportCounter, double X, double Y, double Z, double Yaw, double Pitch, bool Crouch, bool Lantern, string Map) : LanMessage;
 }
 
 public enum SharedCustomStoryStartOutcome { Started, NotFound, Invalid, NotInMainMenu, Unavailable }
@@ -22,8 +25,12 @@ public sealed class LanProtocolException(string message, Exception? innerExcepti
 
 public static class LanProtocol
 {
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 4;
     public const int MaximumFrameBytes = 4096;
+    // Keeps a Pose's numbers within the game's 15-digit, 4-decimal line format; real positions and angles are far smaller.
+    public const double MaximumPoseMagnitude = 1e9;
+    // Even fully escaped in JSON, a map path this long leaves the Pose within one frame.
+    public const int MaximumPoseMapScalars = 256;
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
     public static async ValueTask WriteAsync(Stream stream, LanMessage message, CancellationToken cancellationToken = default)
@@ -45,6 +52,21 @@ public static class LanProtocol
                 identifier = ValidIdentifier(value.Identifier),
                 outcome = OutcomeWireName(value.Outcome)
             },
+            LanMessage.Pose value when IsValid(value) => new
+            {
+                type = "pose",
+                timeMs = value.TimeMs,
+                teleportCounter = value.TeleportCounter,
+                x = value.X,
+                y = value.Y,
+                z = value.Z,
+                yaw = value.Yaw,
+                pitch = value.Pitch,
+                crouch = value.Crouch,
+                lantern = value.Lantern,
+                map = value.Map
+            },
+            LanMessage.Pose => throw new LanProtocolException("Invalid Pose."),
             _ => throw new LanProtocolException("Unsupported LAN message type.")
         });
         if (payload.Length > MaximumFrameBytes) throw new LanProtocolException("LAN message exceeds the maximum frame size.");
@@ -84,6 +106,7 @@ public static class LanProtocol
                 "custom-story-started" => new LanMessage.CustomStoryStarted(RequiredIdentifier(root)),
                 "custom-story-start-outcome" => new LanMessage.CustomStoryStartOutcome(
                     RequiredIdentifier(root), ParseOutcome(RequiredString(root, "outcome", 32))),
+                "pose" => ReadPose(root),
                 _ => throw new LanProtocolException("Unknown LAN message type.")
             };
         }
@@ -150,6 +173,28 @@ public static class LanProtocol
         var entry = new LanMessage.ChatEntry(root.GetProperty("author").GetString()!, root.GetProperty("message").GetString()!);
         if (!IsValidChat(entry.Author, entry.Message)) throw new LanProtocolException("Invalid Chat Entry.");
         return entry;
+    }
+
+    public static bool IsValid(LanMessage.Pose pose) =>
+        IsPoseNumber(pose.X) && IsPoseNumber(pose.Y) && IsPoseNumber(pose.Z) && IsPoseNumber(pose.Yaw) && IsPoseNumber(pose.Pitch) &&
+        pose.Map is not null && pose.Map.Length > 0 && IsValidField(pose.Map, MaximumPoseMapScalars, rejectColon: false);
+
+    private static bool IsPoseNumber(double value) => double.IsFinite(value) && Math.Abs(value) <= MaximumPoseMagnitude;
+
+    private static LanMessage.Pose ReadPose(JsonElement root)
+    {
+        var pose = new LanMessage.Pose(
+            root.GetProperty("timeMs").GetUInt64(),
+            root.GetProperty("teleportCounter").GetUInt32(),
+            root.GetProperty("x").GetDouble(),
+            root.GetProperty("y").GetDouble(),
+            root.GetProperty("z").GetDouble(),
+            root.GetProperty("yaw").GetDouble(),
+            root.GetProperty("pitch").GetDouble(),
+            root.GetProperty("crouch").GetBoolean(),
+            root.GetProperty("lantern").GetBoolean(),
+            root.GetProperty("map").GetString()!);
+        return IsValid(pose) ? pose : throw new LanProtocolException("Invalid Pose.");
     }
 
     private static bool IsValidChat(string? author, string? message) =>

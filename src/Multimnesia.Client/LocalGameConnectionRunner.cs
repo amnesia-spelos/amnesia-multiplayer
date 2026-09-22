@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Multimnesia.Client;
 
 public enum ConnectionLogSeverity { Information, Warning }
@@ -7,7 +9,16 @@ public sealed record GameConnectionStatus(
     DateTimeOffset Timestamp,
     ConnectionLogSeverity Severity,
     GameConnectionEvent Event,
-    int Attempt);
+    int Attempt)
+{
+    public static string Format(GameConnectionStatus status) => JsonSerializer.Serialize(new
+    {
+        timestamp = status.Timestamp,
+        severity = status.Severity.ToString(),
+        @event = status.Event.ToString(),
+        status.Attempt
+    });
+}
 
 public static class LocalGameReconnectPolicy
 {
@@ -15,6 +26,17 @@ public static class LocalGameReconnectPolicy
     {
         var multiplier = Math.Pow(2, Math.Min(Math.Max(attempt, 1) - 1, 30));
         return TimeSpan.FromTicks((long)Math.Min(initialBackoff.Ticks * multiplier, maximumBackoff.Ticks));
+    }
+}
+
+public static class LocalGameSocket
+{
+    public static async ValueTask<Stream> ConnectAsync(string host, int port, CancellationToken cancellationToken)
+    {
+        // Poses and chat are small lines; Nagle's algorithm would hold them back.
+        var game = new System.Net.Sockets.TcpClient { NoDelay = true };
+        try { await game.ConnectAsync(host, port, cancellationToken); return game.GetStream(); }
+        catch { game.Dispose(); throw; }
     }
 }
 

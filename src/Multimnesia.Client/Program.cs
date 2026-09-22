@@ -1,5 +1,3 @@
-using System.Net.Sockets;
-using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Multimnesia.Client;
 
@@ -8,145 +6,59 @@ configuration.AddJsonFile("appsettings.json", optional: true, reloadOnChange: fa
 configuration.AddCommandLine(args);
 var options = configuration.GetSection(GamePeerOptions.SectionName).Get<GamePeerOptions>() ?? new GamePeerOptions();
 var errors = options.Validate();
+using var log = GamePeerLog.Open(
+    Path.Combine(AppContext.BaseDirectory, "logs"),
+    DateTime.Now,
+    errors.Count == 0 ? options.ParsedLogLevel : RelaySeverity.Information,
+    Console.Out,
+    Console.Error);
 if (errors.Count > 0)
 {
-    foreach (var error in errors) Console.Error.WriteLine($"Configuration error: {error}");
+    foreach (var error in errors) log.Write(RelaySeverity.Error, $"Configuration error: {error}");
     return 2;
 }
-var logLevel = options.ParsedLogLevel;
+log.Write(RelaySeverity.Information, $"{GamePeerVersion.DisplayName} starting.");
 
 using var cancellation = new CancellationTokenSource();
 Console.CancelKeyPress += (_, eventArgs) => { eventArgs.Cancel = true; cancellation.Cancel(); };
 
-var localGameLosses = 0;
-while (!cancellation.IsCancellationRequested)
-{
-    await using var gameStream = await ConnectToLocalGameAsync(options, cancellation.Token);
-    if (gameStream is null) break;
-    await using var writer = GameInteractionProtocol.CreateWriter(gameStream);
-    using var reader = GameInteractionProtocol.CreateReader(gameStream);
-    var welcome = await reader.ReadLineAsync(cancellation.Token);
-    if (welcome is null)
-    {
-        Console.Error.WriteLine("Local-game connection failed: the game closed the Game Interaction Protocol session during startup.");
-        localGameLosses++;
-        await DelayBeforeLocalGameReconnectAsync(localGameLosses, cancellation.Token);
-        continue;
-    }
-    Console.WriteLine($"Connected to local game at {options.GameHost}:{options.GamePort}. {welcome}");
-
-    var writeGate = new SemaphoreSlim(1, 1);
-    async ValueTask WriteLineAsync(string line, CancellationToken cancellationToken)
-    {
-        await writeGate.WaitAsync(cancellationToken);
-        try { await writer.WriteLineAsync(line.AsMemory(), cancellationToken); }
-        finally { writeGate.Release(); }
-    }
-    ValueTask DisplayAsync(ChatEntry entry) => WriteLineAsync(GameInteractionProtocol.Display(entry), cancellation.Token);
-    ValueTask DisplaySystemAsync(string message) => DisplayAsync(new ChatEntry("SYSTEM", message));
-    var localGameCommands = new LocalGameCommands(WriteLineAsync, Task.Delay);
-    SharedCustomStoryStart sharedStart = null!;
-
-    await using var sessions = new TcpSessionOperations(
-        new SessionNetworkOptions
+var isFirstConnection = true;
+await LocalGameSession.RunReconnectingAsync(
+    token => ConnectToLocalGameAsync(options, log, token),
+    gameStream => new LocalGameSession(
+        gameStream,
+        callbacks => new TcpSessionOperations(
+            new SessionNetworkOptions
+            {
+                Port = options.RelayPort,
+                JoinTimeout = TimeSpan.FromSeconds(options.JoinTimeoutSeconds)
+            },
+            callbacks.DisplaySystem,
+            receiveChat: callbacks.ReceiveChat,
+            log: entry => log.Write(entry.Severity, RelayLog.Format(entry)),
+            receiveCustomStoryStarted: callbacks.ReceiveCustomStoryStarted,
+            receiveCustomStoryStartOutcome: callbacks.ReceiveCustomStoryStartOutcome,
+            receivePose: callbacks.ReceivePose),
+        entry =>
         {
-            Port = options.RelayPort,
-            JoinTimeout = TimeSpan.FromSeconds(options.JoinTimeoutSeconds)
+            if (entry.Event == LocalGameEventName.Connected)
+                log.Write(entry.Severity, $"Connected to local game on port {options.GamePort}. {entry.Line}");
+            else
+                log.Write(entry.Severity, LocalGameLogEntry.Format(entry));
         },
-        DisplaySystemAsync,
-        receiveChat: DisplayAsync,
-        log: RelayLog.ConsoleSinkAt(logLevel),
-        // Not awaited: the exchange with the local game must not stall reading Heartbeats from the Session Host.
-        receiveCustomStoryStarted: identifier =>
-        {
-            _ = RunIgnoringDisconnectAsync(sharedStart.HandleHostStartAsync(identifier, cancellation.Token));
-            return ValueTask.CompletedTask;
-        },
-        // Not awaited: the Session Host's game may be frozen loading, and writing to it must not stall reading Heartbeats.
-        receiveCustomStoryStartOutcome: (identifier, outcome) =>
-        {
-            _ = RunIgnoringDisconnectAsync(sharedStart.HandleOutcomeAsync(identifier, outcome));
-            return ValueTask.CompletedTask;
-        });
-    var orchestrator = new GamePeerOrchestrator(sessions);
-    sharedStart = new SharedCustomStoryStart(sessions, localGameCommands.StartCustomStoryAsync, DisplaySystemAsync);
-
-    try
-    {
-        while (!cancellation.IsCancellationRequested)
-        {
-            var line = await reader.ReadLineAsync(cancellation.Token);
-            if (line is null) throw new IOException("The local game closed the Game Interaction Protocol session.");
-            var gameEvent = GameInteractionProtocol.ParseEvent(line);
-            if (GameInteractionProtocol.IsUnrecognizedReply(gameEvent))
-                Console.WriteLine(JsonSerializer.Serialize(new
-                {
-                    timestamp = DateTimeOffset.UtcNow,
-                    severity = "Warning",
-                    @event = "UnrecognizedGameReply",
-                    line
-                }));
-            DispatchGameEvent(gameEvent);
-        }
-    }
-    catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
-    catch (IOException exception)
-    {
-        Console.Error.WriteLine($"Local-game connection was lost: {exception.Message}");
-        localGameLosses++;
-        await DelayBeforeLocalGameReconnectAsync(localGameLosses, cancellation.Token);
-    }
-
-    void DispatchGameEvent(GameEvent gameEvent)
-    {
-        if (gameEvent is GameEvent.ChatSubmitted chat) _ = RunIgnoringDisconnectAsync(HandleCommandAsync(chat.Entry));
-        // Not awaited, but it records the event before its first await, so events are observed in the order the game sent them.
-        _ = RunIgnoringDisconnectAsync(sharedStart.HandleLocalGameEventAsync(gameEvent, cancellation.Token));
-        localGameCommands.Dispatch(gameEvent);
-    }
-
-    async Task HandleCommandAsync(ChatEntry entry)
-    {
-        var feedback = await orchestrator.HandleAsync(entry, cancellation.Token);
-        if (feedback is not null) await DisplaySystemAsync(feedback.Message);
-    }
-
-    async Task RunIgnoringDisconnectAsync(Task operation)
-    {
-        try { await operation; }
-        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
-        catch (IOException) { }
-    }
-}
+        connectedNotice: Interlocked.Exchange(ref isFirstConnection, false) ? GamePeerVersion.ConnectedNotice : null),
+    (attempt, token) => Task.Delay(LocalGameReconnectPolicy.DelayForAttempt(
+        attempt, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(30)), token),
+    exception => log.Write(RelaySeverity.Error, $"Local-game connection was lost: {exception.Message}"),
+    cancellation.Token);
 return 0;
 
-static async Task DelayBeforeLocalGameReconnectAsync(int attempt, CancellationToken cancellationToken)
-{
-    try
-    {
-        await Task.Delay(LocalGameReconnectPolicy.DelayForAttempt(
-            attempt, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(30)), cancellationToken);
-    }
-    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
-}
-
-static Task<Stream?> ConnectToLocalGameAsync(GamePeerOptions options, CancellationToken cancellationToken)
+static Task<Stream?> ConnectToLocalGameAsync(GamePeerOptions options, GamePeerLog log, CancellationToken cancellationToken)
 {
     var connector = new LocalGameConnector(
-        async token =>
-        {
-            var game = new TcpClient();
-            try { await game.ConnectAsync(options.GameHost, options.GamePort, token); return game.GetStream(); }
-            catch { game.Dispose(); throw; }
-        },
+        token => LocalGameSocket.ConnectAsync(options.GameHost, options.GamePort, token),
         Task.Delay,
-        status => Console.WriteLine(JsonSerializer.Serialize(new
-        {
-            timestamp = status.Timestamp,
-            severity = status.Severity.ToString(),
-            @event = status.Event.ToString(),
-            status.Attempt
-        })),
+        status => log.Write(status.Severity, GameConnectionStatus.Format(status)),
         TimeSpan.FromSeconds(1),
         TimeSpan.FromSeconds(30));
     return connector.ConnectAsync(cancellationToken);

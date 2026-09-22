@@ -87,6 +87,13 @@ public sealed class GameInteractionProtocolTests
         Assert.IsType<GameEvent.UnknownCommandWarned>(GameInteractionProtocol.ParseEvent("WARNING:Unknown command"));
     }
 
+    [Fact]
+    public void Ping_answers_are_typed()
+    {
+        Assert.IsType<GameEvent.Ponged>(GameInteractionProtocol.ParseEvent("RESPONSE:ping:pong"));
+        Assert.IsType<GameEvent.Unknown>(GameInteractionProtocol.ParseEvent("RESPONSE:ping:pongs"));
+    }
+
     [Theory]
     [InlineData("RESPONSE:startcustomstory:exploded", true)]
     [InlineData("WARNING:Unknown command", true)]

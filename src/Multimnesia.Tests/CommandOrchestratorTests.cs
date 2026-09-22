@@ -149,6 +149,9 @@ public sealed class CommandOrchestratorTests
     private sealed class RecordingSessionOperations : ISessionOperations
     {
         public event Action? MultiplayerSessionEnded { add { } remove { } }
+        public event Action? OtherPlayerPresenceChanged { add { } remove { } }
+        public int OtherPlayerArrival => 0;
+        public void SendPose(LanMessage.Pose pose) { }
         public bool IsJoined => false;
         public List<ChatEntry> SentChat { get; } = [];
         public SessionOperationResult HostResult { get; init; } = SessionOperationResult.Succeeded;

@@ -43,10 +43,7 @@ public static class RelayLog
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
-    public static Action<RelayLogEntry> ConsoleSinkAt(RelaySeverity minimumSeverity) =>
-        entry => { if (entry.Severity >= minimumSeverity) ConsoleSink(entry); };
-
-    public static void ConsoleSink(RelayLogEntry entry) => Console.WriteLine(JsonSerializer.Serialize(new
+    public static string Format(RelayLogEntry entry) => JsonSerializer.Serialize(new
     {
         timestamp = entry.Timestamp,
         severity = entry.Severity.ToString(),
@@ -59,5 +56,5 @@ public static class RelayLog
         endpoint = entry.Severity == RelaySeverity.Debug ? entry.Endpoint?.ToString() : null,
         customStoryIdentifier = entry.CustomStoryIdentifier,
         customStoryStartOutcome = entry.CustomStoryStartOutcome?.ToString()
-    }, SerializerOptions));
+    }, SerializerOptions);
 }
