@@ -2,10 +2,10 @@
     <EditorSession>
         <Performance CamClipPlanes="0.05 1000" LightsActive="true" PSActive="true" ShowFog="true" ShowSkybox="true" WorldReflection="true" />
         <ViewportConfig BGColor="0.2 0.2 0.2 1" GAmbientLight="true" GPointLight="true" GridSnap="false" GridSnapSeparation="0.25" SelectedViewport="3" UsingEnlargedViewport="true">
-            <Viewport CameraPosition="-0.00229013 1.00752 180" CameraTarget="-0.00229013 1.00752 0" CameraZoom="0" GridHeight="0" GridPlane="2" Preset="0" RenderMode="1" ShowAxes="true" ShowGrid="true" UsingLTCam="false" />
+            <Viewport CameraPosition="0 0 180" CameraTarget="0 0 0" CameraZoom="0" GridHeight="0" GridPlane="2" Preset="0" RenderMode="1" ShowAxes="true" ShowGrid="true" UsingLTCam="false" />
             <Viewport CameraPosition="180 0 0" CameraTarget="0 0 0" CameraZoom="0" GridHeight="0" GridPlane="0" Preset="1" RenderMode="1" ShowAxes="true" ShowGrid="true" UsingLTCam="false" />
             <Viewport CameraPosition="0 180 0" CameraTarget="0 0 0" CameraZoom="0" GridHeight="0" GridPlane="1" Preset="2" RenderMode="1" ShowAxes="true" ShowGrid="true" UsingLTCam="false" />
-            <Viewport CameraPosition="-0.143035 1.7587 2.34677" CameraTarget="-0.0932655 0.435374 -0.191636" CameraZoom="2.86013" GridHeight="0" GridPlane="1" Preset="3" RenderMode="0" ShowAxes="true" ShowGrid="true" UsingLTCam="false" />
+            <Viewport CameraPosition="0.796337 1.81301 2.28635" CameraTarget="-0.083732 0.897508 -0.279672" CameraZoom="2.86013" GridHeight="0" GridPlane="1" Preset="3" RenderMode="0" ShowAxes="true" ShowGrid="true" UsingLTCam="false" />
         </ViewportConfig>
     </EditorSession>
     <ModelData>
@@ -13,11 +13,63 @@
         <Mesh Filename="entities/multiplayer/skeleton_spelos/TheSkeletonSpelos.dae">
             <SubMesh Active="true" ID="0" Material="" Name="TheSkeletonSpelos" Rotation="0 0 0" Scale="1 1 1" SubMeshID="0" Tag="" WorldPos="0 0 0" />
         </Mesh>
-        <Bones />
+        <Bones>
+            <Bone ID="1" Name="Armature" />
+            <Bone ID="2" Name="Armature_Hip" />
+            <Bone ID="3" Name="Armature_Chest" />
+            <Bone ID="4" Name="Armature_Neck" />
+            <Bone ID="5" Name="Armature_Head" />
+            <Bone ID="6" Name="Armature_Jaw" />
+            <Bone ID="7" Name="Armature_Shoulder_L" />
+            <Bone ID="8" Name="Armature_Arm_L" />
+            <Bone ID="9" Name="Armature_Forearm_L" />
+            <Bone ID="10" Name="Armature_Hand_L" />
+            <Bone ID="11" Name="Armature_Shoulder_R" />
+            <Bone ID="12" Name="Armature_Arm_R" />
+            <Bone ID="13" Name="Armature_Forearm_R" />
+            <Bone ID="14" Name="Armature_Hand_R" />
+            <Bone ID="15" Name="Armature_Hip_L" />
+            <Bone ID="16" Name="Armature_Leg_L" />
+            <Bone ID="17" Name="Armature_Shin_L" />
+            <Bone ID="18" Name="Armature_Foot_L" />
+            <Bone ID="19" Name="Armature_Hip_R" />
+            <Bone ID="20" Name="Armature_Leg_R" />
+            <Bone ID="21" Name="Armature_Shin_R" />
+            <Bone ID="22" Name="Armature_Foot_R" />
+            <Bone ID="23" Name="TheSkeletonSpelos" />
+        </Bones>
         <Shapes />
         <Bodies />
         <Joints />
-        <Animations />
+        <Animations>
+            <Animation File="D:/SteamLibrary/steamapps/common/Amnesia The Dark Descent/entities/multiplayer/skeleton_spelos/TheSkeletonSpelos_idle.dae_anim" Name="idle" SpecialEventTime="0" Speed="1" />
+            <Animation File="D:/SteamLibrary/steamapps/common/Amnesia The Dark Descent/entities/multiplayer/skeleton_spelos/TheSkeletonSpelos_rom.dae_anim" Name="rom" SpecialEventTime="0" Speed="1" />
+        </Animations>
     </ModelData>
-    <UserDefinedVariables EntitySubType="" EntityType="StaticProp" />
+    <UserDefinedVariables EntitySubType="" EntityType="NPC">
+        <Var Name="Health" Value="100" />
+        <Var Name="Toughness" Value="0" />
+        <Var Name="MaxFocusDistance" Value="0" />
+        <Var Name="MainPhysicsBody" Value="" />
+        <Var Name="ShowMesh" Value="true" />
+        <Var Name="DissolveOnDestruction" Value="false" />
+        <Var Name="DissolveTime" Value="1.0" />
+        <Var Name="EffectsOnSound" Value="" />
+        <Var Name="EffectsOffSound" Value="" />
+        <Var Name="EffectsOnTime" Value="1" />
+        <Var Name="EffectsOffTime" Value="1" />
+        <Var Name="EffectsOffLightColor" Value="0 0 0 0" />
+        <Var Name="EffectsOffLightRadius" Value="-1" />
+        <Var Name="ShowHints" Value="true" />
+        <Var Name="StaticMoveCheckCollision" Value="false" />
+        <Var Name="StaticMoveStartSound" Value="" />
+        <Var Name="StaticMoveStopSound" Value="" />
+        <Var Name="StaticMoveLoopSound" Value="" />
+        <Var Name="RandomizeAnimationStart" Value="true" />
+        <Var Name="MoveHeadBones" Value="" />
+        <Var Name="MoveHeadBoneMuls" Value="" />
+        <Var Name="HeadMoveSpeedMul" Value="1" />
+        <Var Name="HeadMoveMaxSpeed" Value="1" />
+        <Var Name="MaxHeadAngle" Value="30" />
+    </UserDefinedVariables>
 </Entity>
