@@ -44,6 +44,9 @@
         <Animations>
             <Animation File="D:/SteamLibrary/steamapps/common/Amnesia The Dark Descent/entities/multiplayer/skeleton_spelos/TheSkeletonSpelos_idle.dae_anim" Name="idle" SpecialEventTime="0" Speed="1" />
             <Animation File="D:/SteamLibrary/steamapps/common/Amnesia The Dark Descent/entities/multiplayer/skeleton_spelos/TheSkeletonSpelos_rom.dae_anim" Name="rom" SpecialEventTime="0" Speed="1" />
+            <Animation File="D:/SteamLibrary/steamapps/common/Amnesia The Dark Descent/entities/multiplayer/skeleton_spelos/TheSkeletonSpelos_walk.dae_anim" Name="walk" SpecialEventTime="9.92377e-038" Speed="1" />
+            <Animation File="D:/SteamLibrary/steamapps/common/Amnesia The Dark Descent/entities/multiplayer/skeleton_spelos/TheSkeletonSpelos_crouch_idle.dae_anim" Name="crouch_idle" SpecialEventTime="0" Speed="1" />
+            <Animation File="D:/SteamLibrary/steamapps/common/Amnesia The Dark Descent/entities/multiplayer/skeleton_spelos/TheSkeletonSpelos_crouch_walk.dae_anim" Name="crouch_walk" SpecialEventTime="4.65717e+031" Speed="1" />
         </Animations>
     </ModelData>
     <UserDefinedVariables EntitySubType="" EntityType="NPC">
