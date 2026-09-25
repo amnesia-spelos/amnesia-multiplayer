@@ -69,8 +69,8 @@
         <Var Name="StaticMoveStopSound" Value="" />
         <Var Name="StaticMoveLoopSound" Value="" />
         <Var Name="RandomizeAnimationStart" Value="true" />
-        <Var Name="MoveHeadBones" Value="" />
-        <Var Name="MoveHeadBoneMuls" Value="" />
+        <Var Name="MoveHeadBones" Value="Armature_Neck Armature_Head" />
+        <Var Name="MoveHeadBoneMuls" Value="0.4 0.6" />
         <Var Name="HeadMoveSpeedMul" Value="1" />
         <Var Name="HeadMoveMaxSpeed" Value="1" />
         <Var Name="MaxHeadAngle" Value="30" />
