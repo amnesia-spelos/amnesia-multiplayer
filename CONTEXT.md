@@ -9,7 +9,7 @@ A shared multiplayer experience coordinated for a group of participating game in
 _Avoid_: Lobby, room
 
 **Multiplayer Relay**:
-The process that coordinates a Multiplayer Session and relays multiplayer traffic among its Game Peers.
+The process that coordinates a Multiplayer Session: it admits Game Peers and orders their Claims.
 _Avoid_: Server, SignalR server, hub
 
 **Game Peer**:
@@ -17,7 +17,7 @@ The multiplayer application instance paired with one locally running game and pa
 _Avoid_: Client, multiplayer client
 
 **Session Host**:
-The player whose computer runs the Multiplayer Relay and whose Game Peer is admitted first to the Multiplayer Session.
+The player whose computer runs the Multiplayer Relay.
 _Avoid_: Server, authority
 
 **Joining Player**:
@@ -31,6 +31,26 @@ _Avoid_: Story sync, map sync, remote start
 **Shared Pose**:
 A player's Pose, continuously reproduced as an Avatar in the other player's game within the same Multiplayer Session.
 _Avoid_: Movement sync, position sync, remote player, ghost
+
+**Hold**:
+A player's exclusive right to decide the motion of one map-placed entity in the shared world, taken by interacting with it or by touching it with their body or another entity they Hold, and lasting until it comes to rest after the Holder is done with it. While it lasts, no other player can interact with that entity.
+_Avoid_: Lock, ownership, grab lock
+
+**Holder**:
+The player who has a Hold.
+_Avoid_: Owner, controller
+
+**Claim**:
+A player's taking of a Hold on an entity, effective at once in their own game and confirmed or denied by the order in which the Multiplayer Relay receives it.
+_Avoid_: Grab request, lock request
+
+**Claim Denial**:
+The Multiplayer Relay's answer to a Claim that arrived after another player's Claim on the same entity, which ends the losing player's interaction with it.
+_Avoid_: Revocation, rejection
+
+**Settling**:
+The part of a Hold during which the Holder is not interacting with the entity but still decides where it goes, until it comes to rest: after the Holder lets go, or from the start of a Hold taken by touch.
+_Avoid_: Cooldown, flight, release window
 
 ## Trusted-LAN boundary
 
