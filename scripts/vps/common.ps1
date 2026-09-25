@@ -3,6 +3,8 @@ $ErrorActionPreference = 'Stop'
 
 $VpsName = 'multimnesia-vps'
 $RelayPort = 5000
+# Marks the up.ps1 -OpenRelay rule so down.ps1 can remove it.
+$OpenRelayNote = 'Open relay until down.ps1'
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $VultrCli = if ($env:VULTR_CLI) { $env:VULTR_CLI } else { Join-Path $RepoRoot '..\vultr-cli.exe' }
 $PublicKeyPath = Join-Path $HOME '.ssh\multimnesia_vps.pub'

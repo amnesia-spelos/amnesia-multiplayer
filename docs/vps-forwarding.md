@@ -14,7 +14,7 @@ The Multiplayer Relay still runs inside the Session Host's Game Peer. A Vultr De
 Joining Player ──TCP 5000──▶ VPS (sshd, GatewayPorts) ══ssh -R══▶ Session Host 127.0.0.1:5000 (Relay)
 ```
 
-Access control is a Vultr firewall group: TCP 22 only from the Session Host's public IP, TCP 5000 only from listed Joining Player IPs. This keeps the Trusted-LAN boundary approximately true: the VPS plus its firewall stands in for the private network.
+Access control is a Vultr firewall group: TCP 22 only from the Session Host's public IP, TCP 5000 only from listed Joining Player IPs (or from anyone, with `-OpenRelay`; see below). This keeps the Trusted-LAN boundary approximately true: the VPS plus its firewall stands in for the private network.
 
 ## Prerequisites (Session Host PC)
 
@@ -28,19 +28,26 @@ Deleting the VPS is the only way to stop billing (Vultr bills stopped instances 
 - SSH key `multimnesia-vps`.
 - Firewall group with description `multimnesia-vps`: TCP 22 from the Session Host's public IP, TCP 5000 from each Joining Player IP allowed so far.
 
+## Before the session: decide who may join
+
+The one snag of the first run: the Vultr firewall silently dropped the Joining Player's connection because their public IP was not allowed, so `/join` just timed out. `up.ps1` now refuses to create a VPS until one of these is chosen:
+
+- **`-JoinerIp <ip>` (default choice):** only that IP reaches the relay. Ask the Joining Player for it *before* the session: `curl.exe -s https://api.ipify.org`. `-JoinerIp self` is the Session Host's own public IP (both PCs on one LAN). Allowed IPs stay in the firewall group, but home IPs change, so ask again each time.
+- **`-OpenRelay`:** no IP needed; the relay port accepts anyone until `down.ps1` removes the rule. This drops the Trusted-LAN boundary for the session: the relay is unauthenticated, so internet scanners can connect, take the one join slot before the Joining Player does, or fill the log with rejected handshakes (seen as "A player is attempting to join."). The protocol still cannot run code on either machine. SSH stays restricted to the Session Host.
+
 ## Running a test
 
-1. `.\scripts\vps\up.ps1 -JoinerIp <joining-player-public-ip>`: allows that IP and creates the VPS (`vc2-1c-1gb` in `fra`, Debian 13; $5/mo cap, billed hourly; the listed free plan was refused for this account in `fra`). Without `-JoinerIp` it allows this PC's own public IP. Rerunning only adds missing rules and leaves a running VPS alone, so it also admits another IP mid-session.
+1. `.\scripts\vps\up.ps1 -JoinerIp <ip>` (or `-OpenRelay`): creates the VPS (`vc2-1c-1gb` in `fra`, Debian 13; $5/mo cap, billed hourly; the listed free plan was refused for this account in `fra`). Rerunning only adds missing rules and leaves a running VPS alone, so it also admits another IP mid-session.
 2. Start the game and Game Peer, type `/host`.
 3. `.\scripts\vps\tunnel.ps1` and keep the window open.
 4. Joining Player: `/join <vps-ip>` (printed by both scripts).
-5. **Always:** `.\scripts\vps\down.ps1` afterwards to stop billing. Confirm with `vultr-cli instance list`.
+5. **Always:** `.\scripts\vps\down.ps1` afterwards to stop billing; it also closes an `-OpenRelay` rule. Confirm with `vultr-cli instance list`.
 
-The Joining Player finds their public IP with `curl.exe -s https://api.ipify.org` and checks the path with `Test-NetConnection <vps-ip> -Port 5000`. Ping always fails: the firewall group allows no ICMP.
+The Joining Player can check the path with `Test-NetConnection <vps-ip> -Port 5000`. Ping always fails: the firewall group allows no ICMP.
 
 ## Troubleshooting
 
-- **Join times out and the host log shows no handshake:** the Vultr firewall dropped it because the Joining Player's public IP is not allowed (home IPs change). Rerun `up.ps1 -JoinerIp <ip>`; rule changes take up to a minute.
+- **Join times out and the host log shows no handshake:** the Vultr firewall dropped it because the Joining Player's public IP is not allowed (home IPs change). Rerun `up.ps1 -JoinerIp <ip>` (or `-OpenRelay`); rule changes take up to a minute.
 - **`up.ps1`/`tunnel.ps1` cannot SSH:** the Session Host's own public IP changed; rerunning `up.ps1` adds a port 22 rule for the current one. Remove stale rules with `vultr-cli firewall rule delete <group-id> <rule-number>`.
 - **`REMOTE HOST IDENTIFICATION HAS CHANGED`:** Vultr reused an IP from an earlier VPS; run `ssh-keygen -R <vps-ip>`.
 - **Unexpected `HandshakeRejected` in the host log:** every `Test-NetConnection` to the VPS reaches the relay and is logged that way; harmless.
