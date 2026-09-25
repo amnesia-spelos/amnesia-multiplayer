@@ -1,0 +1,16 @@
+#cloud-config
+# Turns a fresh Vultr Debian instance into a dumb TCP forwarder for the Multiplayer Relay port.
+# The 00- prefix makes these settings win: sshd keeps the first value it reads for each option.
+write_files:
+  - path: /etc/ssh/sshd_config.d/00-multimnesia.conf
+    content: |
+      # Lets the Session Host's `ssh -R 0.0.0.0:5000:...` bind the public interface.
+      GatewayPorts clientspecified
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      ClientAliveInterval 15
+      ClientAliveCountMax 3
+runcmd:
+  # Vultr's Debian image ships ufw enabled for SSH only; the Vultr firewall group is the access control.
+  - if command -v ufw >/dev/null; then ufw allow 5000/tcp; fi
+  - systemctl restart ssh
