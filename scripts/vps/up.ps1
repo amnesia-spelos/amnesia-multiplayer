@@ -2,8 +2,18 @@
 .SYNOPSIS
 Creates the forwarding VPS (and its free SSH key and firewall group, if missing).
 
+Who may reach the Multiplayer Relay port must be chosen explicitly, before the session:
+-JoinerIp (allowlist) or -OpenRelay (anyone, until down.ps1). Forgetting this was the one
+snag of the first run: the firewall silently drops the join, which times out.
+
 .PARAMETER JoinerIp
-Public IPv4 addresses allowed to reach the Multiplayer Relay port. Defaults to this PC's public IP.
+Public IPv4 addresses allowed to reach the Multiplayer Relay port. The Joining Player gets theirs
+with `curl.exe -s https://api.ipify.org`. `self` means this PC's public IP (both PCs on one LAN).
+Allowed IPs stay in the firewall group across VPSes.
+
+.PARAMETER OpenRelay
+Allow the Multiplayer Relay port from any IPv4 address until down.ps1 removes the rule. No IP needs
+to be known, but the unauthenticated relay is then public: scanners can take the one join slot.
 
 .PARAMETER Plan
 vc2-1c-1gb is $5/mo billed hourly. The listed free plan (vc2-1c-0.5gb-free) was refused for this
@@ -14,6 +24,7 @@ Only ensure the SSH key and firewall group exist; create no instance (costs noth
 #>
 param(
     [string[]]$JoinerIp,
+    [switch]$OpenRelay,
     [string]$Region = 'fra',
     [string]$Plan = 'vc2-1c-1gb',
     [int]$OsId = 2625, # Debian 13 x64 (trixie)
@@ -22,7 +33,10 @@ param(
 . (Join-Path $PSScriptRoot 'common.ps1')
 
 $hostIp = Get-PublicIp
-if (-not $JoinerIp) { $JoinerIp = @($hostIp) }
+$JoinerIp = @($JoinerIp | Where-Object { $_ } | ForEach-Object { if ($_ -eq 'self') { $hostIp } else { $_ } })
+if (-not $PrepareOnly -and -not $JoinerIp -and -not $OpenRelay -and -not (Get-VpsInstance)) {
+    throw 'Choose who may join: -JoinerIp <their public IP> (they run: curl.exe -s https://api.ipify.org), -JoinerIp self, or -OpenRelay.'
+}
 
 # SSH key: the private half lives in the Bitwarden agent; only the public key is uploaded.
 if (-not (Test-Path $PublicKeyPath)) { throw "Public key not found at $PublicKeyPath." }
@@ -40,12 +54,13 @@ if (-not $group) {
     Write-Host "Created firewall group $($group.id)."
 }
 $rules = @((Invoke-Vultr firewall rule list $group.id).firewall_rules)
-$wanted = @(@{ Port = '22'; Ip = $hostIp; Note = 'Session Host SSH' }) +
-    @($JoinerIp | ForEach-Object { @{ Port = "$RelayPort"; Ip = $_; Note = 'Joining Player relay' } })
+$wanted = @(@{ Port = '22'; Ip = $hostIp; Size = 32; Note = 'Session Host SSH' }) +
+    @($JoinerIp | ForEach-Object { @{ Port = "$RelayPort"; Ip = $_; Size = 32; Note = 'Joining Player relay' } })
+if ($OpenRelay) { $wanted += @{ Port = "$RelayPort"; Ip = '0.0.0.0'; Size = 0; Note = $OpenRelayNote } }
 foreach ($rule in $wanted) {
-    if ($rules | Where-Object { $_.port -eq $rule.Port -and $_.subnet -eq $rule.Ip -and $_.subnet_size -eq 32 }) { continue }
-    Invoke-Vultr firewall rule create $group.id -t v4 -p tcp -r $rule.Port -s $rule.Ip -z 32 -n $rule.Note | Out-Null
-    Write-Host "Allowed TCP $($rule.Port) from $($rule.Ip)."
+    if ($rules | Where-Object { $_.port -eq $rule.Port -and $_.subnet -eq $rule.Ip -and $_.subnet_size -eq $rule.Size }) { continue }
+    Invoke-Vultr firewall rule create $group.id -t v4 -p tcp -r $rule.Port -s $rule.Ip -z $rule.Size -n $rule.Note | Out-Null
+    Write-Host "Allowed TCP $($rule.Port) from $($rule.Ip)/$($rule.Size)."
 }
 
 if ($PrepareOnly) { Write-Host 'Prepared; no instance created.'; return }
