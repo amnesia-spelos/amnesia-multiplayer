@@ -35,6 +35,18 @@ The one snag of the first run: the Vultr firewall silently dropped the Joining P
 - **`-JoinerIp <ip>` (default choice):** only that IP reaches the relay. Ask the Joining Player for it *before* the session: `curl.exe -s https://api.ipify.org`. `-JoinerIp self` is the Session Host's own public IP (both PCs on one LAN). Allowed IPs stay in the firewall group, but home IPs change, so ask again each time.
 - **`-OpenRelay`:** no IP needed; the relay port accepts anyone until `down.ps1` removes the rule. This drops the Trusted-LAN boundary for the session: the relay is unauthenticated, so internet scanners can connect, take the one join slot before the Joining Player does, or fill the log with rejected handshakes (seen as "A player is attempting to join."). The protocol still cannot run code on either machine. SSH stays restricted to the Session Host.
 
+## Choosing a region
+
+Latency is roughly Session Host→VPS plus Joining Player→VPS, so any region *along the route* between the players gives about the same total; only an off-route region hurts. Pick the region with the lowest sum of both players' pings to Vultr's test endpoints (`<name>-ping.vultr.com`; ICMP):
+
+```powershell
+'fra-de','ams-nl','nj-us','il-us','wa-us','sjo-ca-us','lax-ca-us' | % { $r = Test-Connection "$_-ping.vultr.com" -Count 3; "$_ $([int]($r.Latency | Measure -Average).Average) ms" }
+```
+
+Endpoint → region code: `fra-de`→`fra`, `ams-nl`→`ams`, `nj-us`→`ewr`, `il-us`→`ord`, `wa-us`→`sea`, `sjo-ca-us`→`sjc`, `lax-ca-us`→`lax`. Switch with `up.ps1 -Region <code>`. The plan exists everywhere at the same price, and the SSH key and firewall group are account-wide.
+
+Session Host's measurements (2026-09-25): `fra` 17 ms, `ewr` 101, `ord` 123, `sea` 159, `sjc` 167, `lax` 169. For the planned run with a Joining Player in Portland, Oregon, `sea` (≈167 ms total) is expected to edge out `fra` (≈170–175 ms); confirm with their pings.
+
 ## Running a test
 
 1. `.\scripts\vps\up.ps1 -JoinerIp <ip>` (or `-OpenRelay`): creates the VPS (`vc2-1c-1gb` in `fra`, Debian 13; $5/mo cap, billed hourly; the listed free plan was refused for this account in `fra`). Rerunning only adds missing rules and leaves a running VPS alone, so it also admits another IP mid-session.
