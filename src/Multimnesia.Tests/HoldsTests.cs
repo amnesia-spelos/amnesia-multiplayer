@@ -30,6 +30,14 @@ public sealed class HoldsTests
 
     private static GameEvent.ReportedBodies Report(ulong timeMs, params BodyEntry[] entries) => new(timeMs, entries, Map);
 
+    private static LanMessage.Pose PoseOn(string map) => new(1000, 0, 0, 0, 0, 0, 0, false, false, map);
+
+    private static GameEvent LocalPoseOn(string map) => new GameEvent.LocalPoseReported(new(1000, 0, 0, 0, 0, 0, 0, false, false, map));
+
+    private bool LoggedHoldEnding(string holder, string reason) => _game.Logged.Any(entry =>
+        entry.Event == LocalGameEventName.HoldEnded &&
+        entry.Line.StartsWith(holder, StringComparison.Ordinal) && entry.Line.EndsWith(reason, StringComparison.Ordinal));
+
     private async Task<Holds> CreatePresentHoldsAsync()
     {
         var holds = CreateHolds();
@@ -68,6 +76,110 @@ public sealed class HoldsTests
         Assert.Empty(_game.Lines);
         Assert.Empty(_sessions.SentHoldMessages);
         Assert.Empty(_sessions.SentBodies);
+    }
+
+    [Fact]
+    public async Task The_other_player_departing_returns_their_entities_to_local_physics_and_forgets_their_Holds()
+    {
+        var holds = await CreatePresentHoldsAsync();
+        holds.HandleReceivedHoldMessage(ClaimOf12);
+        await _game.WaitForLinesAsync(2);
+
+        _sessions.SetPresent(false);
+        await _game.WaitForLinesAsync(4);
+
+        Assert.Equal([Subscribe, Drive, Unsubscribe, Release], _game.Lines);
+        Assert.True(LoggedHoldEnding("The other player's Hold on entity 12", "the other player left."));
+    }
+
+    [Fact]
+    public async Task A_replacement_player_starts_with_a_clean_slate()
+    {
+        var holds = await CreatePresentHoldsAsync();
+        holds.HandleReceivedHoldMessage(ClaimOf12);
+        await holds.HandleLocalGameEventAsync(new GameEvent.InteractionStarted(40, 0, Map));
+        await _game.WaitForLinesAsync(2);
+
+        _sessions.SetPresent(false);
+        await _game.WaitForLinesAsync(4);
+        _sessions.SetPresent(true);
+        await _game.WaitForLinesAsync(5);
+        // The replacement never Claimed 12, and the local player's Hold on 40 is unknown to them, so it is Claimed anew.
+        holds.HandleReceivedHoldMessage(new LanMessage.Interaction(Map, 12, 3, true));
+        await holds.HandleLocalGameEventAsync(new GameEvent.InteractionStarted(40, 0, Map));
+        holds.HandleReceivedHoldMessage(ClaimOf12);
+        await _game.WaitForLinesAsync(6);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        Assert.Equal([Subscribe, Drive, Unsubscribe, Release, Subscribe, Drive], _game.Lines);
+        LanMessage.HoldMessage claimOf40 = new LanMessage.Claim(Map, 40, ClaimReason.Interact);
+        Assert.Equal(2, _sessions.SentHoldMessages.Count(message => message == claimOf40));
+        Assert.True(LoggedHoldEnding("The local player's Hold on entity 40", "the other player left."));
+    }
+
+    [Fact]
+    public async Task A_replacement_without_a_departure_in_between_also_starts_with_a_clean_slate()
+    {
+        var holds = await CreatePresentHoldsAsync();
+        holds.HandleReceivedHoldMessage(ClaimOf12);
+        await _game.WaitForLinesAsync(2);
+
+        _sessions.Replace();
+        await _game.WaitForLinesAsync(3);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        Assert.Equal([Subscribe, Drive, Release], _game.Lines);
+    }
+
+    [Fact]
+    public async Task The_Holder_leaving_the_map_returns_their_entities_there_to_local_physics()
+    {
+        var holds = await CreatePresentHoldsAsync();
+        holds.HandleReceivedHoldMessage(ClaimOf12);
+        await _game.WaitForLinesAsync(2);
+
+        holds.HandleReceivedPose(PoseOn(Map));
+        holds.HandleReceivedPose(PoseOn("maps/other.map"));
+        holds.HandleReceivedBodies(new(1000, Map, [new(12, 3, Carried)]));
+        await _game.WaitForLinesAsync(3);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        Assert.Equal([Subscribe, Drive, Release], _game.Lines);
+        Assert.True(LoggedHoldEnding("The other player's Hold on entity 12", "the other player left the map."));
+    }
+
+    [Fact]
+    public async Task The_local_player_changing_map_forgets_the_Holds_on_the_map_they_left()
+    {
+        var holds = await CreatePresentHoldsAsync();
+        await holds.HandleLocalGameEventAsync(LocalPoseOn(Map));
+        holds.HandleReceivedHoldMessage(ClaimOf12);
+        await holds.HandleLocalGameEventAsync(new GameEvent.InteractionStarted(40, 0, Map));
+        await _game.WaitForLinesAsync(2);
+
+        // The local game released its Peer-Driven Entities and emptied its report with the map change, so nothing is written.
+        await holds.HandleLocalGameEventAsync(LocalPoseOn("maps/other.map"));
+        holds.HandleReceivedBodies(new(1000, Map, [new(12, 3, Carried)]));
+        await holds.HandleLocalGameEventAsync(Report(1000, new BodyEntry(40, 0, Carried)));
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        Assert.Equal([Subscribe, Drive], _game.Lines);
+        Assert.Empty(_sessions.SentBodies);
+        Assert.True(LoggedHoldEnding("The other player's Hold on entity 12", "the local player left the map."));
+        Assert.True(LoggedHoldEnding("The local player's Hold on entity 40", "the local player left the map."));
+    }
+
+    [Fact]
+    public async Task A_grab_on_a_new_map_ends_the_Holds_on_the_map_the_local_player_left_before_it_is_Claimed()
+    {
+        var holds = await CreatePresentHoldsAsync();
+        await holds.HandleLocalGameEventAsync(Grab);
+
+        await holds.HandleLocalGameEventAsync(new GameEvent.InteractionStarted(12, 3, "maps/other.map"));
+        await holds.HandleLocalGameEventAsync(Grab);
+
+        Assert.Equal(3, _sessions.SentHoldMessages.Count(message => message is LanMessage.Claim));
+        Assert.True(LoggedHoldEnding("The local player's Hold on entity 12", "the local player left the map."));
     }
 
     [Fact]
@@ -365,6 +477,13 @@ public sealed class HoldsTests
         public void SetPresent(bool present)
         {
             Volatile.Write(ref _currentArrival, present ? Interlocked.Increment(ref _arrivalCount) : 0);
+            OtherPlayerPresenceChanged?.Invoke();
+        }
+
+        // A Session Host can admit a replacement Joining Player before it notices the departure.
+        public void Replace()
+        {
+            Volatile.Write(ref _currentArrival, Interlocked.Increment(ref _arrivalCount));
             OtherPlayerPresenceChanged?.Invoke();
         }
 

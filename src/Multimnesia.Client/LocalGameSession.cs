@@ -54,6 +54,7 @@ public sealed class LocalGameSession(
     string? connectedNotice = null)
 {
     public const string AvatarsUnsupportedNotice = "Your game does not support Avatars; movement will not be shared.";
+    public const string InteractionsUnsupportedNotice = "Your game does not support interactions; moving props will not be shared.";
 
     // Completes when the local game answers the negotiation; every other write waits for it.
     private readonly TaskCompletionSource<ProtocolNegotiation> _negotiation = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -137,6 +138,7 @@ public sealed class LocalGameSession(
             pose =>
             {
                 sharedPose.HandleReceivedPose(pose);
+                holds.HandleReceivedPose(pose);
                 return ValueTask.CompletedTask;
             },
             // Never blocks, and never waits behind the Pose gate: Hold lines are written to the local game later, in order.
@@ -206,7 +208,14 @@ public sealed class LocalGameSession(
             Log(negotiation.GrantsSharedPose ? ConnectionLogSeverity.Information : ConnectionLogSeverity.Warning,
                 LocalGameEventName.ProtocolNegotiated, negotiation: negotiation);
             _negotiation.TrySetResult(negotiation);
-            if (!negotiation.GrantsSharedPose) _ = RunIgnoringDisconnectAsync(DisplaySystemAsync(AvatarsUnsupportedNotice).AsTask());
+            _ = RunIgnoringDisconnectAsync(DisplayUnsupportedNoticesAsync(negotiation));
+        }
+
+        // The Session carries on without what the local game does not support, and the player is told once per Session.
+        async Task DisplayUnsupportedNoticesAsync(ProtocolNegotiation negotiation)
+        {
+            if (!negotiation.GrantsSharedPose) await DisplaySystemAsync(AvatarsUnsupportedNotice);
+            if (!negotiation.GrantsInteractions) await DisplaySystemAsync(InteractionsUnsupportedNotice);
         }
 
         async Task HandleCommandAsync(GamePeerOrchestrator orchestrator, ChatEntry entry)

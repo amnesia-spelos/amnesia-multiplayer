@@ -9,6 +9,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
 {
     private const string Negotiate = "protocol 2 avatars localpose interactions";
     private const string AvatarsUnsupportedNotice = "chat:SYSTEM:Your game does not support Avatars; movement will not be shared.";
+    private const string InteractionsUnsupportedNotice = "chat:SYSTEM:Your game does not support interactions; moving props will not be shared.";
     private readonly CancellationTokenSource _cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
     private readonly FakeSessionOperations _sessions = new();
     private readonly List<LocalGameLogEntry> _log = [];
@@ -81,6 +82,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         await game.ReadLineAsync();
 
         await game.SendAsync("RESPONSE protocol ok 2 avatars localpose");
+        Assert.Equal(InteractionsUnsupportedNotice, await game.ReadLineAsync());
         await _callbacks.DisplaySystem("marker");
 
         Assert.Equal("chat:SYSTEM:marker", await game.ReadLineAsync());
@@ -99,7 +101,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
     [InlineData("RESPONSE protocol unsupported-version", "unsupported-version")]
     [InlineData("RESPONSE protocol invalid", "invalid")]
     [InlineData("WARNING:Unknown command", "unknown-command")]
-    public async Task Other_outcomes_leave_the_Session_on_the_legacy_protocol_with_one_SYSTEM_notice(string response, string outcome)
+    public async Task Other_outcomes_leave_the_Session_on_the_legacy_protocol_with_SYSTEM_notices(string response, string outcome)
     {
         var (game, session, _) = await ConnectAsync();
         await using var _ = game;
@@ -108,6 +110,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         await game.SendAsync(response);
 
         Assert.Equal(AvatarsUnsupportedNotice, await game.ReadLineAsync());
+        Assert.Equal(InteractionsUnsupportedNotice, await game.ReadLineAsync());
         Assert.False(session.IsSharedPoseAvailable);
         var logged = Assert.Single(_log, entry => entry.Event == LocalGameEventName.ProtocolNegotiated);
         Assert.Equal(ConnectionLogSeverity.Warning, logged.Severity);
@@ -133,6 +136,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
 
         Assert.Equal("chat:SYSTEM:Version line.", await game.ReadLineAsync());
         Assert.Equal(AvatarsUnsupportedNotice, await game.ReadLineAsync());
+        Assert.Equal(InteractionsUnsupportedNotice, await game.ReadLineAsync());
     }
 
     [Fact]
@@ -143,6 +147,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         await game.ReadLineAsync();
         await game.SendAsync("WARNING:Unknown command");
         Assert.Equal(AvatarsUnsupportedNotice, await game.ReadLineAsync());
+        Assert.Equal(InteractionsUnsupportedNotice, await game.ReadLineAsync());
 
         await _callbacks.ReceiveChat(new ChatEntry("Bob", "hello"));
         Assert.Equal("chat:Bob:hello", await game.ReadLineAsync());
@@ -191,6 +196,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         var (game, _, _) = await ConnectAsync();
         Assert.Equal(Negotiate, await game.ReadLineAsync());
         await game.SendAsync("RESPONSE protocol ok 2 avatars localpose");
+        Assert.Equal(InteractionsUnsupportedNotice, await game.ReadLineAsync());
         _sessions.SetPresent(true);
         Assert.Equal("avatarcreate partner", await game.ReadLineAsync());
         Assert.Equal("localpose subscribe 30", await game.ReadLineAsync());
@@ -260,11 +266,13 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         Assert.Equal(Negotiate, await game.ReadLineAsync());
         await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions");
         _sessions.SetPresent(true);
-        // The Shared Pose and the Holds set up independently, so their lines may interleave.
-        string?[] setup = [await game.ReadLineAsync(), await game.ReadLineAsync(), await game.ReadLineAsync()];
-        Assert.Equal(["avatarcreate partner", "localpose subscribe 30", "reportedbodies subscribe 30"], setup.Order());
+        Assert.Equal(["avatarcreate partner", "localpose subscribe 30", "reportedbodies subscribe 30"], await ReadSetupAsync(game));
         return game;
     }
+
+    // The Shared Pose and the Holds set up independently, so their lines may interleave.
+    private static async Task<string[]> ReadSetupAsync(FakeGame game) =>
+        [.. new[] { (await game.ReadLineAsync())!, (await game.ReadLineAsync())!, (await game.ReadLineAsync())! }.Order()];
 
     [Fact]
     public async Task A_grab_and_throw_in_the_local_game_is_Claimed_and_streamed_to_the_other_player()
@@ -305,6 +313,20 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task The_other_player_walking_into_another_map_returns_the_entity_they_Hold_to_local_physics()
+    {
+        await using var game = await ConnectWithHoldsAsync();
+
+        await _callbacks.ReceivePose(ReceivedPose with { Map = HoldMap });
+        await _callbacks.ReceiveHoldMessage(new LanMessage.Claim(HoldMap, 12, ClaimReason.Interact));
+        await _callbacks.ReceivePose(ReceivedPose with { TimeMs = ReceivedPose.TimeMs + 33 });
+
+        string? line;
+        do line = await game.ReadLineAsync(); while (line!.StartsWith("avatarpose ", StringComparison.Ordinal) || line == $"entitydrive 12 {HoldMap}");
+        Assert.Equal($"entityrelease 12 {HoldMap}", line);
+    }
+
+    [Fact]
     public async Task After_a_local_game_reconnect_the_Avatar_is_recreated_and_received_Poses_drive_it_again()
     {
         _sessions.SetPresent(true);
@@ -321,17 +343,15 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         {
             await first.SendAsync("Welcome");
             Assert.Equal(Negotiate, await first.ReadLineAsync());
-            await first.SendAsync("RESPONSE protocol ok 2 avatars localpose");
-            Assert.Equal("avatarcreate partner", await first.ReadLineAsync());
-            Assert.Equal("localpose subscribe 30", await first.ReadLineAsync());
+            await first.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions");
+            Assert.Equal(["avatarcreate partner", "localpose subscribe 30", "reportedbodies subscribe 30"], await ReadSetupAsync(first));
         }
 
         await second.SendAsync("Welcome");
         Assert.Equal(Negotiate, await second.ReadLineAsync());
-        await second.SendAsync("RESPONSE protocol ok 2 avatars localpose");
+        await second.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions");
 
-        Assert.Equal("avatarcreate partner", await second.ReadLineAsync());
-        Assert.Equal("localpose subscribe 30", await second.ReadLineAsync());
+        Assert.Equal(["avatarcreate partner", "localpose subscribe 30", "reportedbodies subscribe 30"], await ReadSetupAsync(second));
         await _callbacks.ReceivePose(ReceivedPose);
         Assert.StartsWith("avatarpose partner 123456 ", await second.ReadLineAsync());
         await _cancellation.CancelAsync();
