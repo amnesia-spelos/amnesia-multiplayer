@@ -206,6 +206,23 @@ Run this one from the extracted release archive on two PCs, never from a dev bui
 
 If either PC's game is an older build without Avatar support, that player sees `Your game does not support Avatars; movement will not be shared.` and chat and Custom Story starts keep working. If the skeleton entity is missing from a game folder, that player sees `The Avatar model is not installed; the other player will be invisible.` Both are degraded modes, not failures of the walkthrough — but a release archive extracted correctly should produce neither.
 
+### Hold endings walkthrough
+
+Run this after any change to how Holds end (#37). Use the Release Game Peer from `src/Multimnesia.Client/bin/Release/net10.0/` on both PCs, built from the same commit, and the game build with `interactions`. Install `mp-test-cs` on both PCs. Each step names who does what. PC B is the Holder unless the step says otherwise. Read Hold endings in the Game Peer log (`logs\game-peer-*.log` next to the exe). Each one is a `HoldEnded` line ending in its reason, for example `The other player's Hold on entity 72 on custom_stories/mp-test-cs/maps/multiplayer-test.map ended: the other player left.`
+
+Setup: on PC A, `/host`. On PC B, `/join <PC A's LAN address>`. On PC A, start "Amnesia Multiplayer Test", and confirm both players are in `multiplayer-test.map` and see each other's Avatar. Pick a small grabbable prop such as the bottle, and note its entity ID from the first `HoldClaimed` line.
+
+1. **Baseline.** B picks up the prop, carries it, and drops it. A sees it move with B and land where B sees it land. Both logs end the Hold with `settled.` Then A picks it up, and B sees it move.
+2. **Departure while holding.** B picks up the prop and keeps holding it. B types `/leave`. On PC A the prop falls from where B held it, under A's own physics, and A can pick it up. A's log ends the Hold with `the other player left.`, and so does B's (`The local player's Hold ...`).
+3. **Clean slate for a replacement.** B lets go, then `/join`s again without restarting the story. B picks up the same prop. A sees it move. B's log shows a new `HoldClaimed` for it, not a continued Hold. A's log has no `HoldCommandFailed` for that entity.
+4. **Crash while holding.** B picks up the prop and keeps holding it, then closes B's Game Peer console window. A sees `A player disconnected.`, either right away or once the heartbeat timeout passes. The prop falls on PC A and A can pick it up, and A's log ends the Hold with `the other player left.` Restart B's Game Peer, `/join` again, and restart the story from PC A.
+5. **The Holder leaves the map.** Standing next to the level door, B throws the prop and uses the door straight away, before the prop settles (about 3 seconds). If B's log ends the Hold with `settled.` first, try again. On PC A the prop finishes falling under A's physics and A can pick it up. A's log ends the Hold with `the other player left the map.`, and B's ends B's own with `the local player left the map.` Bring B back by restarting the story from PC A, not through the door: after a level door the map path is spelled differently (amnesia-tdd-tcp#64).
+6. **The receiving player leaves the map.** B picks up the prop and keeps holding it, and A walks through the level door. A's log ends the Hold with `the local player left the map.` There is no `HoldCommandFailed` `entityrelease ... wrong-map` line. B drops the prop and lets it settle; otherwise the restart runs into the gap in step 8. Then restart the story from PC A.
+7. **The Holder's own entry is gone.** After the story restart that ends step 5, B picks up the prop again. B's log shows a fresh `HoldClaimed` for it, not a continued Hold, and A sees it move.
+8. **Known gap, not a failure: reload of the same map.** B picks up the prop and keeps holding it, and A restarts the story. Neither log ends the Hold, and the prop may stop syncing until both Game Peers are restarted. This is tracked in amnesia-tdd-tcp#67. Note what you see, but don't count it as a failure.
+
+If a game lacks `interactions` (an older build), that player sees `Your game does not support interactions; moving props will not be shared.` once after connecting. Their Game Peer writes no `entity...` or `reportedbodies` lines, and chat and Avatars keep working.
+
 ## Expected behavior and limitations
 
 Whisper is a vertical slice: two players host, join, chat, start the same Custom Story together, and see each other move. What that slice does *not* cover:
