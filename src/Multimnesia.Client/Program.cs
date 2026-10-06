@@ -38,7 +38,9 @@ await LocalGameSession.RunReconnectingAsync(
             log: entry => log.Write(entry.Severity, RelayLog.Format(entry)),
             receiveCustomStoryStarted: callbacks.ReceiveCustomStoryStarted,
             receiveCustomStoryStartOutcome: callbacks.ReceiveCustomStoryStartOutcome,
-            receivePose: callbacks.ReceivePose),
+            receivePose: callbacks.ReceivePose,
+            receiveHoldMessage: callbacks.ReceiveHoldMessage,
+            receiveBodies: callbacks.ReceiveBodies),
         entry =>
         {
             if (entry.Event == LocalGameEventName.Connected)

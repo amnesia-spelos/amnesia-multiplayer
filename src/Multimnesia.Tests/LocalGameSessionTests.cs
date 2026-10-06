@@ -7,7 +7,7 @@ namespace Multimnesia.Tests;
 
 public sealed class LocalGameSessionTests : IAsyncDisposable
 {
-    private const string NegotiateSharedPose = "protocol 2 avatars localpose";
+    private const string Negotiate = "protocol 2 avatars localpose interactions";
     private const string AvatarsUnsupportedNotice = "chat:SYSTEM:Your game does not support Avatars; movement will not be shared.";
     private readonly CancellationTokenSource _cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
     private readonly FakeSessionOperations _sessions = new();
@@ -40,7 +40,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         var (game, _, _) = await ConnectAsync();
         await using var _ = game;
 
-        Assert.Equal(NegotiateSharedPose, await game.ReadLineAsync());
+        Assert.Equal(Negotiate, await game.ReadLineAsync());
     }
 
     [Fact]
@@ -48,7 +48,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
     {
         var (game, _, _) = await ConnectAsync();
         await using var _ = game;
-        Assert.Equal(NegotiateSharedPose, await game.ReadLineAsync());
+        Assert.Equal(Negotiate, await game.ReadLineAsync());
 
         var display = _callbacks.ReceiveChat(new ChatEntry("Bob", "hello")).AsTask();
 
@@ -127,7 +127,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
             game.PeerStream, callbacks => { _callbacks = callbacks; return _sessions; }, _ => { }, connectedNotice: "Version line.");
         _ = session.RunAsync(_cancellation.Token);
         await game.SendAsync("Welcome to the Amnesia TCP server!");
-        Assert.Equal(NegotiateSharedPose, await game.ReadLineAsync());
+        Assert.Equal(Negotiate, await game.ReadLineAsync());
 
         await game.SendAsync("WARNING:Unknown command");
 
@@ -172,11 +172,11 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         await using (first)
         {
             await first.SendAsync("Welcome");
-            Assert.Equal(NegotiateSharedPose, await first.ReadLineAsync());
+            Assert.Equal(Negotiate, await first.ReadLineAsync());
         }
         await second.SendAsync("Welcome");
 
-        Assert.Equal(NegotiateSharedPose, await second.ReadLineAsync());
+        Assert.Equal(Negotiate, await second.ReadLineAsync());
         Assert.Equal([1], losses);
         await _cancellation.CancelAsync();
         await run;
@@ -189,7 +189,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
     private async Task<FakeGame> ConnectWithSharedPoseAsync()
     {
         var (game, _, _) = await ConnectAsync();
-        Assert.Equal(NegotiateSharedPose, await game.ReadLineAsync());
+        Assert.Equal(Negotiate, await game.ReadLineAsync());
         await game.SendAsync("RESPONSE protocol ok 2 avatars localpose");
         _sessions.SetPresent(true);
         Assert.Equal("avatarcreate partner", await game.ReadLineAsync());
@@ -250,6 +250,60 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         }
     }
 
+    private const string HoldMap = "custom_stories/mp-test-cs/maps/holds room.map";
+    private const string ReportedBody = "12 3 1.2500 -2.5000 3.7500 0.0000 0.0000 0.0000 1.0000 0.5000 0.0000 -1.0000 0.0000 90.0000 0.0000";
+    private static readonly BodyEntry ReportedEntry = new(12, 3, new BodyState(1.25, -2.5, 3.75, 0, 0, 0, 1, 0.5, 0, -1, 0, 90, 0));
+
+    private async Task<FakeGame> ConnectWithHoldsAsync()
+    {
+        var (game, _, _) = await ConnectAsync();
+        Assert.Equal(Negotiate, await game.ReadLineAsync());
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions");
+        _sessions.SetPresent(true);
+        // The Shared Pose and the Holds set up independently, so their lines may interleave.
+        string?[] setup = [await game.ReadLineAsync(), await game.ReadLineAsync(), await game.ReadLineAsync()];
+        Assert.Equal(["avatarcreate partner", "localpose subscribe 30", "reportedbodies subscribe 30"], setup.Order());
+        return game;
+    }
+
+    [Fact]
+    public async Task A_grab_and_throw_in_the_local_game_is_Claimed_and_streamed_to_the_other_player()
+    {
+        await using var game = await ConnectWithHoldsAsync();
+
+        await game.SendAsync($"EVENT interactionstart 12 3 {HoldMap}");
+        await game.SendAsync($"STATE reportedbodies 1000 1 {ReportedBody} {HoldMap}");
+        await game.SendAsync($"EVENT interactionend 12 3 thrown {HoldMap}");
+        await game.SendAsync($"EVENT reportsettled 12 {HoldMap}");
+
+        await WaitUntilAsync(() => _sessions.SentHoldMessages.Count == 4);
+        Assert.Equal(
+            [
+                new LanMessage.Claim(HoldMap, 12, ClaimReason.Interact), new LanMessage.Interaction(HoldMap, 12, 3, true),
+                new LanMessage.Interaction(HoldMap, 12, 3, false), new LanMessage.Settled(HoldMap, 12)
+            ],
+            _sessions.SentHoldMessages);
+        Assert.Equal([new LanMessage.Bodies(1000, HoldMap, [ReportedEntry])], _sessions.SentBodies);
+    }
+
+    [Fact]
+    public async Task Hold_messages_are_written_while_Poses_wait_for_the_local_game_frozen_loading()
+    {
+        await using var game = await ConnectWithHoldsAsync();
+
+        for (ulong time = 0; time < 10_000; time++) await _callbacks.ReceivePose(ReceivedPose with { TimeMs = time });
+        await _callbacks.ReceiveHoldMessage(new LanMessage.Claim(HoldMap, 12, ClaimReason.Interact));
+        await _callbacks.ReceiveBodies(new LanMessage.Bodies(1000, HoldMap, [ReportedEntry]));
+
+        var ahead = new List<string>();
+        for (var line = await game.ReadLineAsync(); line != $"entitydrive 12 {HoldMap}"; line = await game.ReadLineAsync())
+            ahead.Add(line!);
+        Assert.True(ahead.Count <= SharedPose.MaxUnconfirmedPoses + 1, $"{ahead.Count} lines were written ahead of the Claim.");
+        string? next;
+        do next = await game.ReadLineAsync(); while (next!.StartsWith("avatarpose ", StringComparison.Ordinal) || next == "ping");
+        Assert.Equal($"entitybodies 1000 1 {ReportedBody} {HoldMap}", next);
+    }
+
     [Fact]
     public async Task After_a_local_game_reconnect_the_Avatar_is_recreated_and_received_Poses_drive_it_again()
     {
@@ -266,14 +320,14 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         await using (first)
         {
             await first.SendAsync("Welcome");
-            Assert.Equal(NegotiateSharedPose, await first.ReadLineAsync());
+            Assert.Equal(Negotiate, await first.ReadLineAsync());
             await first.SendAsync("RESPONSE protocol ok 2 avatars localpose");
             Assert.Equal("avatarcreate partner", await first.ReadLineAsync());
             Assert.Equal("localpose subscribe 30", await first.ReadLineAsync());
         }
 
         await second.SendAsync("Welcome");
-        Assert.Equal(NegotiateSharedPose, await second.ReadLineAsync());
+        Assert.Equal(Negotiate, await second.ReadLineAsync());
         await second.SendAsync("RESPONSE protocol ok 2 avatars localpose");
 
         Assert.Equal("avatarcreate partner", await second.ReadLineAsync());
@@ -391,6 +445,17 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         }
 
         public void SendPose(LanMessage.Pose pose) { lock (_sentPoses) _sentPoses.Add(pose); }
+        public List<LanMessage.HoldMessage> SentHoldMessages { get { lock (_sentHoldMessages) return [.. _sentHoldMessages]; } }
+        private readonly List<LanMessage.HoldMessage> _sentHoldMessages = [];
+        public List<LanMessage.Bodies> SentBodies { get { lock (_sentBodies) return [.. _sentBodies]; } }
+        private readonly List<LanMessage.Bodies> _sentBodies = [];
+        public void SendBodies(LanMessage.Bodies bodies) { lock (_sentBodies) _sentBodies.Add(bodies); }
+
+        public Task SendHoldMessageAsync(LanMessage.HoldMessage message, CancellationToken cancellationToken)
+        {
+            lock (_sentHoldMessages) _sentHoldMessages.Add(message);
+            return Task.CompletedTask;
+        }
         public bool IsJoined => true;
         public List<(string, SharedCustomStoryStartOutcome)> SentOutcomes { get; } = [];
         public Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken) => throw new NotSupportedException();

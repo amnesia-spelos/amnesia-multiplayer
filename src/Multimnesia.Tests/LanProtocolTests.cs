@@ -98,9 +98,9 @@ public sealed class LanProtocolTests
     }
 
     [Fact]
-    public void Protocol_version_is_4_for_the_raised_lantern_in_the_Shared_Pose()
+    public void Protocol_version_is_5_for_Holds()
     {
-        Assert.Equal(4, LanProtocol.CurrentVersion);
+        Assert.Equal(5, LanProtocol.CurrentVersion);
     }
 
     public static TheoryData<LanMessage.Pose> Poses => new()
@@ -332,5 +332,182 @@ public sealed class LanProtocolTests
 
         await Assert.ThrowsAsync<LanProtocolException>(
             () => LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken).AsTask());
+    }
+
+    private static readonly BodyState Thrown = new(1.25, -2.5, 3.75, 0, 0.6, 0, 0.8, 0.5, 0, -1, 0, 90, 0);
+    private static readonly BodyState AtRest = new(0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0);
+    private const string HoldMap = "custom_stories/My Story: Part 2/maps/cellar one.map";
+
+    public static TheoryData<LanMessage> HoldMessages => new()
+    {
+        new LanMessage.Claim(HoldMap, 12, ClaimReason.Interact),
+        new LanMessage.Claim("maps/a.map", int.MinValue, ClaimReason.Contact),
+        new LanMessage.ClaimDenied(HoldMap, int.MaxValue),
+        new LanMessage.Interaction(HoldMap, 12, 3, true),
+        new LanMessage.Interaction("maps/a.map", -7, 0, false),
+        new LanMessage.Broke(HoldMap, 12, Thrown),
+        new LanMessage.Settled(HoldMap, -7),
+        new LanMessage.Bodies(123456, HoldMap, [new(12, 3, Thrown), new(-7, 0, AtRest)]),
+        new LanMessage.Bodies(ulong.MaxValue, "maps/a.map", []),
+        new LanMessage.Bodies(0, "maps/a.map",
+            [.. Enumerable.Range(0, LanProtocol.MaximumBodies).Select(index => new BodyEntry(index, index, AtRest))]),
+    };
+
+    [Theory]
+    [MemberData(nameof(HoldMessages))]
+    public async Task Hold_messages_round_trip(LanMessage message)
+    {
+        await using var stream = new MemoryStream();
+
+        await LanProtocol.WriteAsync(stream, message, TestContext.Current.CancellationToken);
+        stream.Position = 0;
+
+        Assert.Equal(message, await LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken));
+    }
+
+    public static TheoryData<LanMessage, string> HoldWireNames => new()
+    {
+        { new LanMessage.Claim("maps/a.map", 12, ClaimReason.Interact), "{\"type\":\"claim\",\"map\":\"maps/a.map\",\"propId\":12,\"reason\":\"interact\"}" },
+        { new LanMessage.Claim("maps/a.map", 12, ClaimReason.Contact), "{\"type\":\"claim\",\"map\":\"maps/a.map\",\"propId\":12,\"reason\":\"contact\"}" },
+        { new LanMessage.ClaimDenied("maps/a.map", 12), "{\"type\":\"claim-denied\",\"map\":\"maps/a.map\",\"propId\":12}" },
+        { new LanMessage.Interaction("maps/a.map", 12, 3, true), "{\"type\":\"interaction\",\"map\":\"maps/a.map\",\"propId\":12,\"bodyId\":3,\"active\":true}" },
+        { new LanMessage.Settled("maps/a.map", -7), "{\"type\":\"settled\",\"map\":\"maps/a.map\",\"propId\":-7}" },
+        {
+            new LanMessage.Broke("maps/a.map", 12, Thrown),
+            "{\"type\":\"broke\",\"map\":\"maps/a.map\",\"propId\":12,\"position\":[1.25,-2.5,3.75],\"orientation\":[0,0.6,0,0.8]," +
+            "\"linearVelocity\":[0.5,0,-1],\"angularVelocity\":[0,90,0]}"
+        },
+        {
+            new LanMessage.Bodies(1000, "maps/a.map", [new(12, 3, Thrown)]),
+            "{\"type\":\"bodies\",\"timeMs\":1000,\"map\":\"maps/a.map\",\"entries\":[{\"propId\":12,\"bodyId\":3,\"position\":[1.25,-2.5,3.75]," +
+            "\"orientation\":[0,0.6,0,0.8],\"linearVelocity\":[0.5,0,-1],\"angularVelocity\":[0,90,0]}]}"
+        },
+    };
+
+    [Theory]
+    [MemberData(nameof(HoldWireNames))]
+    public async Task Hold_messages_use_their_wire_names(LanMessage message, string json)
+    {
+        await using var stream = new MemoryStream();
+
+        await LanProtocol.WriteAsync(stream, message, TestContext.Current.CancellationToken);
+
+        Assert.Equal(json, Encoding.UTF8.GetString(stream.ToArray(), 4, (int)stream.Length - 4));
+    }
+
+    public static TheoryData<LanMessage> InvalidHoldMessages => new()
+    {
+        new LanMessage.Claim("", 12, ClaimReason.Interact),
+        new LanMessage.Claim("maps/a\n.map", 12, ClaimReason.Interact),
+        new LanMessage.Claim(new string('m', LanProtocol.MaximumPoseMapScalars + 1), 12, ClaimReason.Interact),
+        new LanMessage.Claim("maps/a.map", 12, (ClaimReason)99),
+        new LanMessage.ClaimDenied("", 12),
+        new LanMessage.Interaction("maps/a\t.map", 12, 3, true),
+        new LanMessage.Settled("", 12),
+        new LanMessage.Broke("maps/a.map", 12, Thrown with { X = double.NaN }),
+        new LanMessage.Broke("maps/a.map", 12, Thrown with { Vy = double.PositiveInfinity }),
+        new LanMessage.Broke("maps/a.map", 12, Thrown with { Wz = LanProtocol.MaximumPoseMagnitude * 2 }),
+        new LanMessage.Broke("maps/a.map", 12, Thrown with { Qw = 0.98 }),
+        new LanMessage.Broke("maps/a.map", 12, Thrown with { Qx = 0.5 }),
+        new LanMessage.Broke("", 12, Thrown),
+        new LanMessage.Bodies(1, "maps/a.map", [new(12, 3, Thrown with { Z = -LanProtocol.MaximumPoseMagnitude * 2 })]),
+        new LanMessage.Bodies(1, "maps/a.map", [new(12, 3, AtRest with { Qw = 0 })]),
+        new LanMessage.Bodies(1, "", [new(12, 3, Thrown)]),
+        new LanMessage.Bodies(1, "maps/a.map",
+            [.. Enumerable.Range(0, LanProtocol.MaximumBodies + 1).Select(index => new BodyEntry(index, 0, AtRest))]),
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidHoldMessages))]
+    public async Task Invalid_Hold_messages_are_rejected_when_written(LanMessage message)
+    {
+        await using var stream = new MemoryStream();
+
+        await Assert.ThrowsAsync<LanProtocolException>(
+            () => LanProtocol.WriteAsync(stream, message, TestContext.Current.CancellationToken).AsTask());
+        Assert.Empty(stream.ToArray());
+    }
+
+    [Fact]
+    public void Body_states_within_their_bounds_and_a_unit_quaternion_tolerance_are_valid()
+    {
+        Assert.True(LanProtocol.IsValid(new BodyState(
+            LanProtocol.MaximumPoseMagnitude, -LanProtocol.MaximumPoseMagnitude, 0, 0, 0, 0, 0.995, 0, 0, 0, 0, 0, 0)));
+        Assert.True(LanProtocol.IsValid(AtRest with { Qw = 1.009 }));
+        Assert.False(LanProtocol.IsValid(AtRest with { Qw = 1.011 }));
+        Assert.False(LanProtocol.IsValid(AtRest with { Qw = double.NaN }));
+    }
+
+    private const string ThrownJson =
+        "\"position\":[1.25,-2.5,3.75],\"orientation\":[0,0.6,0,0.8],\"linearVelocity\":[0.5,0,-1],\"angularVelocity\":[0,90,0]";
+
+    public static TheoryData<string> InvalidHoldFrames => new()
+    {
+        "{\"type\":\"claim\",\"map\":\"maps/a.map\",\"propId\":12}",
+        "{\"type\":\"claim\",\"map\":\"maps/a.map\",\"propId\":12,\"reason\":\"grab\"}",
+        "{\"type\":\"claim\",\"map\":\"maps/a.map\",\"propId\":12,\"reason\":\"Interact\"}",
+        "{\"type\":\"claim\",\"map\":\"maps/a.map\",\"propId\":12,\"reason\":0}",
+        "{\"type\":\"claim\",\"map\":\"maps/a.map\",\"propId\":2147483648,\"reason\":\"interact\"}",
+        "{\"type\":\"claim\",\"map\":\"maps/a.map\",\"propId\":1.5,\"reason\":\"interact\"}",
+        "{\"type\":\"claim\",\"map\":\"maps/a.map\",\"propId\":\"12\",\"reason\":\"interact\"}",
+        "{\"type\":\"claim\",\"propId\":12,\"reason\":\"interact\"}",
+        "{\"type\":\"claim\",\"map\":\"\",\"propId\":12,\"reason\":\"interact\"}",
+        "{\"type\":\"claim\",\"map\":\"maps/a\\u0007.map\",\"propId\":12,\"reason\":\"interact\"}",
+        "{\"type\":\"claim\",\"map\":\"" + new string('m', LanProtocol.MaximumPoseMapScalars + 1) + "\",\"propId\":12,\"reason\":\"interact\"}",
+        "{\"type\":\"claim-denied\",\"map\":\"maps/a.map\"}",
+        "{\"type\":\"claim-denied\",\"map\":42,\"propId\":12}",
+        "{\"type\":\"interaction\",\"map\":\"maps/a.map\",\"propId\":12,\"bodyId\":3}",
+        "{\"type\":\"interaction\",\"map\":\"maps/a.map\",\"propId\":12,\"bodyId\":3,\"active\":1}",
+        "{\"type\":\"interaction\",\"map\":\"maps/a.map\",\"propId\":12,\"bodyId\":-2147483649,\"active\":true}",
+        "{\"type\":\"settled\",\"propId\":12}",
+        "{\"type\":\"settled\",\"map\":\"maps/a.map\",\"propId\":null}",
+        "{\"type\":\"broke\",\"map\":\"maps/a.map\",\"propId\":12}",
+        "{\"type\":\"broke\",\"map\":\"maps/a.map\",\"propId\":12,\"position\":[1,2],\"orientation\":[0,0,0,1],\"linearVelocity\":[0,0,0],\"angularVelocity\":[0,0,0]}",
+        "{\"type\":\"broke\",\"map\":\"maps/a.map\",\"propId\":12,\"position\":[1,2,3,4],\"orientation\":[0,0,0,1],\"linearVelocity\":[0,0,0],\"angularVelocity\":[0,0,0]}",
+        "{\"type\":\"broke\",\"map\":\"maps/a.map\",\"propId\":12,\"position\":[1e20,2,3],\"orientation\":[0,0,0,1],\"linearVelocity\":[0,0,0],\"angularVelocity\":[0,0,0]}",
+        "{\"type\":\"broke\",\"map\":\"maps/a.map\",\"propId\":12,\"position\":[1e400,2,3],\"orientation\":[0,0,0,1],\"linearVelocity\":[0,0,0],\"angularVelocity\":[0,0,0]}",
+        "{\"type\":\"broke\",\"map\":\"maps/a.map\",\"propId\":12,\"position\":[\"1\",2,3],\"orientation\":[0,0,0,1],\"linearVelocity\":[0,0,0],\"angularVelocity\":[0,0,0]}",
+        "{\"type\":\"broke\",\"map\":\"maps/a.map\",\"propId\":12,\"position\":[1,2,3],\"orientation\":[0,0,0,2],\"linearVelocity\":[0,0,0],\"angularVelocity\":[0,0,0]}",
+        "{\"type\":\"broke\",\"map\":\"maps/a.map\",\"propId\":12,\"position\":[1,2,3],\"orientation\":[0,0,0],\"linearVelocity\":[0,0,0],\"angularVelocity\":[0,0,0]}",
+        "{\"type\":\"broke\",\"map\":\"maps/a.map\",\"propId\":12,\"position\":[1,2,3],\"orientation\":[0,0,0,1],\"linearVelocity\":{},\"angularVelocity\":[0,0,0]}",
+        "{\"type\":\"bodies\",\"map\":\"maps/a.map\",\"entries\":[]}",
+        "{\"type\":\"bodies\",\"timeMs\":-1,\"map\":\"maps/a.map\",\"entries\":[]}",
+        "{\"type\":\"bodies\",\"timeMs\":1,\"map\":\"maps/a.map\"}",
+        "{\"type\":\"bodies\",\"timeMs\":1,\"map\":\"maps/a.map\",\"entries\":{}}",
+        "{\"type\":\"bodies\",\"timeMs\":1,\"entries\":[]}",
+        "{\"type\":\"bodies\",\"timeMs\":1,\"map\":\"maps/a.map\",\"entries\":[{\"propId\":12," + ThrownJson + "}]}",
+        "{\"type\":\"bodies\",\"timeMs\":1,\"map\":\"maps/a.map\",\"entries\":[{\"propId\":12,\"bodyId\":3,\"position\":[0,0,0],\"orientation\":[0,0,0,0],\"linearVelocity\":[0,0,0],\"angularVelocity\":[0,0,0]}]}",
+        "{\"type\":\"bodies\",\"timeMs\":1,\"map\":\"maps/a.map\",\"entries\":[" +
+            string.Join(',', Enumerable.Repeat("{\"propId\":12,\"bodyId\":3," + ThrownJson + "}", LanProtocol.MaximumBodies + 1)) + "]}",
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidHoldFrames))]
+    public async Task Invalid_Hold_messages_are_rejected_when_read(string json)
+    {
+        var payload = Encoding.UTF8.GetBytes(json);
+        var bytes = new byte[payload.Length + 4];
+        BinaryPrimitives.WriteInt32BigEndian(bytes, payload.Length);
+        payload.CopyTo(bytes.AsSpan(4));
+        await using var stream = new MemoryStream(bytes);
+
+        await Assert.ThrowsAsync<LanProtocolException>(
+            () => LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken).AsTask());
+    }
+
+    [Fact]
+    public async Task The_largest_bodies_message_fits_in_one_frame_whatever_its_numbers_and_map_characters()
+    {
+        await using var stream = new MemoryStream();
+        // The longest JSON numbers within the bounds: 17 significant digits, a sign, and an exponent.
+        const double longest = -1.2345678901234567E-300;
+        var state = new BodyState(longest, longest, longest, longest, longest, longest, -1, longest, longest, longest, longest, longest, longest);
+        var bodies = new LanMessage.Bodies(ulong.MaxValue, string.Concat(Enumerable.Repeat("👻", LanProtocol.MaximumPoseMapScalars)),
+            [.. Enumerable.Range(0, LanProtocol.MaximumBodies).Select(_ => new BodyEntry(int.MinValue, int.MinValue, state))]);
+
+        await LanProtocol.WriteAsync(stream, bodies, TestContext.Current.CancellationToken);
+        stream.Position = 0;
+
+        Assert.Equal(bodies, await LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken));
     }
 }

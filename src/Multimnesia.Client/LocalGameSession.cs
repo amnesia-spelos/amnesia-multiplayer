@@ -4,7 +4,11 @@ using Multimnesia.Contracts;
 
 namespace Multimnesia.Client;
 
-public enum LocalGameEventName { Connected, ProtocolNegotiated, UnrecognizedGameReply, AvatarCreated, SharedPoseCommandFailed }
+public enum LocalGameEventName
+{
+    Connected, ProtocolNegotiated, UnrecognizedGameReply, AvatarCreated, SharedPoseCommandFailed,
+    HoldClaimed, HoldEnded, HoldMessageIgnored, HoldCommandFailed
+}
 
 public sealed record LocalGameLogEntry(
     DateTimeOffset Timestamp,
@@ -38,7 +42,9 @@ public sealed record SessionCallbacks(
     Func<ChatEntry, ValueTask> ReceiveChat,
     Func<string, ValueTask> ReceiveCustomStoryStarted,
     Func<string, SharedCustomStoryStartOutcome, ValueTask> ReceiveCustomStoryStartOutcome,
-    Func<LanMessage.Pose, ValueTask> ReceivePose);
+    Func<LanMessage.Pose, ValueTask> ReceivePose,
+    Func<LanMessage.HoldMessage, ValueTask> ReceiveHoldMessage,
+    Func<LanMessage.Bodies, ValueTask> ReceiveBodies);
 
 // One Game Interaction Protocol Session with the local game: from its greeting until the connection is lost.
 public sealed class LocalGameSession(
@@ -110,6 +116,7 @@ public sealed class LocalGameSession(
         var localGameCommands = new LocalGameCommands(WriteLineAsync, Task.Delay);
         SharedCustomStoryStart sharedStart = null!;
         SharedPose sharedPose = null!;
+        Holds holds = null!;
 
         var sessions = createSessions(new SessionCallbacks(
             DisplaySystemAsync,
@@ -131,6 +138,18 @@ public sealed class LocalGameSession(
             {
                 sharedPose.HandleReceivedPose(pose);
                 return ValueTask.CompletedTask;
+            },
+            // Never blocks, and never waits behind the Pose gate: Hold lines are written to the local game later, in order.
+            message =>
+            {
+                holds.HandleReceivedHoldMessage(message);
+                return ValueTask.CompletedTask;
+            },
+            // Never blocks: the bodies are written to the local game later, and only the newest.
+            bodies =>
+            {
+                holds.HandleReceivedBodies(bodies);
+                return ValueTask.CompletedTask;
             }));
         try
         {
@@ -139,9 +158,11 @@ public sealed class LocalGameSession(
             sharedPose = new SharedPose(
                 sessions, WriteLineAsync, DisplaySystemAsync, (severity, eventName, line) => Log(severity, eventName, line),
                 _negotiation.Task, cancellationToken);
+            holds = new Holds(
+                sessions, WriteLineAsync, (severity, eventName, line) => Log(severity, eventName, line), _negotiation.Task, cancellationToken);
 
             // Bypasses the gate: every other writer waits there until the negotiation is answered.
-            await writer.WriteLineAsync(GameInteractionProtocol.NegotiateSharedPose.AsMemory(), cancellationToken);
+            await writer.WriteLineAsync(GameInteractionProtocol.Negotiate.AsMemory(), cancellationToken);
             // Queued at the gate before the negotiation can settle, so it is the first chat line after it.
             if (connectedNotice is not null) _ = RunIgnoringDisconnectAsync(DisplaySystemAsync(connectedNotice).AsTask());
             while (!cancellationToken.IsCancellationRequested)
@@ -160,7 +181,13 @@ public sealed class LocalGameSession(
                 if (gameEvent is GameEvent.ChatSubmitted chat) _ = RunIgnoringDisconnectAsync(HandleCommandAsync(orchestrator, chat.Entry));
                 if (gameEvent is GameEvent.LocalPoseReported reported) sharedPose.HandleLocalPose(reported.Pose);
                 if (gameEvent is GameEvent.Ponged) sharedPose.HandlePong();
-                if (gameEvent is GameEvent.Responded responded) _ = RunIgnoringDisconnectAsync(sharedPose.HandleResponseAsync(responded).AsTask());
+                if (gameEvent is GameEvent.Responded responded)
+                {
+                    _ = RunIgnoringDisconnectAsync(sharedPose.HandleResponseAsync(responded).AsTask());
+                    holds.HandleResponse(responded);
+                }
+                // Not awaited, but it queues its Hold messages before its first await, so they keep the order the game sent them in.
+                _ = RunIgnoringDisconnectAsync(holds.HandleLocalGameEventAsync(gameEvent));
                 // Not awaited, but it records the event before its first await, so events are observed in the order the game sent them.
                 _ = RunIgnoringDisconnectAsync(sharedStart.HandleLocalGameEventAsync(gameEvent, cancellationToken));
                 localGameCommands.Dispatch(gameEvent);

@@ -71,4 +71,59 @@ public sealed class LanOutboundTests
         Assert.Equal([new LanMessage.Departure()], sent);
         Assert.False(outbound.TryWrite(new(new LanMessage.Heartbeat())));
     }
+
+    private static LanMessage.Bodies BodiesAt(ulong timeMs) =>
+        new(timeMs, "maps/a.map", [new(12, 3, new BodyState(1, 2, 3, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0))]);
+
+    [Fact]
+    public async Task Unsent_bodies_are_replaced_by_newer_ones_without_replacing_the_Pose()
+    {
+        var outbound = new LanOutbound(capacity: 8);
+        await using var frames = outbound.ReadAllAsync(TestContext.Current.CancellationToken).GetAsyncEnumerator(TestContext.Current.CancellationToken);
+
+        for (ulong time = 1; time <= 100; time++) outbound.OfferBodies(BodiesAt(time));
+        outbound.OfferPose(PoseAt(7));
+
+        var sent = new List<LanMessage>();
+        for (var i = 0; i < 2; i++)
+        {
+            Assert.True(await frames.MoveNextAsync());
+            sent.Add(frames.Current.Message);
+        }
+        Assert.Equal(2, sent.Count);
+        Assert.Contains(BodiesAt(100), sent);
+        Assert.Contains(PoseAt(7), sent);
+    }
+
+    [Fact]
+    public async Task Session_messages_are_sent_in_order_ahead_of_unsent_bodies()
+    {
+        var outbound = new LanOutbound(capacity: 8);
+        await using var frames = outbound.ReadAllAsync(TestContext.Current.CancellationToken).GetAsyncEnumerator(TestContext.Current.CancellationToken);
+
+        outbound.OfferBodies(BodiesAt(1));
+        Assert.True(outbound.TryWrite(new(new LanMessage.Claim("maps/a.map", 12, ClaimReason.Interact))));
+        Assert.True(outbound.TryWrite(new(new LanMessage.Interaction("maps/a.map", 12, 3, true))));
+
+        var sent = new List<LanMessage>();
+        for (var i = 0; i < 3; i++)
+        {
+            Assert.True(await frames.MoveNextAsync());
+            sent.Add(frames.Current.Message);
+        }
+        Assert.Equal(
+            [new LanMessage.Claim("maps/a.map", 12, ClaimReason.Interact), new LanMessage.Interaction("maps/a.map", 12, 3, true), BodiesAt(1)],
+            sent);
+    }
+
+    [Fact]
+    public void Bodies_never_use_the_session_message_capacity()
+    {
+        var outbound = new LanOutbound(capacity: 1);
+
+        for (ulong time = 1; time <= 100; time++) outbound.OfferBodies(BodiesAt(time));
+
+        Assert.True(outbound.TryWrite(new(new LanMessage.Heartbeat())));
+        Assert.False(outbound.TryWrite(new(new LanMessage.Heartbeat())));
+    }
 }

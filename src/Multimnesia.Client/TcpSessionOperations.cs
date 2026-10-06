@@ -24,6 +24,9 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     // Poses have their own allowance: 30 per second, but a brief network stall releases them in one burst.
     public const int MaxInboundPoseBurst = 600;
     public const int InboundPosesPerSecond = 60;
+    // Bodies have an allowance of their own like Poses, so carrying a prop never spends the session message budget.
+    public const int MaxInboundBodiesBurst = 600;
+    public const int InboundBodiesPerSecond = 60;
     private const string Incompatible = "The Multiplayer Session uses an incompatible protocol version.";
     private const string Full = "The Multiplayer Session is full.";
     private const string RateLimited = "You were disconnected for exceeding the Multiplayer Session's message rate limit.";
@@ -35,6 +38,8 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     private readonly Func<string, ValueTask> _receiveCustomStoryStarted;
     private readonly Func<string, SharedCustomStoryStartOutcome, ValueTask> _receiveCustomStoryStartOutcome;
     private readonly Func<LanMessage.Pose, ValueTask> _receivePose;
+    private readonly Func<LanMessage.HoldMessage, ValueTask> _receiveHoldMessage;
+    private readonly Func<LanMessage.Bodies, ValueTask> _receiveBodies;
     private readonly SemaphoreSlim _handshakeSlots = new(MaxConcurrentHandshakes, MaxConcurrentHandshakes);
     private readonly object _gate = new();
     private readonly CancellationTokenSource _lifetime = new();
@@ -55,7 +60,9 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         Action<RelayLogEntry>? log = null,
         Func<string, ValueTask>? receiveCustomStoryStarted = null,
         Func<string, SharedCustomStoryStartOutcome, ValueTask>? receiveCustomStoryStartOutcome = null,
-        Func<LanMessage.Pose, ValueTask>? receivePose = null)
+        Func<LanMessage.Pose, ValueTask>? receivePose = null,
+        Func<LanMessage.HoldMessage, ValueTask>? receiveHoldMessage = null,
+        Func<LanMessage.Bodies, ValueTask>? receiveBodies = null)
     {
         _options = options;
         _notice = notice ?? (_ => ValueTask.CompletedTask);
@@ -65,6 +72,8 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         _receiveCustomStoryStarted = receiveCustomStoryStarted ?? (_ => ValueTask.CompletedTask);
         _receiveCustomStoryStartOutcome = receiveCustomStoryStartOutcome ?? ((_, _) => ValueTask.CompletedTask);
         _receivePose = receivePose ?? (_ => ValueTask.CompletedTask);
+        _receiveHoldMessage = receiveHoldMessage ?? (_ => ValueTask.CompletedTask);
+        _receiveBodies = receiveBodies ?? (_ => ValueTask.CompletedTask);
     }
 
     public Guid SessionCorrelationId { get; private set; }
@@ -221,6 +230,32 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         LanOutbound? outbound;
         lock (_gate) outbound = _joinedOutbound ?? _admittedOutbound;
         outbound?.OfferPose(pose);
+    }
+
+    // Latest-wins like the Pose, and validated here for the same reason.
+    public void SendBodies(LanMessage.Bodies bodies)
+    {
+        if (!LanProtocol.IsValid(bodies)) return;
+        LanOutbound? outbound;
+        lock (_gate) outbound = _joinedOutbound ?? _admittedOutbound;
+        outbound?.OfferBodies(bodies);
+    }
+
+    // Ordered and exactly once, like chat: a Hold message that cannot be queued ends the Multiplayer Session.
+    public async Task SendHoldMessageAsync(LanMessage.HoldMessage message, CancellationToken cancellationToken)
+    {
+        LanOutbound? outbound;
+        TcpClient? connection;
+        lock (_gate)
+        {
+            outbound = _joinedOutbound ?? _admittedOutbound;
+            connection = _joinedConnection ?? _admittedConnection;
+        }
+        if (outbound is null || connection is null) return;
+        if (outbound.TryWrite(new(message))) return;
+
+        connection.Dispose();
+        await _notice("The remote Game Peer could not keep up with interaction traffic.");
     }
 
     public async Task SendChatAsync(ChatEntry entry, CancellationToken cancellationToken)
@@ -445,6 +480,8 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         var windowCount = 0;
         var poseAllowance = (double)MaxInboundPoseBurst;
         var poseAllowanceAt = windowStart;
+        var bodiesAllowance = (double)MaxInboundBodiesBurst;
+        var bodiesAllowanceAt = windowStart;
         try
         {
             while (!cancellationToken.IsCancellationRequested)
@@ -460,6 +497,13 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
                         poseAllowance + (now - poseAllowanceAt).TotalSeconds * InboundPosesPerSecond);
                     poseAllowanceAt = now;
                     withinAllowance = --poseAllowance >= 0;
+                }
+                else if (message is LanMessage.Bodies)
+                {
+                    bodiesAllowance = Math.Min(MaxInboundBodiesBurst,
+                        bodiesAllowance + (now - bodiesAllowanceAt).TotalSeconds * InboundBodiesPerSecond);
+                    bodiesAllowanceAt = now;
+                    withinAllowance = --bodiesAllowance >= 0;
                 }
                 else
                 {
@@ -491,6 +535,13 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
                         break;
                     case LanMessage.Pose pose:
                         await _receivePose(pose);
+                        break;
+                    case LanMessage.Bodies bodies:
+                        await _receiveBodies(bodies);
+                        break;
+                    // Only the Multiplayer Relay's arbiter denies Claims.
+                    case LanMessage.HoldMessage hold when hold is not LanMessage.ClaimDenied || !isHost:
+                        await _receiveHoldMessage(hold);
                         break;
                     case LanMessage.Heartbeat:
                         break;

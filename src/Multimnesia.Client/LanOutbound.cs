@@ -7,7 +7,7 @@ namespace Multimnesia.Client;
 
 public sealed record OutboundMessage(LanMessage Message, TaskCompletionSource? Sent = null);
 
-// The frames for one admitted Game Peer: session messages in order, then the newest Pose whenever none are waiting.
+// The frames for one admitted Game Peer: session messages in order, then the newest Pose and bodies whenever none are waiting.
 public sealed class LanOutbound(int capacity)
 {
     private readonly Channel<OutboundMessage> _messages = Channel.CreateBounded<OutboundMessage>(new BoundedChannelOptions(capacity)
@@ -23,6 +23,7 @@ public sealed class LanOutbound(int capacity)
         FullMode = BoundedChannelFullMode.DropWrite
     });
     private LanMessage.Pose? _pose;
+    private LanMessage.Bodies? _bodies;
 
     // False when the session messages are full or the outbound is complete.
     public bool TryWrite(OutboundMessage message)
@@ -39,13 +40,20 @@ public sealed class LanOutbound(int capacity)
         _wake.Writer.TryWrite(true);
     }
 
+    // Latest-wins, beside the Pose: replaces any bodies not yet sent.
+    public void OfferBodies(LanMessage.Bodies bodies)
+    {
+        Volatile.Write(ref _bodies, bodies);
+        _wake.Writer.TryWrite(true);
+    }
+
     public void Complete()
     {
         _messages.Writer.TryComplete();
         _wake.Writer.TryComplete();
     }
 
-    // Single reader. Ends once complete and the session messages are sent; an unsent Pose is dropped.
+    // Single reader. Ends once complete and the session messages are sent; an unsent Pose or bodies are dropped.
     public async IAsyncEnumerable<OutboundMessage> ReadAllAsync([EnumeratorCancellation] CancellationToken cancellationToken)
     {
         while (true)
@@ -53,6 +61,7 @@ public sealed class LanOutbound(int capacity)
             if (_messages.Reader.TryRead(out var message)) { yield return message; continue; }
             if (_messages.Reader.Completion.IsCompleted) yield break;
             if (Interlocked.Exchange(ref _pose, null) is { } pose) { yield return new(pose); continue; }
+            if (Interlocked.Exchange(ref _bodies, null) is { } bodies) { yield return new(bodies); continue; }
             if (!await _wake.Reader.WaitToReadAsync(cancellationToken)) yield break;
             _wake.Reader.TryRead(out _);
         }

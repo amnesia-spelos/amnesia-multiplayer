@@ -44,6 +44,10 @@ public static class GameInteractionProtocol
     private const string UnknownCommandWarning = "WARNING:Unknown command";
     private const string PongResponse = "RESPONSE:ping:pong";
     private const string LocalPoseStatePrefix = "STATE localpose ";
+    private const string ReportedBodiesStatePrefix = "STATE reportedbodies ";
+    // Legacy Events continue with ':' instead.
+    private const string Version2EventPrefix = "EVENT ";
+    private const int BodyEntryFieldCount = 2 + ProtocolVersion2Line.BodyStateFieldCount;
     // Legacy Responses continue with ':' instead.
     private const string Version2ResponsePrefix = "RESPONSE ";
     private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
@@ -78,6 +82,10 @@ public static class GameInteractionProtocol
         if (line == PongResponse) return new GameEvent.Ponged();
         if (line.StartsWith(LocalPoseStatePrefix, StringComparison.Ordinal))
             return TryParseLocalPose(line, out var pose) ? new GameEvent.LocalPoseReported(pose) : new GameEvent.Unknown(line);
+        if (line.StartsWith(ReportedBodiesStatePrefix, StringComparison.Ordinal))
+            return TryParseReportedBodies(line) ?? new GameEvent.Unknown(line);
+        if (line.StartsWith(Version2EventPrefix, StringComparison.Ordinal))
+            return TryParseInteractionEvent(line) ?? new GameEvent.Unknown(line);
         if (line.StartsWith(Version2ResponsePrefix, StringComparison.Ordinal))
         {
             // RESPONSE <keyword> <outcome> [<field>...]
@@ -108,6 +116,70 @@ public static class GameInteractionProtocol
         return true;
     }
 
+    // EVENT interactionstart <entityId> <bodyId> <map>, EVENT interactionend <entityId> <bodyId> <ending> <map>,
+    // EVENT reportcontact|reportsettled <entityId> <map>, EVENT reportbroke <entityId> <state> <map>
+    private static GameEvent? TryParseInteractionEvent(string line)
+    {
+        var name = line.Split(' ', 3)[1];
+        var fixedFieldCount = name switch
+        {
+            "interactionstart" => 4,
+            "interactionend" => 5,
+            "reportcontact" or "reportsettled" => 3,
+            "reportbroke" => 3 + ProtocolVersion2Line.BodyStateFieldCount,
+            _ => 0
+        };
+        if (fixedFieldCount == 0 ||
+            !ProtocolVersion2Line.TrySplit(line, fixedFieldCount, hasPath: true, out var fields) ||
+            !ProtocolVersion2Line.TryParseIdentifier(fields[2], out var entityId)) return null;
+        var map = fields[fixedFieldCount];
+        switch (name)
+        {
+            case "interactionstart" when ProtocolVersion2Line.TryParseIdentifier(fields[3], out var bodyId):
+                return new GameEvent.InteractionStarted(entityId, bodyId, map);
+            case "interactionend" when ProtocolVersion2Line.TryParseIdentifier(fields[3], out var bodyId) && ParseEnding(fields[4]) is { } ending:
+                return new GameEvent.InteractionEnded(entityId, bodyId, ending, map);
+            case "reportcontact":
+                return new GameEvent.ReportContacted(entityId, map);
+            case "reportsettled":
+                return new GameEvent.ReportSettled(entityId, map);
+            case "reportbroke" when ProtocolVersion2Line.TryParseBodyState(fields.AsSpan(3, ProtocolVersion2Line.BodyStateFieldCount), out var state):
+                return new GameEvent.ReportBroke(entityId, state, map);
+            default:
+                return null;
+        }
+    }
+
+    private static InteractionEnding? ParseEnding(string wireName) => wireName switch
+    {
+        "released" => InteractionEnding.Released,
+        "thrown" => InteractionEnding.Thrown,
+        "too-far" => InteractionEnding.TooFar,
+        "destroyed" => InteractionEnding.Destroyed,
+        _ => null
+    };
+
+    // STATE reportedbodies <timeMs> <count> <entry>... <map>, where each entry is <entityId> <bodyId> <state>
+    private static GameEvent? TryParseReportedBodies(string line)
+    {
+        if (!ProtocolVersion2Line.TrySplit(line, fixedFieldCount: 4, hasPath: true, out var header) ||
+            !ulong.TryParse(header[2], NumberStyles.None, CultureInfo.InvariantCulture, out var timeMs) ||
+            !int.TryParse(header[3], NumberStyles.None, CultureInfo.InvariantCulture, out var count) ||
+            count > LanProtocol.MaximumBodies ||
+            !ProtocolVersion2Line.TrySplit(header[4], count * BodyEntryFieldCount, hasPath: true, out var fields)) return null;
+
+        var entries = new BodyEntry[count];
+        for (var index = 0; index < count; index++)
+        {
+            var entry = fields.AsSpan(index * BodyEntryFieldCount, BodyEntryFieldCount);
+            if (!ProtocolVersion2Line.TryParseIdentifier(entry[0], out var entityId) ||
+                !ProtocolVersion2Line.TryParseIdentifier(entry[1], out var bodyId) ||
+                !ProtocolVersion2Line.TryParseBodyState(entry[2..], out var state)) return null;
+            entries[index] = new(entityId, bodyId, state);
+        }
+        return new GameEvent.ReportedBodies(timeMs, entries, fields[^1]);
+    }
+
     // Replies that LocalGameCommands turns into an Unrecognized start, which the Joining Player reports as unavailable.
     public static bool IsUnrecognizedReply(GameEvent gameEvent) => gameEvent is
         GameEvent.StartCustomStoryResponded { Outcome: StartCustomStoryOutcome.Unrecognized } or GameEvent.UnknownCommandWarned;
@@ -116,8 +188,9 @@ public static class GameInteractionProtocol
 
     public static string StartCustomStory(string identifier) => $"startcustomstory:{identifier}";
 
-    // The first Command of every game Session; the Shared Pose needs both Capabilities.
-    public const string NegotiateSharedPose = $"protocol 2 {ProtocolNegotiation.Avatars} {ProtocolNegotiation.LocalPose}";
+    // The first Command of every game Session; the Shared Pose needs the first two Capabilities, Holds the third.
+    public const string Negotiate =
+        $"protocol 2 {ProtocolNegotiation.Avatars} {ProtocolNegotiation.LocalPose} {ProtocolNegotiation.Interactions}";
 
     // Uses the default model, with collision on.
     public static string AvatarCreate(string avatarIdentifier) => $"avatarcreate {avatarIdentifier}";
@@ -142,11 +215,43 @@ public static class GameInteractionProtocol
 
     public const string UnsubscribeLocalPose = "localpose unsubscribe";
 
+    public static string SubscribeReportedBodies(int hz) => $"reportedbodies subscribe {hz.ToString(CultureInfo.InvariantCulture)}";
+
+    public const string UnsubscribeReportedBodies = "reportedbodies unsubscribe";
+
+    // Every Peer-Driven Entity Command ends with the map the Game Peer means, so it never reaches an entity in another map.
+    public static string EntityDrive(int entityId, string map) =>
+        $"entitydrive {ProtocolVersion2Line.FormatIdentifier(entityId)} {map}";
+
+    public static string EntityInteracting(int entityId, bool active, string map) =>
+        $"entityinteracting {ProtocolVersion2Line.FormatIdentifier(entityId)} {(active ? "1" : "0")} {map}";
+
+    public static string EntityRelease(int entityId, string map) =>
+        $"entityrelease {ProtocolVersion2Line.FormatIdentifier(entityId)} {map}";
+
+    public static string EntityBreak(int entityId, BodyState state, string map) =>
+        $"entitybreak {ProtocolVersion2Line.FormatIdentifier(entityId)} {ProtocolVersion2Line.FormatBodyState(state)} {map}";
+
+    // entitybodies <timeMs> <count> [<entry>...] <map>
+    public static string EntityBodies(ulong timeMs, IReadOnlyList<BodyEntry> entries, string map) => string.Join(' ',
+    [
+        "entitybodies",
+        timeMs.ToString(CultureInfo.InvariantCulture),
+        entries.Count.ToString(CultureInfo.InvariantCulture),
+        .. entries.Select(entry => string.Join(' ',
+            ProtocolVersion2Line.FormatIdentifier(entry.PropId),
+            ProtocolVersion2Line.FormatIdentifier(entry.BodyId),
+            ProtocolVersion2Line.FormatBodyState(entry.State))),
+        map
+    ]);
+
     // A legacy Command; the game answers it after processing every line written before it.
     public const string Ping = "ping";
 }
 
 public enum StartCustomStoryOutcome { Starting, NotFound, Invalid, NotInMainMenu, Unrecognized }
+
+public enum InteractionEnding { Released, Thrown, TooFar, Destroyed }
 
 public abstract record GameEvent
 {
@@ -156,6 +261,13 @@ public abstract record GameEvent
     public sealed record UnknownCommandWarned : GameEvent;
     public sealed record Ponged : GameEvent;
     public sealed record LocalPoseReported(LocalPose Pose) : GameEvent;
+    // The `interactions` Events about the local player's interactions, and the report of the bodies they decide.
+    public sealed record InteractionStarted(int EntityId, int BodyId, string Map) : GameEvent;
+    public sealed record InteractionEnded(int EntityId, int BodyId, InteractionEnding Ending, string Map) : GameEvent;
+    public sealed record ReportContacted(int EntityId, string Map) : GameEvent;
+    public sealed record ReportSettled(int EntityId, string Map) : GameEvent;
+    public sealed record ReportBroke(int EntityId, BodyState State, string Map) : GameEvent;
+    public sealed record ReportedBodies(ulong TimeMs, IReadOnlyList<BodyEntry> Entries, string Map) : GameEvent;
     public sealed record Responded(string Keyword, string Outcome, IReadOnlyList<string> Fields) : GameEvent;
     public sealed record Unknown(string Line) : GameEvent;
 }

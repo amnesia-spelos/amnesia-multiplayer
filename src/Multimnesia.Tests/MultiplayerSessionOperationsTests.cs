@@ -712,6 +712,7 @@ public sealed class MultiplayerSessionOperationsTests
     [Theory]
     [InlineData(1)]
     [InlineData(2)]
+    [InlineData(4)]
     public async Task Older_Game_Peers_are_rejected_as_incompatible(int protocolVersion)
     {
         var port = FreePort();
@@ -940,6 +941,211 @@ public sealed class MultiplayerSessionOperationsTests
         Assert.False(operations.IsOtherPlayerPresent);
         Assert.Equal(0, receivedPoses);
         await relayTask;
+    }
+
+    private static readonly BodyState Carried = new(1.25, -2.5, 3.75, 0, 0, 0, 1, 0.5, 0, -1, 0, 90, 0);
+    private static readonly LanMessage.Bodies HostBodies = new(1000, "custom_stories/mp-test-cs/maps/start.map", [new(12, 3, Carried)]);
+    private static readonly LanMessage.Bodies JoiningBodies = new(2000, "custom_stories/mp-test-cs/maps/start.map", [new(-7, 0, Carried)]);
+
+    [Fact]
+    public async Task Hold_messages_travel_both_ways_in_order_between_admitted_Game_Peers()
+    {
+        var port = FreePort();
+        var hostReceived = new List<LanMessage.HoldMessage>();
+        var joiningReceived = new List<LanMessage.HoldMessage>();
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            receiveHoldMessage: message => { lock (hostReceived) hostReceived.Add(message); return ValueTask.CompletedTask; });
+        await using var joining = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            receiveHoldMessage: message => { lock (joiningReceived) joiningReceived.Add(message); return ValueTask.CompletedTask; });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        await joining.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => host.IsOtherPlayerPresent);
+        LanMessage.HoldMessage[] fromJoining =
+        [
+            new LanMessage.Claim("maps/a.map", 12, ClaimReason.Interact),
+            new LanMessage.Interaction("maps/a.map", 12, 3, true),
+            new LanMessage.Interaction("maps/a.map", 12, 3, false),
+            new LanMessage.Broke("maps/a.map", 13, Carried),
+            new LanMessage.Settled("maps/a.map", 12),
+        ];
+        LanMessage.HoldMessage[] fromHost = [new LanMessage.Claim("maps/a.map", 5, ClaimReason.Contact), new LanMessage.ClaimDenied("maps/a.map", 12)];
+
+        foreach (var message in fromJoining) await joining.SendHoldMessageAsync(message, TestContext.Current.CancellationToken);
+        foreach (var message in fromHost) await host.SendHoldMessageAsync(message, TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => { lock (hostReceived) lock (joiningReceived) return hostReceived.Count == 5 && joiningReceived.Count == 2; });
+
+        lock (hostReceived) Assert.Equal(fromJoining, hostReceived);
+        lock (joiningReceived) Assert.Equal(fromHost, joiningReceived);
+    }
+
+    [Fact]
+    public async Task Bodies_travel_both_ways_between_admitted_Game_Peers()
+    {
+        var port = FreePort();
+        var hostReceived = new List<LanMessage.Bodies>();
+        var joiningReceived = new List<LanMessage.Bodies>();
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            receiveBodies: bodies => { lock (hostReceived) hostReceived.Add(bodies); return ValueTask.CompletedTask; });
+        await using var joining = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            receiveBodies: bodies => { lock (joiningReceived) joiningReceived.Add(bodies); return ValueTask.CompletedTask; });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        await joining.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => host.IsOtherPlayerPresent);
+
+        host.SendBodies(HostBodies);
+        joining.SendBodies(JoiningBodies);
+        await WaitUntilAsync(() => { lock (hostReceived) lock (joiningReceived) return hostReceived.Count > 0 && joiningReceived.Count > 0; });
+
+        lock (hostReceived) Assert.Equal([JoiningBodies], hostReceived);
+        lock (joiningReceived) Assert.Equal([HostBodies], joiningReceived);
+    }
+
+    [Fact]
+    public async Task Hold_messages_and_bodies_are_not_sent_without_an_admitted_other_player_and_invalid_bodies_are_dropped()
+    {
+        var port = FreePort();
+        var notices = new List<string>();
+        var hostReceived = new List<LanMessage>();
+        await using var local = new TcpSessionOperations(new SessionNetworkOptions { Port = FreePort() });
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            receiveHoldMessage: message => { lock (hostReceived) hostReceived.Add(message); return ValueTask.CompletedTask; },
+            receiveBodies: bodies => { lock (hostReceived) hostReceived.Add(bodies); return ValueTask.CompletedTask; });
+        await using var joining = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            notice => { lock (notices) notices.Add(notice); return ValueTask.CompletedTask; });
+
+        local.SendBodies(HostBodies);
+        await local.SendHoldMessageAsync(new LanMessage.Settled("maps/a.map", 12), TestContext.Current.CancellationToken);
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        host.SendBodies(HostBodies);
+        await host.SendHoldMessageAsync(new LanMessage.Settled("maps/a.map", 12), TestContext.Current.CancellationToken);
+        await joining.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => host.IsOtherPlayerPresent);
+        joining.SendBodies(JoiningBodies with { Entries = [new(-7, 0, Carried with { Qw = 0 })] });
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        await joining.SendHoldMessageAsync(new LanMessage.Settled("maps/a.map", 12), TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => { lock (hostReceived) return hostReceived.Count > 0; });
+
+        Assert.True(joining.IsOtherPlayerPresent);
+        lock (hostReceived) Assert.Equal([new LanMessage.Settled("maps/a.map", 12)], hostReceived);
+        lock (notices) Assert.Empty(notices);
+    }
+
+    [Fact]
+    public async Task A_burst_of_buffered_bodies_uses_neither_the_Pose_nor_the_session_message_allowance()
+    {
+        var port = FreePort();
+        var notices = new List<string>();
+        var receivedBodies = 0;
+        var receivedPoses = 0;
+        var received = new List<LanMessage.HoldMessage>();
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            notice => { lock (notices) notices.Add(notice); return ValueTask.CompletedTask; },
+            receivePose: _ => { Interlocked.Increment(ref receivedPoses); return ValueTask.CompletedTask; },
+            receiveHoldMessage: message => { lock (received) received.Add(message); return ValueTask.CompletedTask; },
+            receiveBodies: _ => { Interlocked.Increment(ref receivedBodies); return ValueTask.CompletedTask; });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        using var peer = await AdmitRawPeerAsync(port);
+        var stream = peer.GetStream();
+
+        for (var i = 0; i < TcpSessionOperations.MaxInboundBodiesBurst; i++)
+            await LanProtocol.WriteAsync(stream, JoiningBodies with { TimeMs = (ulong)i }, TestContext.Current.CancellationToken);
+        for (var i = 0; i < TcpSessionOperations.MaxInboundPoseBurst; i++)
+            await LanProtocol.WriteAsync(stream, JoiningPose with { TimeMs = (ulong)i }, TestContext.Current.CancellationToken);
+        for (var i = 0; i < TcpSessionOperations.MaxInboundMessagesPerWindow; i++)
+            await LanProtocol.WriteAsync(stream, new LanMessage.Settled("maps/a.map", i), TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => { lock (received) return received.Count == TcpSessionOperations.MaxInboundMessagesPerWindow; });
+
+        Assert.Equal(TcpSessionOperations.MaxInboundBodiesBurst, Volatile.Read(ref receivedBodies));
+        Assert.Equal(TcpSessionOperations.MaxInboundPoseBurst, Volatile.Read(ref receivedPoses));
+        Assert.True(host.IsOtherPlayerPresent);
+        lock (notices) Assert.DoesNotContain(notices, notice => notice.Contains("rate limit", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task A_peer_flooding_bodies_beyond_their_allowance_is_disconnected()
+    {
+        var port = FreePort();
+        var notices = new List<string>();
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            notice => { lock (notices) notices.Add(notice); return ValueTask.CompletedTask; });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        using var peer = await AdmitRawPeerAsync(port);
+
+        try
+        {
+            for (var i = 0; i < TcpSessionOperations.MaxInboundBodiesBurst * 2; i++)
+                await LanProtocol.WriteAsync(peer.GetStream(), JoiningBodies, TestContext.Current.CancellationToken);
+        }
+        catch (IOException) { }
+
+        await WaitUntilAsync(() => { lock (notices) return notices.Any(notice => notice.Contains("rate limit", StringComparison.Ordinal)); });
+        await WaitUntilAsync(() => !host.IsOtherPlayerPresent);
+    }
+
+    [Fact]
+    public async Task Hold_messages_spend_the_session_message_allowance()
+    {
+        var port = FreePort();
+        var notices = new List<string>();
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            notice => { lock (notices) notices.Add(notice); return ValueTask.CompletedTask; });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        using var peer = await AdmitRawPeerAsync(port);
+
+        try
+        {
+            for (var i = 0; i <= TcpSessionOperations.MaxInboundMessagesPerWindow; i++)
+                await LanProtocol.WriteAsync(peer.GetStream(), new LanMessage.Settled("maps/a.map", i), TestContext.Current.CancellationToken);
+        }
+        catch (IOException) { }
+
+        await WaitUntilAsync(() => { lock (notices) return notices.Any(notice => notice.Contains("rate limit", StringComparison.Ordinal)); });
+        await WaitUntilAsync(() => !host.IsOtherPlayerPresent);
+    }
+
+    [Fact]
+    public async Task A_Joining_Player_sending_a_Claim_Denial_violates_the_protocol()
+    {
+        var port = FreePort();
+        var notices = new List<string>();
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            notice => { lock (notices) notices.Add(notice); return ValueTask.CompletedTask; });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        using var peer = await AdmitRawPeerAsync(port);
+
+        await LanProtocol.WriteAsync(peer.GetStream(), new LanMessage.ClaimDenied("maps/a.map", 12), TestContext.Current.CancellationToken);
+
+        await WaitUntilAsync(() => { lock (notices) return notices.Contains("The remote Game Peer violated the Multiplayer Session protocol."); });
+        await WaitUntilAsync(() => !host.IsOtherPlayerPresent);
+    }
+
+    [Fact]
+    public async Task Invalid_bodies_violate_the_protocol()
+    {
+        var port = FreePort();
+        var notices = new List<string>();
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            notice => { lock (notices) notices.Add(notice); return ValueTask.CompletedTask; });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        using var peer = await AdmitRawPeerAsync(port);
+
+        await WriteRawFrameAsync(peer.GetStream(),
+            "{\"type\":\"bodies\",\"timeMs\":1,\"map\":\"maps/a.map\",\"entries\":[{\"propId\":12,\"bodyId\":3,\"position\":[0,0,0]," +
+            "\"orientation\":[0,0,0,2],\"linearVelocity\":[0,0,0],\"angularVelocity\":[0,0,0]}]}");
+
+        await WaitUntilAsync(() => { lock (notices) return notices.Contains("The remote Game Peer violated the Multiplayer Session protocol."); });
+        await WaitUntilAsync(() => !host.IsOtherPlayerPresent);
     }
 
     [Fact]

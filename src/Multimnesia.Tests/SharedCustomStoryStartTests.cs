@@ -194,6 +194,8 @@ public sealed class SharedCustomStoryStartTests
         public event Action? OtherPlayerPresenceChanged { add { } remove { } }
         public int OtherPlayerArrival => 0;
         public void SendPose(LanMessage.Pose pose) { }
+        public void SendBodies(LanMessage.Bodies bodies) { }
+        public Task SendHoldMessageAsync(LanMessage.HoldMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
         public bool JoiningPlayerAdmitted { get; set; }
         public bool IsJoined { get; set; }
         public List<string> SentStarts { get; } = [];

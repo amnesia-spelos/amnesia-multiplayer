@@ -470,6 +470,8 @@ public sealed class SharedPoseTests
         }
 
         public void SendPose(LanMessage.Pose pose) { lock (SentPoses) SentPoses.Add(pose); }
+        public void SendBodies(LanMessage.Bodies bodies) { }
+        public Task SendHoldMessageAsync(LanMessage.HoldMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<SessionOperationResult> JoinAsync(string destination, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task LeaveAsync(GamePeerState state, CancellationToken cancellationToken) => throw new NotSupportedException();
