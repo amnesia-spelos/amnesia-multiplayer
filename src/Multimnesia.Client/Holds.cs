@@ -7,7 +7,10 @@ namespace Multimnesia.Client;
 // local player Holds stream to the other player. The other player's Claims make their entities Peer-Driven Entities in
 // the local game, which follow their bodies until they settle. Every line written to the local game is composed here.
 // Active only while the other player is present and the local game granted `interactions`.
-// One per local game Session: the game releases its Peer-Driven Entities and subscription when that Session ends.
+// Every Hold ends when it settles, when the other player leaves or is replaced, or when its Holder or the local player
+// leaves its map. Maps are known from Poses and `interactions` Events, so a reload of the same map is not seen, and the
+// Holder leaving a map is not seen without their Poses. One per local game Session: the game releases its Peer-Driven
+// Entities and subscription when that Session ends, and the other player sees this Game Peer depart.
 public sealed class Holds
 {
     public const int ReportedBodiesRateHz = 30;
@@ -27,6 +30,9 @@ public sealed class Holds
     // Who Holds each entity. On the Session Host this table is the Multiplayer Relay's arbiter: every Claim, the Session
     // Host's own included, is ordered by a compare-and-set on it.
     private readonly Dictionary<Entity, Holder> _holds = [];
+    // Guarded by the _holds lock: the other player's arrival the table belongs to, and the map the local player was last seen on.
+    private int _arrival;
+    private string? _localMap;
     // Lines for the local game, enqueued under the _holds lock so they follow the order the Holds changed in.
     private readonly ConcurrentQueue<string> _lines = new();
     private LanMessage.Bodies? _receivedBodies;
@@ -46,9 +52,9 @@ public sealed class Holds
         _log = log;
         _negotiation = negotiation;
         _cancellationToken = cancellationToken;
-        sessions.OtherPlayerPresenceChanged += Update;
+        sessions.OtherPlayerPresenceChanged += HandlePresenceChanged;
         // After a local game reconnect, the other player may already be present.
-        Update();
+        HandlePresenceChanged();
     }
 
     private bool IsActive =>
@@ -59,6 +65,9 @@ public sealed class Holds
     public async Task HandleLocalGameEventAsync(GameEvent gameEvent)
     {
         if (!IsActive) return;
+        // Before the event itself, so a grab on a new map is Claimed rather than taken for a Hold on the map left.
+        if (LocalMapOf(gameEvent) is { } map)
+            lock (_holds) ObserveLocalMapLocked(map);
         switch (gameEvent)
         {
             case GameEvent.InteractionStarted started:
@@ -80,8 +89,6 @@ public sealed class Holds
                 await SendAsync(new LanMessage.Interaction(ended.Map, ended.EntityId, ended.BodyId, false));
                 break;
             case GameEvent.ReportSettled settled when TryEnd(new(settled.Map, settled.EntityId), Holder.Local):
-                _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldEnded,
-                    $"The local player's Hold on {new Entity(settled.Map, settled.EntityId)} ended: settled.");
                 await SendAsync(new LanMessage.Settled(settled.Map, settled.EntityId));
                 break;
             case GameEvent.ReportedBodies reported:
@@ -108,10 +115,8 @@ public sealed class Holds
                 case LanMessage.Interaction interaction when IsHeldByLocked(entity, Holder.Other):
                     _lines.Enqueue(GameInteractionProtocol.EntityInteracting(entity.PropId, interaction.Active, entity.Map));
                     break;
-                case LanMessage.Settled when IsHeldByLocked(entity, Holder.Other) && _holds.Remove(entity):
-                    _lines.Enqueue(GameInteractionProtocol.EntityRelease(entity.PropId, entity.Map));
-                    _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldEnded,
-                        $"The other player's Hold on {entity} ended: settled.");
+                case LanMessage.Settled when IsHeldByLocked(entity, Holder.Other):
+                    EndLocked(entity, "settled");
                     break;
                 default:
                     _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldMessageIgnored, $"Ignored {message}.");
@@ -119,6 +124,17 @@ public sealed class Holds
             }
         }
         Update();
+    }
+
+    // Called for each Pose the other player sends: they Hold nothing outside the map they are on. Never blocks.
+    // A Claim is sent ahead of any later Pose, so a Pose never predates the Claims it is compared with.
+    public void HandleReceivedPose(LanMessage.Pose pose)
+    {
+        if (!IsActive) return;
+        int ended;
+        lock (_holds)
+            ended = EndAllLocked((entity, holder) => holder == Holder.Other && entity.Map != pose.Map, "the other player left the map");
+        if (ended > 0) Update();
     }
 
     // Latest-wins: replaces any received bodies not yet written to the local game. Never blocks.
@@ -154,7 +170,65 @@ public sealed class Holds
 
     private bool TryEnd(Entity entity, Holder holder)
     {
-        lock (_holds) return IsHeldByLocked(entity, holder) && _holds.Remove(entity);
+        lock (_holds)
+        {
+            if (!IsHeldByLocked(entity, holder)) return false;
+            EndLocked(entity, "settled");
+            return true;
+        }
+    }
+
+    // A departure or a replacement: none of the table, the local player's Holds included, means anything to who comes next.
+    private void HandlePresenceChanged()
+    {
+        lock (_holds)
+        {
+            var arrival = _sessions.OtherPlayerArrival;
+            if (arrival != _arrival)
+            {
+                _arrival = arrival;
+                EndAllLocked((_, _) => true, "the other player left");
+            }
+        }
+        Update();
+    }
+
+    // The local game released its Peer-Driven Entities and emptied its report on the map it left.
+    private void ObserveLocalMapLocked(string map)
+    {
+        var left = _localMap;
+        _localMap = map;
+        if (left is not null && left != map)
+            EndAllLocked((entity, _) => entity.Map == left, "the local player left the map", releaseInLocalGame: false);
+    }
+
+    private static string? LocalMapOf(GameEvent gameEvent) => gameEvent switch
+    {
+        GameEvent.LocalPoseReported reported => reported.Pose.Map,
+        GameEvent.InteractionStarted started => started.Map,
+        GameEvent.InteractionEnded ended => ended.Map,
+        GameEvent.ReportContacted contacted => contacted.Map,
+        GameEvent.ReportSettled settled => settled.Map,
+        GameEvent.ReportBroke broke => broke.Map,
+        GameEvent.ReportedBodies reported => reported.Map,
+        _ => null
+    };
+
+    private int EndAllLocked(Func<Entity, Holder, bool> ends, string reason, bool releaseInLocalGame = true)
+    {
+        Entity[] ending = [.. _holds.Where(hold => ends(hold.Key, hold.Value)).Select(hold => hold.Key)];
+        foreach (var entity in ending) EndLocked(entity, reason, releaseInLocalGame);
+        return ending.Length;
+    }
+
+    // The other player's entity returns to local physics from its last streamed state; the local player's needs nothing.
+    private void EndLocked(Entity entity, string reason, bool releaseInLocalGame = true)
+    {
+        _holds.Remove(entity, out var holder);
+        if (holder == Holder.Other && releaseInLocalGame)
+            _lines.Enqueue(GameInteractionProtocol.EntityRelease(entity.PropId, entity.Map));
+        _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldEnded,
+            $"The {(holder == Holder.Local ? "local" : "other")} player's Hold on {entity} ended: {reason}.");
     }
 
     private Task SendAsync(LanMessage.HoldMessage message) => _sessions.SendHoldMessageAsync(message, _cancellationToken);
