@@ -229,6 +229,16 @@ Run this after any change to how Claims are ordered (#36), with the same builds,
 2. **A held prop cannot be taken while Settling.** B throws the prop, and A tries to grab it in flight. A cannot until it lands and both logs end the Hold with `settled.`
 3. **Near-simultaneous grabs.** Both players look at the prop, and on a count of three both grab it. Exactly one player ends up holding it, and the other sees it leave their hands, if it reached them at all. Both players see it move with the Holder. The race shows as `HoldClaimDenied` lines. When B lost, A's log has `Denied the other player's Claim ...` and B's has `The local player's Claim ... was denied.` When A lost, A's log has `The local player's grab ... was refused: the other player Holds it.` Repeat a few times; either player may win.
 
+### Contact walkthrough
+
+Run this after any change to how Holds spread by contact (#38), with the same builds, setup, and logs as the Hold endings walkthrough, and a game build that reports contacts (amnesia-tdd-tcp#57). A Hold taken by touch shows as a `HoldClaimed` line ending in `by contact.` The test room has a stack of three wooden boxes and a pyramid of three more; restart the story from PC A to rebuild them between steps.
+
+1. **A thrown prop topples a stack.** B throws the bottle into the stack of three boxes. Both screens show the boxes fall the same way and come to rest in the same places. B's log has a `by contact.` Claim for each box that moved, and both logs end each box's Hold with `settled.`
+2. **Walking into a box.** B walks into a box of the pyramid. A sees it move as B pushed it. B's log has a `by contact.` Claim for it. A walking into the box B pushed, after it settles, gives A the Claim the same way.
+3. **An Avatar pushes nothing.** A walks into a box while B watches. Only A's log has a `by contact.` Claim; B sees the box move with A's Hold and has no Claim of its own.
+4. **Contact never takes a Held prop.** B holds a box, and A throws the bottle at it. The box stays in B's hands on both screens. A's log has no `by contact.` Claim for that box; if the contact raced B's Claim, it shows as `The local player's contact with ... was refused: the other player Holds it.`
+5. **Accepted divergence, not a failure.** A prop B threw is still rolling when A throws another into it. Each screen may briefly show its own collision between the two before both settle where their Holders put them.
+
 If a game lacks `interactions` (an older build), that player sees `Your game does not support interactions; moving props will not be shared.` once after connecting. Their Game Peer writes no `entity...` or `reportedbodies` lines, and chat and Avatars keep working.
 
 ## Expected behavior and limitations
