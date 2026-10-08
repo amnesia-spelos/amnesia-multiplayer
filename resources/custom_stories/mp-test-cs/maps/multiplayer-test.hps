@@ -1,0 +1,35 @@
+void OnStart()
+{
+    InteractConnectPropWithMoveObject(
+        "ValveGate",
+        "valve_iron_rusty_1",
+        "castle_portcullis_1",
+        true,
+        false,
+        0
+    );
+
+    SetEntityConnectionStateChangeCallback("light_lever", "RoomLightLeverChanged");
+    SetLightVisible("RoomLight", false);
+    SetMultiSliderCallback("water_wheel_cog_panel_1", "RoomLightColorChanged");
+}
+
+void RoomLightColorChanged(string &in asEntity, int alState)
+{
+    // Change RGB color over 0.25 seconds, keeping the existing light radius.
+    if(alState == 0)
+        FadeLightTo("RoomLight", 0.7, 0.05, 0.05, 1.0, -1.0, 0.25);
+    else if(alState == 1)
+        FadeLightTo("RoomLight", 0.05, 0.7, 0.05, 1.0, -1.0, 0.25);
+    else if(alState == 2)
+        FadeLightTo("RoomLight", 0.05, 0.05, 0.7, 1.0, -1.0, 0.25);
+}
+
+void RoomLightLeverChanged(string &in asEntity, int alState)
+{
+    // Keep the current light setting while the lever moves between its limits.
+    if(alState == 1)
+        SetLightVisible("RoomLight", true);
+    else if(alState == -1)
+        SetLightVisible("RoomLight", false);
+}
