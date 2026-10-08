@@ -7,7 +7,7 @@ namespace Multimnesia.Client;
 public enum LocalGameEventName
 {
     Connected, ProtocolNegotiated, UnrecognizedGameReply, AvatarCreated, SharedPoseCommandFailed,
-    HoldClaimed, HoldEnded, HoldMessageIgnored, HoldCommandFailed
+    HoldClaimed, HoldClaimDenied, HoldEnded, HoldMessageIgnored, HoldCommandFailed
 }
 
 public sealed record LocalGameLogEntry(

@@ -5,7 +5,8 @@ namespace Multimnesia.Client;
 
 // Shares the players' Holds on map-placed entities (ADR 0004). A local interaction becomes a Claim, and the bodies the
 // local player Holds stream to the other player. The other player's Claims make their entities Peer-Driven Entities in
-// the local game, which follow their bodies until they settle. Every line written to the local game is composed here.
+// the local game, which follow their bodies until they settle. Contention resolves by the order Claims reach the Session
+// Host's table, and the loser's game drives the entity for the winner. Every line written to the local game is composed here.
 // Active only while the other player is present and the local game granted `interactions`.
 // Every Hold ends when it settles, when the other player leaves or is replaced, or when its Holder or the local player
 // leaves its map. Maps are known from Poses and `interactions` Events, so a reload of the same map is not seen, and the
@@ -30,6 +31,10 @@ public sealed class Holds
     // Who Holds each entity. On the Session Host this table is the Multiplayer Relay's arbiter: every Claim, the Session
     // Host's own included, is ordered by a compare-and-set on it.
     private readonly Dictionary<Entity, Holder> _holds = [];
+    // Guarded by the _holds lock. On the Joining Player: the Session Host's Claims on entities the local player Holds,
+    // each with whether the Session Host is interacting. The Multiplayer Relay ordered them before the local player's
+    // Claim, which it denies unless the Session Host's Hold settles first.
+    private readonly Dictionary<Entity, bool> _earlierClaims = [];
     // Guarded by the _holds lock: the other player's arrival the table belongs to, and the map the local player was last seen on.
     private int _arrival;
     private string? _localMap;
@@ -60,6 +65,9 @@ public sealed class Holds
     private bool IsActive =>
         _negotiation.IsCompletedSuccessfully && _negotiation.Result.GrantsInteractions && _sessions.OtherPlayerArrival != 0;
 
+    // The Session Host's Game Peer is the Multiplayer Relay, whose table orders every Claim.
+    private bool IsArbiter => !_sessions.IsJoined;
+
     // Called for each `interactions` Event and `reportedbodies` State Update the local game sends. Never waits for the
     // other player: Hold messages are queued on the session lane, and bodies replace any not yet sent.
     public async Task HandleLocalGameEventAsync(GameEvent gameEvent)
@@ -72,24 +80,57 @@ public sealed class Holds
         {
             case GameEvent.InteractionStarted started:
                 var entity = new Entity(started.Map, started.EntityId);
-                bool claimed;
+                Task claim = Task.CompletedTask, start;
                 lock (_holds)
                 {
                     // Grabbing an entity the local player Holds while it is Settling continues that Hold.
-                    if (!TryTake(entity, Holder.Local, out claimed)) return;
+                    if (!TryTake(entity, Holder.Local, out var claimed))
+                    {
+                        // The entitydrive already queued for the other player takes it out of the local player's hands.
+                        _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldClaimDenied,
+                            $"The local player's grab of {entity} was refused: the other player Holds it.");
+                        return;
+                    }
+                    if (claimed)
+                    {
+                        _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldClaimed, $"The local player Claimed {entity}.");
+                        claim = SendLocked(new LanMessage.Claim(entity.Map, entity.PropId, ClaimReason.Interact));
+                    }
+                    start = SendLocked(new LanMessage.Interaction(entity.Map, entity.PropId, started.BodyId, true));
                 }
-                if (claimed)
+                await claim;
+                await start;
+                break;
+            case GameEvent.InteractionEnded ended:
+                Task end;
+                lock (_holds)
                 {
-                    _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldClaimed, $"The local player Claimed {entity}.");
-                    await SendAsync(new LanMessage.Claim(entity.Map, entity.PropId, ClaimReason.Interact));
+                    if (!IsHeldByLocked(new(ended.Map, ended.EntityId), Holder.Local)) break;
+                    end = SendLocked(new LanMessage.Interaction(ended.Map, ended.EntityId, ended.BodyId, false));
                 }
-                await SendAsync(new LanMessage.Interaction(entity.Map, entity.PropId, started.BodyId, true));
+                await end;
                 break;
-            case GameEvent.InteractionEnded ended when IsHeldBy(new(ended.Map, ended.EntityId), Holder.Local):
-                await SendAsync(new LanMessage.Interaction(ended.Map, ended.EntityId, ended.BodyId, false));
-                break;
-            case GameEvent.ReportSettled settled when TryEnd(new(settled.Map, settled.EntityId), Holder.Local):
-                await SendAsync(new LanMessage.Settled(settled.Map, settled.EntityId));
+            case GameEvent.ReportSettled reportSettled:
+                var settled = new Entity(reportSettled.Map, reportSettled.EntityId);
+                Task settledSent;
+                bool driven;
+                lock (_holds)
+                {
+                    if (!IsHeldByLocked(settled, Holder.Local)) break;
+                    EndLocked(settled, "settled");
+                    settledSent = SendLocked(new LanMessage.Settled(settled.Map, settled.PropId));
+                    // The Multiplayer Relay ordered the Session Host's Claim first, so its denial of the local player's
+                    // is on its way; until then, a grab would send a new Claim that the denial could be taken to answer.
+                    driven = _earlierClaims.Remove(settled, out var interacting);
+                    if (driven)
+                    {
+                        _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldClaimed,
+                            $"The other player's Claim on {settled}, ordered ahead of the local player's, took effect.");
+                        DriveLocked(settled, interacting);
+                    }
+                }
+                if (driven) Update();
+                await settledSent;
                 break;
             case GameEvent.ReportedBodies reported:
                 BodyEntry[] held;
@@ -108,16 +149,44 @@ public sealed class Holds
         {
             switch (message)
             {
-                case LanMessage.Claim when TryTake(entity, Holder.Other, out _):
-                    _lines.Enqueue(GameInteractionProtocol.EntityDrive(entity.PropId, entity.Map));
+                // Already held by the other player when their Claim Denial overtook their Claim.
+                case LanMessage.Claim when TryTake(entity, Holder.Other, out var claimed):
+                    if (!claimed) return;
                     _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldClaimed, $"The other player Claimed {entity}.");
+                    DriveLocked(entity, interacting: false);
+                    break;
+                // The local player's Claim was ordered first. The denial ends the other player's interaction: their Game
+                // Peer drives the entity for the local player. Never awaited, so a failure ends the session unobserved here.
+                case LanMessage.Claim when IsArbiter:
+                    _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldClaimDenied, $"Denied the other player's Claim on {entity}.");
+                    _ = SendLocked(new LanMessage.ClaimDenied(entity.Map, entity.PropId));
+                    return;
+                // The Multiplayer Relay accepts a Claim only on an entity nobody Holds, so it ordered the Session Host's first.
+                case LanMessage.Claim:
+                    _earlierClaims[entity] = false;
+                    _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldClaimed,
+                        $"The other player Claimed {entity} ahead of the local player.");
+                    return;
+                case LanMessage.ClaimDenied when IsHeldByLocked(entity, Holder.Local):
+                    _holds.Remove(entity);
+                    _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldClaimDenied, $"The local player's Claim on {entity} was denied.");
+                    // Driving the entity ends the local player's interaction with it.
+                    DriveLocked(entity, _earlierClaims.Remove(entity, out var interacting) && interacting);
                     break;
                 case LanMessage.Interaction interaction when IsHeldByLocked(entity, Holder.Other):
                     _lines.Enqueue(GameInteractionProtocol.EntityInteracting(entity.PropId, interaction.Active, entity.Map));
                     break;
+                case LanMessage.Interaction interaction when _earlierClaims.ContainsKey(entity):
+                    _earlierClaims[entity] = interaction.Active;
+                    return;
                 case LanMessage.Settled when IsHeldByLocked(entity, Holder.Other):
                     EndLocked(entity, "settled");
                     break;
+                // The Multiplayer Relay accepted the local player's Claim after the Session Host's Hold ended.
+                case LanMessage.Settled when _earlierClaims.Remove(entity):
+                    _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldEnded,
+                        $"The other player's Hold on {entity} ended: settled before the local player's Claim was ordered.");
+                    return;
                 default:
                     _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldMessageIgnored, $"Ignored {message}.");
                     return;
@@ -161,21 +230,14 @@ public sealed class Holds
         return claimed || _holds[entity] == holder;
     }
 
-    private bool IsHeldBy(Entity entity, Holder holder)
-    {
-        lock (_holds) return IsHeldByLocked(entity, holder);
-    }
-
     private bool IsHeldByLocked(Entity entity, Holder holder) => _holds.TryGetValue(entity, out var current) && current == holder;
 
-    private bool TryEnd(Entity entity, Holder holder)
+    // The entity becomes a Peer-Driven Entity for the other player, mirroring whether they are interacting with it.
+    private void DriveLocked(Entity entity, bool interacting)
     {
-        lock (_holds)
-        {
-            if (!IsHeldByLocked(entity, holder)) return false;
-            EndLocked(entity, "settled");
-            return true;
-        }
+        _holds[entity] = Holder.Other;
+        _lines.Enqueue(GameInteractionProtocol.EntityDrive(entity.PropId, entity.Map));
+        if (interacting) _lines.Enqueue(GameInteractionProtocol.EntityInteracting(entity.PropId, true, entity.Map));
     }
 
     // A departure or a replacement: none of the table, the local player's Holds included, means anything to who comes next.
@@ -218,6 +280,13 @@ public sealed class Holds
     {
         Entity[] ending = [.. _holds.Where(hold => ends(hold.Key, hold.Value)).Select(hold => hold.Key)];
         foreach (var entity in ending) EndLocked(entity, reason, releaseInLocalGame);
+        // Never driven in the local game, so nothing to release.
+        foreach (var entity in _earlierClaims.Keys.Where(entity => ends(entity, Holder.Other)).ToArray())
+        {
+            _earlierClaims.Remove(entity);
+            _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldEnded,
+                $"The other player's Hold on {entity}, Claimed ahead of the local player, ended: {reason}.");
+        }
         return ending.Length;
     }
 
@@ -231,7 +300,9 @@ public sealed class Holds
             $"The {(holder == Holder.Local ? "local" : "other")} player's Hold on {entity} ended: {reason}.");
     }
 
-    private Task SendAsync(LanMessage.HoldMessage message) => _sessions.SendHoldMessageAsync(message, _cancellationToken);
+    // Queued on the session lane before the _holds lock is released, so Hold messages leave in the order the Holds changed
+    // in, whichever thread changed them. Queuing never calls back into Holds; only a full lane, which ends the Multiplayer Session, leaves work for the task.
+    private Task SendLocked(LanMessage.HoldMessage message) => _sessions.SendHoldMessageAsync(message, _cancellationToken);
 
     private void Update()
     {

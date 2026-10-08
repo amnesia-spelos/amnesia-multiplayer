@@ -340,6 +340,169 @@ public sealed class HoldsTests
     }
 
     [Fact]
+    public async Task On_the_Session_Host_the_first_Claim_wins_and_a_later_one_is_denied()
+    {
+        var holds = await CreatePresentHoldsAsync();
+        await holds.HandleLocalGameEventAsync(Grab);
+
+        holds.HandleReceivedHoldMessage(ClaimOf12);
+        holds.HandleReceivedHoldMessage(new LanMessage.Interaction(Map, 12, 3, true));
+        holds.HandleReceivedBodies(new(1000, Map, [new(12, 3, Carried)]));
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        Assert.Equal([ClaimOf12, new LanMessage.Interaction(Map, 12, 3, true), new LanMessage.ClaimDenied(Map, 12)],
+            _sessions.SentHoldMessages);
+        Assert.Equal([Subscribe], _game.Lines);
+        Assert.Contains(_game.Logged, entry =>
+            entry.Event == LocalGameEventName.HoldClaimDenied && entry.Line == $"Denied the other player's Claim on entity 12 on {Map}.");
+    }
+
+    [Fact]
+    public async Task On_the_Session_Host_its_own_Claim_on_an_entity_the_other_player_Holds_is_denied()
+    {
+        var holds = await CreatePresentHoldsAsync();
+        holds.HandleReceivedHoldMessage(ClaimOf12);
+        await _game.WaitForLinesAsync(2);
+
+        // The local game grabbed before it applied the entitydrive, which takes the entity out of the player's hands.
+        await holds.HandleLocalGameEventAsync(Grab);
+        await holds.HandleLocalGameEventAsync(Report(1000, new BodyEntry(12, 3, Carried)));
+
+        Assert.Empty(_sessions.SentHoldMessages);
+        Assert.Empty(_sessions.SentBodies);
+        Assert.Equal([Subscribe, Drive], _game.Lines);
+        Assert.Contains(_game.Logged, entry =>
+            entry.Event == LocalGameEventName.HoldClaimDenied && entry.Line == $"The local player's grab of entity 12 on {Map} was refused: the other player Holds it.");
+    }
+
+    [Fact]
+    public async Task A_denied_Joining_Player_drives_the_entity_for_the_Session_Host_from_its_interaction_and_bodies()
+    {
+        _sessions.IsJoined = true;
+        var holds = await CreatePresentHoldsAsync();
+        await holds.HandleLocalGameEventAsync(Grab);
+
+        // The Session Host's Claim was ordered first; until the denial arrives, the local player's Claim stands.
+        holds.HandleReceivedHoldMessage(ClaimOf12);
+        holds.HandleReceivedHoldMessage(new LanMessage.Interaction(Map, 12, 3, true));
+        holds.HandleReceivedBodies(new(999, Map, [new(12, 3, Carried)]));
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        holds.HandleReceivedHoldMessage(new LanMessage.ClaimDenied(Map, 12));
+        await _game.WaitForLinesAsync(3);
+        holds.HandleReceivedBodies(new(1000, Map, [new(12, 3, Carried)]));
+        await holds.HandleLocalGameEventAsync(new GameEvent.InteractionEnded(12, 3, InteractionEnding.Released, Map));
+        await holds.HandleLocalGameEventAsync(Report(1000, new BodyEntry(12, 3, Carried)));
+
+        await _game.WaitForLinesAsync(4);
+        Assert.Equal([Subscribe, Drive, $"entityinteracting 12 1 {Map}", $"entitybodies 1000 1 12 3 {CarriedText} {Map}"], _game.Lines);
+        Assert.Equal([ClaimOf12, new LanMessage.Interaction(Map, 12, 3, true)], _sessions.SentHoldMessages);
+        Assert.Empty(_sessions.SentBodies);
+        Assert.Contains(_game.Logged, entry =>
+            entry.Event == LocalGameEventName.HoldClaimDenied && entry.Line == $"The local player's Claim on entity 12 on {Map} was denied.");
+    }
+
+    [Fact]
+    public async Task A_denial_that_overtakes_the_Session_Hosts_Claim_still_hands_it_the_entity()
+    {
+        _sessions.IsJoined = true;
+        var holds = await CreatePresentHoldsAsync();
+        await holds.HandleLocalGameEventAsync(Grab);
+
+        holds.HandleReceivedHoldMessage(new LanMessage.ClaimDenied(Map, 12));
+        holds.HandleReceivedHoldMessage(ClaimOf12);
+        holds.HandleReceivedHoldMessage(new LanMessage.Interaction(Map, 12, 3, true));
+
+        await _game.WaitForLinesAsync(3);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        Assert.Equal([Subscribe, Drive, $"entityinteracting 12 1 {Map}"], _game.Lines);
+    }
+
+    [Fact]
+    public async Task A_Session_Host_Claim_that_settles_before_the_local_one_is_ordered_leaves_the_local_Hold_standing()
+    {
+        _sessions.IsJoined = true;
+        var holds = await CreatePresentHoldsAsync();
+        await holds.HandleLocalGameEventAsync(Grab);
+
+        holds.HandleReceivedHoldMessage(ClaimOf12);
+        holds.HandleReceivedHoldMessage(new LanMessage.Settled(Map, 12));
+        await holds.HandleLocalGameEventAsync(Report(1000, new BodyEntry(12, 3, Carried)));
+        holds.HandleReceivedHoldMessage(new LanMessage.ClaimDenied(Map, 40));
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        Assert.Equal([Subscribe], _game.Lines);
+        Assert.Equal([new LanMessage.Bodies(1000, Map, [new(12, 3, Carried)])], _sessions.SentBodies);
+    }
+
+    [Fact]
+    public async Task A_local_Hold_settling_before_its_denial_hands_the_entity_to_the_Session_Host_at_once()
+    {
+        _sessions.IsJoined = true;
+        var holds = await CreatePresentHoldsAsync();
+        await holds.HandleLocalGameEventAsync(Grab);
+        holds.HandleReceivedHoldMessage(ClaimOf12);
+
+        await holds.HandleLocalGameEventAsync(Throw);
+        await holds.HandleLocalGameEventAsync(Rest);
+        await _game.WaitForLinesAsync(2);
+        // A grab now is not a new Claim, so the denial still on its way cannot be taken for an answer to one.
+        await holds.HandleLocalGameEventAsync(Grab);
+        holds.HandleReceivedHoldMessage(new LanMessage.ClaimDenied(Map, 12));
+        holds.HandleReceivedHoldMessage(new LanMessage.Settled(Map, 12));
+
+        await _game.WaitForLinesAsync(3);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        Assert.Equal([Subscribe, Drive, Release], _game.Lines);
+        Assert.Single(_sessions.SentHoldMessages, message => message is LanMessage.Claim);
+    }
+
+    [Fact]
+    public async Task Two_Game_Peers_grabbing_at_once_agree_on_exactly_one_Holder()
+    {
+        var port = FreePort();
+        var hostGame = new RecordingGame();
+        var joiningGame = new RecordingGame();
+        Holds hostHolds = null!;
+        Holds joiningHolds = null!;
+        await using var host = new TcpSessionOperations(new SessionNetworkOptions { Port = port },
+            receiveHoldMessage: message => { hostHolds.HandleReceivedHoldMessage(message); return ValueTask.CompletedTask; },
+            receiveBodies: bodies => { hostHolds.HandleReceivedBodies(bodies); return ValueTask.CompletedTask; });
+        await using var joining = new TcpSessionOperations(new SessionNetworkOptions { Port = port },
+            receiveHoldMessage: message => { joiningHolds.HandleReceivedHoldMessage(message); return ValueTask.CompletedTask; },
+            receiveBodies: bodies => { joiningHolds.HandleReceivedBodies(bodies); return ValueTask.CompletedTask; });
+        hostHolds = CreateHolds(host, hostGame);
+        joiningHolds = CreateHolds(joining, joiningGame);
+        await new GamePeerOrchestrator(host).HandleAsync(new ChatEntry("Host", "/host"), TestContext.Current.CancellationToken);
+        await new GamePeerOrchestrator(joining).HandleAsync(new ChatEntry("Joiner", "/join 127.0.0.1"), TestContext.Current.CancellationToken);
+        await hostGame.WaitForLinesAsync(1);
+        await joiningGame.WaitForLinesAsync(1);
+
+        await Task.WhenAll(
+            Task.Run(() => hostHolds.HandleLocalGameEventAsync(Grab), TestContext.Current.CancellationToken),
+            Task.Run(() => joiningHolds.HandleLocalGameEventAsync(Grab), TestContext.Current.CancellationToken));
+
+        // The loser's game is told to drive the entity for the winner; the winner's game is not.
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        while (!hostGame.Lines.Contains(Drive) && !joiningGame.Lines.Contains(Drive)) await Task.Delay(5, timeout.Token);
+        await Task.Delay(100, TestContext.Current.CancellationToken);
+        Assert.NotEqual(hostGame.Lines.Contains(Drive), joiningGame.Lines.Contains(Drive));
+        var hostLost = hostGame.Lines.Contains(Drive);
+        var (loser, winner) = hostLost ? (hostGame, joiningHolds) : (joiningGame, hostHolds);
+        Assert.Equal([Subscribe, Drive, $"entityinteracting 12 1 {Map}"], loser.Lines);
+
+        // Both tables agree: the winner's bodies drive the loser's copy, and its settling releases it.
+        await winner.HandleLocalGameEventAsync(Report(1000, new BodyEntry(12, 3, Carried)));
+        await loser.WaitForLinesAsync(4);
+        await winner.HandleLocalGameEventAsync(Throw);
+        await winner.HandleLocalGameEventAsync(Rest);
+        await loser.WaitForLinesAsync(6);
+        Assert.Equal(
+            [Subscribe, Drive, $"entityinteracting 12 1 {Map}", $"entitybodies 1000 1 12 3 {CarriedText} {Map}",
+                $"entityinteracting 12 0 {Map}", Release],
+            loser.Lines);
+    }
+
+    [Fact]
     public async Task Two_Game_Peers_see_each_others_grab_and_throw_until_it_settles()
     {
         var port = FreePort();
@@ -468,7 +631,7 @@ public sealed class HoldsTests
         private readonly List<LanMessage.Bodies> _sentBodies = [];
         public event Action? MultiplayerSessionEnded { add { } remove { } }
         public event Action? OtherPlayerPresenceChanged;
-        public bool IsJoined => false;
+        public bool IsJoined { get; set; }
         public int OtherPlayerArrival => Volatile.Read(ref _currentArrival);
         public List<LanMessage.HoldMessage> SentHoldMessages { get { lock (_sentHoldMessages) return [.. _sentHoldMessages]; } }
         public List<LanMessage.Bodies> SentBodies { get { lock (_sentBodies) return [.. _sentBodies]; } }
