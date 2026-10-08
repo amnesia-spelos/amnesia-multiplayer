@@ -9,9 +9,9 @@ namespace Multimnesia.Client;
 // Contention resolves by the order Claims reach the Session Host's table, and the loser's game drives the entity for the
 // winner. Every line written to the local game is composed here.
 // Active only while the other player is present and the local game granted `interactions`.
-// Every Hold ends when it settles, when the other player leaves or is replaced, or when its Holder or the local player
-// leaves its map. Maps are known from Poses and `interactions` Events, so a reload of the same map is not seen, and the
-// Holder leaving a map is not seen without their Poses. One per local game Session: the game releases its Peer-Driven
+// Every Hold ends when it settles or breaks, when the other player leaves or is replaced, or when its Holder or the local
+// player leaves its map. Maps are known from Poses and `interactions` Events, so a reload of the same map is not seen, and
+// the Holder leaving a map is not seen without their Poses. One per local game Session: the game releases its Peer-Driven
 // Entities and subscription when that Session ends, and the other player sees this Game Peer depart.
 public sealed class Holds
 {
@@ -154,6 +154,22 @@ public sealed class Holds
                 if (driven) Update();
                 await settledSent;
                 break;
+            case GameEvent.ReportBroke reportBroke:
+                var broken = new Entity(reportBroke.Map, reportBroke.EntityId);
+                Task brokeSent;
+                lock (_holds)
+                {
+                    if (!IsHeldByLocked(broken, Holder.Local)) break;
+                    EndLocked(broken, "broke");
+                    brokeSent = SendLocked(new LanMessage.Broke(broken.Map, broken.PropId, reportBroke.State));
+                    // The local copy is gone, so the Session Host's Claim ordered ahead of the local player's has nothing
+                    // left to drive here, even if its Hold later breaks too.
+                    if (_earlierClaims.Remove(broken))
+                        _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldEnded,
+                            $"The other player's Hold on {broken}, Claimed ahead of the local player, ended: the local copy broke.");
+                }
+                await brokeSent;
+                break;
             case GameEvent.ReportedBodies reported:
                 List<BodyEntry> held = [];
                 lock (_holds)
@@ -213,6 +229,16 @@ public sealed class Holds
                 case LanMessage.Settled when IsHeldByLocked(entity, Holder.Other):
                     EndLocked(entity, "settled");
                     break;
+                // Breaking it ends driving, so the debris and contained item fall under local physics.
+                case LanMessage.Broke broke when IsHeldByLocked(entity, Holder.Other):
+                    BreakLocked(entity, broke.State);
+                    break;
+                // The Multiplayer Relay ordered the Session Host's Claim first, so its break stands, and the denial of the
+                // local player's Claim is on its way. The game breaks only a Peer-Driven Entity, so it is driven first.
+                case LanMessage.Broke broke when _earlierClaims.Remove(entity):
+                    DriveLocked(entity, interacting: false);
+                    BreakLocked(entity, broke.State);
+                    break;
                 // The Multiplayer Relay accepted the local player's Claim after the Session Host's Hold ended.
                 case LanMessage.Settled when _earlierClaims.Remove(entity):
                     _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldEnded,
@@ -269,6 +295,13 @@ public sealed class Holds
         _holds[entity] = Holder.Other;
         _lines.Enqueue(GameInteractionProtocol.EntityDrive(entity.PropId, entity.Map));
         if (interacting) _lines.Enqueue(GameInteractionProtocol.EntityInteracting(entity.PropId, true, entity.Map));
+    }
+
+    // The other player's entity breaks from their final state instead of returning to local physics.
+    private void BreakLocked(Entity entity, BodyState state)
+    {
+        EndLocked(entity, "broke", releaseInLocalGame: false);
+        _lines.Enqueue(GameInteractionProtocol.EntityBreak(entity.PropId, state, entity.Map));
     }
 
     // A departure or a replacement: none of the table, the local player's Holds included, means anything to who comes next.

@@ -366,6 +366,23 @@ public sealed class HoldsTests
     }
 
     [Fact]
+    public async Task A_local_break_relays_the_final_state_and_ends_the_Hold()
+    {
+        var holds = await CreatePresentHoldsAsync();
+        await holds.HandleLocalGameEventAsync(Grab);
+        await holds.HandleLocalGameEventAsync(Throw);
+
+        await holds.HandleLocalGameEventAsync(new GameEvent.ReportBroke(12, Carried, Map));
+        await holds.HandleLocalGameEventAsync(Report(1033, new BodyEntry(12, 3, Carried)));
+        await holds.HandleLocalGameEventAsync(Grab);
+
+        LanMessage.HoldMessage start = new LanMessage.Interaction(Map, 12, 3, true), end = new LanMessage.Interaction(Map, 12, 3, false);
+        Assert.Equal([ClaimOf12, start, end, new LanMessage.Broke(Map, 12, Carried), ClaimOf12, start], _sessions.SentHoldMessages);
+        Assert.Empty(_sessions.SentBodies);
+        Assert.True(LoggedHoldEnding("The local player's Hold on entity 12", "broke."));
+    }
+
+    [Fact]
     public async Task Grabbing_a_Settling_entity_again_continues_the_Hold_and_a_settled_one_is_Claimed_anew()
     {
         var holds = await CreatePresentHoldsAsync();
@@ -451,6 +468,22 @@ public sealed class HoldsTests
 
         Assert.Equal([Subscribe, Drive, Release], _game.Lines);
         Assert.Contains(_game.Logged, entry => entry.Event == LocalGameEventName.HoldEnded && entry.Line.Contains("settled"));
+    }
+
+    [Fact]
+    public async Task The_other_players_entity_breaking_breaks_it_from_the_final_state_and_ends_their_Hold()
+    {
+        var holds = await CreatePresentHoldsAsync();
+        holds.HandleReceivedHoldMessage(ClaimOf12);
+
+        holds.HandleReceivedHoldMessage(new LanMessage.Broke(Map, 12, Carried));
+        holds.HandleReceivedBodies(new(1000, Map, [new(12, 3, Carried)]));
+        holds.HandleReceivedHoldMessage(new LanMessage.Settled(Map, 12));
+        await _game.WaitForLinesAsync(3);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        Assert.Equal([Subscribe, Drive, $"entitybreak 12 {CarriedText} {Map}"], _game.Lines);
+        Assert.True(LoggedHoldEnding("The other player's Hold on entity 12", "broke."));
     }
 
     [Fact]
@@ -564,6 +597,43 @@ public sealed class HoldsTests
     }
 
     [Fact]
+    public async Task A_Session_Host_Claim_that_breaks_before_the_local_one_is_ordered_breaks_the_local_copy()
+    {
+        _sessions.IsJoined = true;
+        var holds = await CreatePresentHoldsAsync();
+        await holds.HandleLocalGameEventAsync(Grab);
+
+        holds.HandleReceivedHoldMessage(ClaimOf12);
+        holds.HandleReceivedHoldMessage(new LanMessage.Interaction(Map, 12, 3, true));
+        holds.HandleReceivedHoldMessage(new LanMessage.Broke(Map, 12, Carried));
+        await holds.HandleLocalGameEventAsync(Report(1000, new BodyEntry(12, 3, Carried)));
+        holds.HandleReceivedHoldMessage(new LanMessage.ClaimDenied(Map, 12));
+        await _game.WaitForLinesAsync(3);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        Assert.Equal([Subscribe, Drive, $"entitybreak 12 {CarriedText} {Map}"], _game.Lines);
+        Assert.Empty(_sessions.SentBodies);
+        Assert.True(LoggedHoldEnding("The other player's Hold on entity 12", "broke."));
+    }
+
+    [Fact]
+    public async Task A_local_Hold_breaking_before_its_denial_leaves_nothing_to_drive_or_break()
+    {
+        _sessions.IsJoined = true;
+        var holds = await CreatePresentHoldsAsync();
+        await holds.HandleLocalGameEventAsync(Grab);
+        holds.HandleReceivedHoldMessage(ClaimOf12);
+
+        await holds.HandleLocalGameEventAsync(new GameEvent.ReportBroke(12, Carried, Map));
+        holds.HandleReceivedHoldMessage(new LanMessage.ClaimDenied(Map, 12));
+        holds.HandleReceivedHoldMessage(new LanMessage.Broke(Map, 12, Carried));
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        Assert.Equal([Subscribe], _game.Lines);
+        Assert.Contains(new LanMessage.Broke(Map, 12, Carried), _sessions.SentHoldMessages);
+    }
+
+    [Fact]
     public async Task A_local_Hold_settling_before_its_denial_hands_the_entity_to_the_Session_Host_at_once()
     {
         _sessions.IsJoined = true;
@@ -669,6 +739,37 @@ public sealed class HoldsTests
         await hostHolds.HandleLocalGameEventAsync(Grab);
         await joiningGame.WaitForLinesAsync(3);
         Assert.Equal([Subscribe, Drive, $"entityinteracting 12 1 {Map}"], joiningGame.Lines);
+    }
+
+    [Fact]
+    public async Task Two_Game_Peers_see_a_thrown_breakable_break()
+    {
+        var port = FreePort();
+        var hostGame = new RecordingGame();
+        var joiningGame = new RecordingGame();
+        Holds hostHolds = null!;
+        Holds joiningHolds = null!;
+        await using var host = new TcpSessionOperations(new SessionNetworkOptions { Port = port },
+            receiveHoldMessage: message => { hostHolds.HandleReceivedHoldMessage(message); return ValueTask.CompletedTask; },
+            receiveBodies: bodies => { hostHolds.HandleReceivedBodies(bodies); return ValueTask.CompletedTask; });
+        await using var joining = new TcpSessionOperations(new SessionNetworkOptions { Port = port },
+            receiveHoldMessage: message => { joiningHolds.HandleReceivedHoldMessage(message); return ValueTask.CompletedTask; },
+            receiveBodies: bodies => { joiningHolds.HandleReceivedBodies(bodies); return ValueTask.CompletedTask; });
+        hostHolds = CreateHolds(host, hostGame);
+        joiningHolds = CreateHolds(joining, joiningGame);
+        await new GamePeerOrchestrator(host).HandleAsync(new ChatEntry("Host", "/host"), TestContext.Current.CancellationToken);
+        await new GamePeerOrchestrator(joining).HandleAsync(new ChatEntry("Joiner", "/join 127.0.0.1"), TestContext.Current.CancellationToken);
+        await hostGame.WaitForLinesAsync(1);
+        await joiningGame.WaitForLinesAsync(1);
+
+        await joiningHolds.HandleLocalGameEventAsync(Grab);
+        await joiningHolds.HandleLocalGameEventAsync(Throw);
+        await joiningHolds.HandleLocalGameEventAsync(new GameEvent.ReportBroke(12, Carried, Map));
+        await hostGame.WaitForLinesAsync(5);
+
+        Assert.Equal(
+            [Subscribe, Drive, $"entityinteracting 12 1 {Map}", $"entityinteracting 12 0 {Map}", $"entitybreak 12 {CarriedText} {Map}"],
+            hostGame.Lines);
     }
 
     [Fact]

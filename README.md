@@ -239,6 +239,15 @@ Run this after any change to how Holds spread by contact (#38), with the same bu
 4. **Contact never takes a Held prop.** B holds a box, and A throws the bottle at it. The box stays in B's hands on both screens. A's log has no `by contact.` Claim for that box; if the contact raced B's Claim, it shows as `The local player's contact with ... was refused: the other player Holds it.`
 5. **Accepted divergence, not a failure.** A prop B threw is still rolling when A throws another into it. Each screen may briefly show its own collision between the two before both settle where their Holders put them.
 
+### Breaks walkthrough
+
+Run this after any change to how breaks are shared (#39), with the same builds, setup, and logs as the Hold endings walkthrough, and a game build that breaks reported props (amnesia-tdd-tcp#58). A shared break ends the Hold with `broke.` in both logs. Restart the story from PC A to restore the props between steps.
+
+1. **A thrown breakable breaks for both.** B picks up the key jar (entity 87) and throws it at a wall. Both screens show it break at the same place, and the sanity potion it holds falls out in both games. Both logs end the Hold with `broke.` A's log has no `HoldCommandFailed` `entitybreak` line.
+2. **The debris is cosmetic.** After step 1, A and B each try to pick up a shard. Neither can, and no `HoldClaimed` line appears for one. The shards may come to rest in different places on the two screens. Each player can pick up the potion in their own game.
+3. **A driven copy never breaks by itself.** B throws the vase (entity 76) gently, so it hits the wall on B's screen without breaking. On A's screen it does not break either, though its copy hits the same wall. Both logs end the Hold with `settled.`
+4. **Swap roles.** Repeat step 1 with A throwing and B watching.
+
 If a game lacks `interactions` (an older build), that player sees `Your game does not support interactions; moving props will not be shared.` once after connecting. Their Game Peer writes no `entity...` or `reportedbodies` lines, and chat and Avatars keep working.
 
 ## Expected behavior and limitations
