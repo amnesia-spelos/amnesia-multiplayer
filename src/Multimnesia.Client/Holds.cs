@@ -3,10 +3,11 @@ using Multimnesia.Contracts;
 
 namespace Multimnesia.Client;
 
-// Shares the players' Holds on map-placed entities (ADR 0004). A local interaction becomes a Claim, and the bodies the
-// local player Holds stream to the other player. The other player's Claims make their entities Peer-Driven Entities in
-// the local game, which follow their bodies until they settle. Contention resolves by the order Claims reach the Session
-// Host's table, and the loser's game drives the entity for the winner. Every line written to the local game is composed here.
+// Shares the players' Holds on map-placed entities (ADR 0004). A local interaction or contact becomes a Claim, and the
+// bodies of every entity the local player Holds stream to the other player in one message per report. The other
+// player's Claims make their entities Peer-Driven Entities in the local game, which follow their bodies until they settle.
+// Contention resolves by the order Claims reach the Session Host's table, and the loser's game drives the entity for the
+// winner. Every line written to the local game is composed here.
 // Active only while the other player is present and the local game granted `interactions`.
 // Every Hold ends when it settles, when the other player leaves or is replaced, or when its Holder or the local player
 // leaves its map. Maps are known from Poses and `interactions` Events, so a reload of the same map is not seen, and the
@@ -101,6 +102,27 @@ public sealed class Holds
                 await claim;
                 await start;
                 break;
+            // A Hold taken by touch starts Settling: there is no interaction to share.
+            case GameEvent.ReportContacted contacted:
+                var touched = new Entity(contacted.Map, contacted.EntityId);
+                Task contactClaim;
+                lock (_holds)
+                {
+                    // Contact never takes an entity that already has a Hold. The entitydrive already queued for the other
+                    // player takes it out of the local game's report.
+                    if (!TryTake(touched, Holder.Local, out var claimed))
+                    {
+                        _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldClaimDenied,
+                            $"The local player's contact with {touched} was refused: the other player Holds it.");
+                        break;
+                    }
+                    if (!claimed) break;
+                    _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldClaimed,
+                        $"The local player Claimed {touched} by contact.");
+                    contactClaim = SendLocked(new LanMessage.Claim(touched.Map, touched.PropId, ClaimReason.Contact));
+                }
+                await contactClaim;
+                break;
             case GameEvent.InteractionEnded ended:
                 Task end;
                 lock (_holds)
@@ -133,9 +155,18 @@ public sealed class Holds
                 await settledSent;
                 break;
             case GameEvent.ReportedBodies reported:
-                BodyEntry[] held;
-                lock (_holds) held = [.. reported.Entries.Where(entry => IsHeldByLocked(new(reported.Map, entry.PropId), Holder.Local))];
-                if (held.Length > 0) _sessions.SendBodies(new(reported.TimeMs, reported.Map, held));
+                List<BodyEntry> held = [];
+                lock (_holds)
+                {
+                    // One message carries every Hold. The game reports at most 32 bodies, but an entity whose bodies would
+                    // not fit is left out whole rather than half driven.
+                    foreach (var bodies in reported.Entries.GroupBy(entry => entry.PropId))
+                    {
+                        if (!IsHeldByLocked(new(reported.Map, bodies.Key), Holder.Local)) continue;
+                        if (held.Count + bodies.Count() <= LanProtocol.MaximumBodies) held.AddRange(bodies);
+                    }
+                }
+                if (held.Count > 0) _sessions.SendBodies(new(reported.TimeMs, reported.Map, held));
                 break;
         }
     }

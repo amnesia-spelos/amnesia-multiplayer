@@ -194,6 +194,135 @@ public sealed class HoldsTests
     }
 
     [Fact]
+    public async Task A_local_contact_Claims_the_entity_for_Settling_and_streams_it_until_it_settles()
+    {
+        var holds = await CreatePresentHoldsAsync();
+
+        await holds.HandleLocalGameEventAsync(new GameEvent.ReportContacted(40, Map));
+        await holds.HandleLocalGameEventAsync(Report(1000, new BodyEntry(40, 0, Carried)));
+        await holds.HandleLocalGameEventAsync(new GameEvent.ReportSettled(40, Map));
+        await holds.HandleLocalGameEventAsync(Report(1033, new BodyEntry(40, 0, Carried)));
+
+        Assert.Equal([new LanMessage.Claim(Map, 40, ClaimReason.Contact), new LanMessage.Settled(Map, 40)], _sessions.SentHoldMessages);
+        Assert.Equal([new LanMessage.Bodies(1000, Map, [new(40, 0, Carried)])], _sessions.SentBodies);
+        Assert.Contains(_game.Logged, entry =>
+            entry.Event == LocalGameEventName.HoldClaimed && entry.Line == $"The local player Claimed entity 40 on {Map} by contact.");
+    }
+
+    [Fact]
+    public async Task A_local_contact_never_takes_an_entity_the_other_player_Holds()
+    {
+        var holds = await CreatePresentHoldsAsync();
+        holds.HandleReceivedHoldMessage(ClaimOf12);
+        await _game.WaitForLinesAsync(2);
+
+        // The local game reported the contact before it applied the entitydrive, which takes the entity out of its report.
+        await holds.HandleLocalGameEventAsync(new GameEvent.ReportContacted(12, Map));
+        await holds.HandleLocalGameEventAsync(Report(1000, new BodyEntry(12, 3, Carried)));
+
+        Assert.Empty(_sessions.SentHoldMessages);
+        Assert.Empty(_sessions.SentBodies);
+        Assert.Equal([Subscribe, Drive], _game.Lines);
+        Assert.Contains(_game.Logged, entry =>
+            entry.Event == LocalGameEventName.HoldClaimDenied &&
+            entry.Line == $"The local player's contact with entity 12 on {Map} was refused: the other player Holds it.");
+    }
+
+    [Fact]
+    public async Task A_local_contact_with_an_entity_the_local_player_Holds_continues_that_Hold()
+    {
+        var holds = await CreatePresentHoldsAsync();
+        await holds.HandleLocalGameEventAsync(Grab);
+        await holds.HandleLocalGameEventAsync(Throw);
+
+        await holds.HandleLocalGameEventAsync(new GameEvent.ReportContacted(12, Map));
+
+        Assert.Single(_sessions.SentHoldMessages, message => message is LanMessage.Claim);
+        Assert.DoesNotContain(_game.Logged, entry => entry.Event == LocalGameEventName.HoldClaimDenied);
+    }
+
+    [Fact]
+    public async Task A_Joining_Player_denied_a_contact_Claim_drives_the_entity_for_the_Session_Host_without_an_interaction()
+    {
+        _sessions.IsJoined = true;
+        var holds = await CreatePresentHoldsAsync();
+        await holds.HandleLocalGameEventAsync(new GameEvent.ReportContacted(12, Map));
+
+        holds.HandleReceivedHoldMessage(new LanMessage.Claim(Map, 12, ClaimReason.Contact));
+        holds.HandleReceivedHoldMessage(new LanMessage.ClaimDenied(Map, 12));
+        await holds.HandleLocalGameEventAsync(Report(1000, new BodyEntry(12, 3, Carried)));
+
+        await _game.WaitForLinesAsync(2);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        Assert.Equal([Subscribe, Drive], _game.Lines);
+        Assert.Empty(_sessions.SentBodies);
+    }
+
+    [Fact]
+    public async Task The_other_players_contact_Claim_drives_the_entity_without_an_interaction()
+    {
+        var holds = await CreatePresentHoldsAsync();
+
+        holds.HandleReceivedHoldMessage(new LanMessage.Claim(Map, 12, ClaimReason.Contact));
+        holds.HandleReceivedBodies(new(1000, Map, [new(12, 3, Carried)]));
+        await _game.WaitForLinesAsync(3);
+        holds.HandleReceivedHoldMessage(new LanMessage.Settled(Map, 12));
+
+        await _game.WaitForLinesAsync(4);
+        Assert.Equal([Subscribe, Drive, $"entitybodies 1000 1 12 3 {CarriedText} {Map}", Release], _game.Lines);
+    }
+
+    [Fact]
+    public async Task On_the_Session_Host_a_contact_Claim_on_an_entity_it_Holds_is_denied()
+    {
+        var holds = await CreatePresentHoldsAsync();
+        await holds.HandleLocalGameEventAsync(new GameEvent.ReportContacted(12, Map));
+
+        holds.HandleReceivedHoldMessage(new LanMessage.Claim(Map, 12, ClaimReason.Contact));
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        Assert.Equal([new LanMessage.Claim(Map, 12, ClaimReason.Contact), new LanMessage.ClaimDenied(Map, 12)], _sessions.SentHoldMessages);
+        Assert.Equal([Subscribe], _game.Lines);
+    }
+
+    [Fact]
+    public async Task Every_Hold_of_the_local_player_streams_in_one_bodies_message_per_report()
+    {
+        var holds = await CreatePresentHoldsAsync();
+        await holds.HandleLocalGameEventAsync(Grab);
+        await holds.HandleLocalGameEventAsync(Throw);
+        await holds.HandleLocalGameEventAsync(new GameEvent.ReportContacted(40, Map));
+        await holds.HandleLocalGameEventAsync(new GameEvent.InteractionStarted(41, 0, Map));
+
+        await holds.HandleLocalGameEventAsync(Report(1000,
+            new BodyEntry(12, 3, Carried), new BodyEntry(40, 0, Carried), new BodyEntry(40, 1, Carried), new BodyEntry(41, 0, Carried)));
+
+        Assert.Equal(
+            [new LanMessage.Bodies(1000, Map, [new(12, 3, Carried), new(40, 0, Carried), new(40, 1, Carried), new(41, 0, Carried)])],
+            _sessions.SentBodies);
+    }
+
+    [Fact]
+    public async Task A_bodies_message_carries_at_most_32_entries_and_never_part_of_an_entity()
+    {
+        var holds = await CreatePresentHoldsAsync();
+        int[] props = [.. Enumerable.Range(100, 33)];
+        foreach (var prop in props) await holds.HandleLocalGameEventAsync(new GameEvent.ReportContacted(prop, Map));
+
+        // 30 single-body entities, one with three bodies that would take the message past 32, then two more that fit.
+        BodyEntry[] entries =
+        [
+            .. props[..30].Select(prop => new BodyEntry(prop, 0, Carried)),
+            .. Enumerable.Range(0, 3).Select(body => new BodyEntry(130, body, Carried)),
+            new BodyEntry(131, 0, Carried), new BodyEntry(132, 0, Carried),
+        ];
+        await holds.HandleLocalGameEventAsync(Report(1000, entries));
+
+        var sent = Assert.Single(_sessions.SentBodies);
+        Assert.Equal([.. entries[..30], new BodyEntry(131, 0, Carried), new BodyEntry(132, 0, Carried)], sent.Entries);
+    }
+
+    [Fact]
     public async Task Nothing_is_Claimed_while_the_other_player_is_not_present()
     {
         var holds = CreateHolds();
@@ -540,6 +669,46 @@ public sealed class HoldsTests
         await hostHolds.HandleLocalGameEventAsync(Grab);
         await joiningGame.WaitForLinesAsync(3);
         Assert.Equal([Subscribe, Drive, $"entityinteracting 12 1 {Map}"], joiningGame.Lines);
+    }
+
+    [Fact]
+    public async Task Two_Game_Peers_see_a_thrown_prop_topple_a_stack()
+    {
+        var port = FreePort();
+        var hostGame = new RecordingGame();
+        var joiningGame = new RecordingGame();
+        Holds hostHolds = null!;
+        Holds joiningHolds = null!;
+        await using var host = new TcpSessionOperations(new SessionNetworkOptions { Port = port },
+            receiveHoldMessage: message => { hostHolds.HandleReceivedHoldMessage(message); return ValueTask.CompletedTask; },
+            receiveBodies: bodies => { hostHolds.HandleReceivedBodies(bodies); return ValueTask.CompletedTask; });
+        await using var joining = new TcpSessionOperations(new SessionNetworkOptions { Port = port },
+            receiveHoldMessage: message => { joiningHolds.HandleReceivedHoldMessage(message); return ValueTask.CompletedTask; },
+            receiveBodies: bodies => { joiningHolds.HandleReceivedBodies(bodies); return ValueTask.CompletedTask; });
+        hostHolds = CreateHolds(host, hostGame);
+        joiningHolds = CreateHolds(joining, joiningGame);
+        await new GamePeerOrchestrator(host).HandleAsync(new ChatEntry("Host", "/host"), TestContext.Current.CancellationToken);
+        await new GamePeerOrchestrator(joining).HandleAsync(new ChatEntry("Joiner", "/join 127.0.0.1"), TestContext.Current.CancellationToken);
+        await hostGame.WaitForLinesAsync(1);
+        await joiningGame.WaitForLinesAsync(1);
+
+        // The Joining Player throws prop 12 into a stack of 40 on 41; 40 knocks 41 in turn.
+        await joiningHolds.HandleLocalGameEventAsync(Grab);
+        await joiningHolds.HandleLocalGameEventAsync(Throw);
+        await joiningHolds.HandleLocalGameEventAsync(new GameEvent.ReportContacted(40, Map));
+        await joiningHolds.HandleLocalGameEventAsync(new GameEvent.ReportContacted(41, Map));
+        await hostGame.WaitForLinesAsync(6);
+        await joiningHolds.HandleLocalGameEventAsync(Report(1000,
+            new BodyEntry(12, 3, Carried), new BodyEntry(40, 0, Carried), new BodyEntry(41, 0, Carried)));
+        await hostGame.WaitForLinesAsync(7);
+        foreach (var prop in new[] { 12, 40, 41 }) await joiningHolds.HandleLocalGameEventAsync(new GameEvent.ReportSettled(prop, Map));
+
+        await hostGame.WaitForLinesAsync(10);
+        Assert.Equal(
+            [Subscribe, Drive, $"entityinteracting 12 1 {Map}", $"entityinteracting 12 0 {Map}", $"entitydrive 40 {Map}", $"entitydrive 41 {Map}",
+                $"entitybodies 1000 3 12 3 {CarriedText} 40 0 {CarriedText} 41 0 {CarriedText} {Map}",
+                Release, $"entityrelease 40 {Map}", $"entityrelease 41 {Map}"],
+            hostGame.Lines);
     }
 
     [Theory]
