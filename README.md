@@ -221,6 +221,14 @@ Setup: on PC A, `/host`. On PC B, `/join <PC A's LAN address>`. On PC A, start "
 7. **The Holder's own entry is gone.** After the story restart that ends step 5, B picks up the prop again. B's log shows a fresh `HoldClaimed` for it, not a continued Hold, and A sees it move.
 8. **Known gap, not a failure: reload of the same map.** B picks up the prop and keeps holding it, and A restarts the story. Neither log ends the Hold, and the prop may stop syncing until both Game Peers are restarted. This is tracked in amnesia-tdd-tcp#67. Note what you see, but don't count it as a failure.
 
+### Contention walkthrough
+
+Run this after any change to how Claims are ordered (#36), with the same builds, setup, and logs as the Hold endings walkthrough. Claim Denials are `HoldClaimDenied` lines.
+
+1. **A held prop cannot be taken.** B picks up the prop and keeps holding it. A looks at it: A's crosshair greys and A cannot grab it. Then B lets go and the prop settles, and A can grab it. Repeat with A holding and B looking.
+2. **A held prop cannot be taken while Settling.** B throws the prop, and A tries to grab it in flight. A cannot until it lands and both logs end the Hold with `settled.`
+3. **Near-simultaneous grabs.** Both players look at the prop, and on a count of three both grab it. Exactly one player ends up holding it, and the other sees it leave their hands, if it reached them at all. Both players see it move with the Holder. The race shows as `HoldClaimDenied` lines. When B lost, A's log has `Denied the other player's Claim ...` and B's has `The local player's Claim ... was denied.` When A lost, A's log has `The local player's grab ... was refused: the other player Holds it.` Repeat a few times; either player may win.
+
 If a game lacks `interactions` (an older build), that player sees `Your game does not support interactions; moving props will not be shared.` once after connecting. Their Game Peer writes no `entity...` or `reportedbodies` lines, and chat and Avatars keep working.
 
 ## Expected behavior and limitations
