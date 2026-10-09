@@ -6,16 +6,16 @@ namespace Multimnesia.Tests;
 public sealed class GamePeerVersionTests
 {
     [Fact]
-    public void The_Game_Peer_is_Whisper_0_1_0()
+    public void The_Game_Peer_is_Grasp_0_2_0()
     {
-        Assert.Equal("0.1.0", GamePeerVersion.Version);
-        Assert.Equal("Whisper", GamePeerVersion.Codename);
+        Assert.Equal("0.2.0", GamePeerVersion.Version);
+        Assert.Equal("Grasp", GamePeerVersion.Codename);
     }
 
     [Fact]
     public void The_connected_notice_names_the_version_and_codename()
     {
-        Assert.Equal("Amnesia Multiplayer v0.1.0 \"Whisper\" connected.", GamePeerVersion.ConnectedNotice);
+        Assert.Equal("Amnesia Multiplayer v0.2.0 \"Grasp\" connected.", GamePeerVersion.ConnectedNotice);
     }
 
     [Fact]
@@ -23,6 +23,6 @@ public sealed class GamePeerVersionTests
     {
         var fileVersion = FileVersionInfo.GetVersionInfo(typeof(GamePeerVersion).Assembly.Location);
 
-        Assert.Equal("0.1.0.0", fileVersion.FileVersion);
+        Assert.Equal("0.2.0.0", fileVersion.FileVersion);
     }
 }

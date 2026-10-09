@@ -12,7 +12,7 @@ Players do not build any of this: a release archive contains the modified `Amnes
 - Windows x64 on both PCs.
 - Amnesia: The Dark Descent installed on both PCs.
 - The same game version on both PCs.
-- The modified `Amnesia.exe` produced by [`amnesia-tdd-tcp`](https://github.com/amnesia-spelos/amnesia-tdd-tcp), with its Game Interaction Protocol listening locally on port 5150. It must include Custom Story start support (`startcustomstory:<id>` and `EVENT:CustomStoryStarted:<id>`); with an older `Amnesia.exe`, chat still works, but the Session Host's starts are never shared, and starts shared with a Joining Player fail as unsupported. It must also support Game Interaction Protocol Version 2 with the `avatars` and `localpose` Capabilities for the Shared Pose; without them, the rest keeps working and the player is told movement will not be shared.
+- The modified `Amnesia.exe` produced by [`amnesia-tdd-tcp`](https://github.com/amnesia-spelos/amnesia-tdd-tcp), with its Game Interaction Protocol listening locally on port 5150. It must include Custom Story start support (`startcustomstory:<id>` and `EVENT:CustomStoryStarted:<id>`); with an older `Amnesia.exe`, chat still works, but the Session Host's starts are never shared, and starts shared with a Joining Player fail as unsupported. It must also support Game Interaction Protocol Version 2 with the `avatars` and `localpose` Capabilities for the Shared Pose; without them, the rest keeps working and the player is told movement will not be shared. For Entity Interaction Sync it must also grant the `interactions` Capability; without it, the rest keeps working and the player is told moving props will not be shared.
 - The same Custom Story installed on both PCs under the same folder name (its Custom Story Identifier). Custom Story versions are not compared.
 - For development, the .NET 10 SDK. Published self-contained builds do not require a separately installed .NET runtime.
 
@@ -37,11 +37,11 @@ To produce a release archive instead of a bare Game Peer folder, run `.\scripts\
 
 Game Peer versions follow SemVer as `0.MINOR.PATCH` while the project is in alpha:
 
-- Each codenamed milestone bumps the minor version; fixes to that milestone bump the patch version under the same codename. The current release is `v0.1.0`, codename "Whisper".
+- Each codenamed milestone bumps the minor version; fixes to that milestone bump the patch version under the same codename. The current release is `v0.1.0`, codename "Whisper". `main` builds `v0.2.0`, codename "Grasp", which is in development.
 - There is no `-alpha` suffix. Instead, GitHub releases are marked pre-release.
-- Release titles and archive names include the codename, for example `amnesia-multiplayer-v0.1.0-whisper-win-x64.zip`.
+- Release titles and archive names include the codename, for example `amnesia-multiplayer-v0.2.0-grasp-win-x64.zip`.
 
-The version and codename are defined once, in `src/Directory.Build.props`, and stamped into the executable's file version. When the Game Peer first connects to its local game, chat shows `Amnesia Multiplayer v0.1.0 "Whisper" connected.` Game Peers do not compare versions with each other; the `LanProtocol` version check at admission decides compatibility.
+The version and codename are defined once, in `src/Directory.Build.props`, and stamped into the executable's file version. When the Game Peer first connects to its local game, chat shows `Amnesia Multiplayer v0.2.0 "Grasp" connected.`, and each per-run log file starts with the same version. Game Peers do not compare versions with each other; the `LanProtocol` version check at admission decides compatibility.
 
 ## Setup
 
@@ -75,7 +75,7 @@ Once both players are in the Custom Story, each Game Peer streams its own player
 - It requires an `Amnesia.exe` that supports Avatars. If yours does not, you see `Your game does not support Avatars; movement will not be shared.` once, and chat and Custom Story starts keep working.
 - If the skeleton entity is not installed, you see `The Avatar model is not installed; the other player will be invisible.` and the Multiplayer Session continues.
 
-Avatars are not animated: an Avatar slides upright and makes no footsteps, and enemies ignore it. See [Expected behavior and limitations](#expected-behavior-and-limitations).
+An Avatar walks, idles, crouches, and looks up and down as its player does. It makes no footsteps, and enemies ignore it. See [Expected behavior and limitations](#expected-behavior-and-limitations).
 
 ## Player commands
 
@@ -190,14 +190,14 @@ For the Shared Custom Story Start, install `mp-test-cs` on both PCs and start ea
 
 A build is considered verified only when every step above produces the documented outcome on real hardware, in addition to the automated test suite passing.
 
-### Whisper walkthrough (from the release archive)
+### Release walkthrough (from the release archive)
 
-Run this one from the extracted release archive on two PCs, never from a dev build: it is what makes a release publishable (`docs/RELEASING.md`). It covers the Shared Pose and the release packaging; the steps above still cover chat, sessions, and the Shared Custom Story Start.
+Run this one from the extracted release archive on two PCs, never from a dev build: it is what makes a release publishable (`docs/RELEASING.md`). It covers the Shared Pose and the release packaging; the steps above still cover chat, sessions, and the Shared Custom Story Start, and the [Entity Interaction Sync walkthrough](#entity-interaction-sync-walkthrough) covers Holds.
 
 1. On both PCs, back up `Amnesia.exe` and extract the archive into the Amnesia folder as its `INSTALL.txt` describes, then add the private-network firewall rule on the PC that will host.
-2. On both PCs, double-click `Start Multiplayer.bat` in the Amnesia folder. Confirm the game starts, the Game Peer gets its own console window, and the game's chat shows `Amnesia Multiplayer v0.1.0 "Whisper" connected.` — the version each PC is running.
+2. On both PCs, double-click `Start Multiplayer.bat` in the Amnesia folder. Confirm the game starts, the Game Peer gets its own console window, and the game's chat shows `Amnesia Multiplayer v0.2.0 "Grasp" connected.` — the version each PC is running.
 3. On PC A, `/host`. On PC B, `/join <PC A's LAN address>`. On PC A, start "Amnesia Multiplayer Test". Confirm both games load the map.
-4. Walk around on both PCs. Confirm each player sees the other as the skeleton Avatar, moving smoothly rather than jumping between positions, turned the way that player is facing, and that walking into the Avatar blocks rather than passing through it.
+4. Walk around on both PCs. Confirm each player sees the other as the skeleton Avatar, moving smoothly rather than jumping between positions, turned the way that player is facing, walking, idling, crouching, and looking up and down as that player does, and that walking into the Avatar blocks rather than passing through it.
 5. Confirm ordinary chat still works both ways while moving.
 6. Trigger a placement that is not ordinary walking — the map start itself, or a `TeleportPlayer` — and confirm the Avatar snaps to the new position rather than gliding across the level to it.
 7. On PC B, `/leave`. Confirm PC A's Avatar disappears. `/join` again and have PC A start the Custom Story again; confirm both Avatars come back.
@@ -267,14 +267,14 @@ If a game lacks `interactions` (an older build), that player sees `Your game doe
 
 ## Expected behavior and limitations
 
-Whisper is a vertical slice: two players host, join, chat, start the same Custom Story together, and see each other move. What that slice does *not* cover:
+Two players host, join, chat, start the same Custom Story together, see each other move, and share how they move props, doors, levers, valves, and sliders. What that does *not* cover:
 
 - **Only Custom Story starts are shared.** In the main game, each player starts or loads it themselves (#23). Once both are on the same map, the Shared Pose and Holds work there as in a Custom Story.
 - **Map changes and returning to the main menu are not shared.** Only the Session Host's fresh Custom Story start is. Continue, Load Game, death reloads, quitting, and every map transition after the start are local.
 - **Changing game settings ends the Multiplayer Session for that player.** Applying settings restarts the game's Game Interaction Protocol server (amnesia-tdd-tcp#66), so the Game Peer loses its local game and has to rejoin. Pausing through the menu or a note does not.
 - **An Avatar stays frozen at its last Pose when its player returns to the main menu.** The game sends no Poses from the main menu and reports no map-left event, so the other player keeps seeing a motionless Avatar where that player last stood. Start the Custom Story again to resynchronize.
 - **Enemies ignore the Joining Player.** Enemy AI is aware only of the player in its own game.
-- Avatar animation, head pitch, crouch visuals, and footstep sounds: an Avatar slides upright and does not animate.
+- Avatar footstep sounds.
 - **What Entity Interaction Sync does not share.** Holds share how players move map-placed props, doors, levers, valves, and sliders, and breaks of props a player Holds. These are not shared:
   - Inventory, including picking up an item spilled from a broken prop.
   - Script execution and map state beyond the callbacks each game's own prop logic fires. Use-item callbacks, player collide and trigger-area callbacks, and interact callbacks run only in the game of the player who caused them (#43). A script that swaps or disables a prop, such as fitting a cogwheel, leaves the other game's copy as it was. Entity collide callbacks do run in both games when a shared Hold causes the collision.
