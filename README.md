@@ -206,6 +206,21 @@ Run this one from the extracted release archive on two PCs, never from a dev bui
 
 If either PC's game is an older build without Avatar support, that player sees `Your game does not support Avatars; movement will not be shared.` and chat and Custom Story starts keep working. If the skeleton entity is missing from a game folder, that player sees `The Avatar model is not installed; the other player will be invisible.` Both are degraded modes, not failures of the walkthrough — but a release archive extracted correctly should produce neither.
 
+### Entity Interaction Sync walkthrough
+
+Run this before calling a build's Entity Interaction Sync verified (#40), with the same builds and logs as the Hold endings walkthrough below. It covers each kind of interaction in the test room once; the walkthroughs after it go deeper into Hold endings, contention, contact, and breaks.
+
+1. **Start.** On PC A, `/host`. On PC B, `/join <PC A's LAN address>`. On PC A, start "Amnesia Multiplayer Test". Confirm both players are in `multiplayer-test.map` and see each other's Avatar.
+2. **Valve and gate.** B spins the valve (entity 84). A sees the valve turn and the portcullis (entity 85) open. Repeat with A spinning and B watching.
+3. **A held prop is out of reach.** B picks up the bottle (entity 72) and keeps holding it. A looks at it: A's crosshair greys and A cannot grab it. B drops it, and once it settles, A can grab it.
+4. **Throw.** B throws the bottle. A sees it fly and land where it lands on B's screen.
+5. **Topple.** B throws the bottle into the stack of wooden boxes. Both screens show the stack fall the same way and come to rest in the same places.
+6. **Break.** B throws the key jar (entity 87) at a wall. It breaks in the same place on both screens.
+7. **Door, lever, and slider.** B opens the door (entity 73) partway, pulls the lever (entity 88) to switch the room light on, and moves the slider (entity 90) to change the light's color. Both screens show the door at the same angle, the lever at the same end, the slider in the same notch, and the same light. The lever and slider callbacks run in each game.
+8. **Leaving mid-hold.** B picks up a box and keeps holding it, then types `/leave`. On PC A the box falls from where B held it, under A's own physics.
+
+On 2026-10-08 these steps all passed, and the same build was then played through chapter 1 of the main game. Holds shared doors, levers, valves, and props there too. That session found the gaps listed under [Expected behavior and limitations](#expected-behavior-and-limitations).
+
 ### Hold endings walkthrough
 
 Run this after any change to how Holds end (#37). Use the Release Game Peer from `src/Multimnesia.Client/bin/Release/net10.0/` on both PCs, built from the same commit, and the game build with `interactions`. Install `mp-test-cs` on both PCs. Each step names who does what. PC B is the Holder unless the step says otherwise. Read Hold endings in the Game Peer log (`logs\game-peer-*.log` next to the exe). Each one is a `HoldEnded` line ending in its reason, for example `The other player's Hold on entity 72 on custom_stories/mp-test-cs/maps/multiplayer-test.map ended: the other player left.`
@@ -254,12 +269,22 @@ If a game lacks `interactions` (an older build), that player sees `Your game doe
 
 Whisper is a vertical slice: two players host, join, chat, start the same Custom Story together, and see each other move. What that slice does *not* cover:
 
-- **Custom Stories only.** The main game is not supported.
+- **Only Custom Story starts are shared.** In the main game, each player starts or loads it themselves (#23). Once both are on the same map, the Shared Pose and Holds work there as in a Custom Story.
 - **Map changes and returning to the main menu are not shared.** Only the Session Host's fresh Custom Story start is. Continue, Load Game, death reloads, quitting, and every map transition after the start are local.
+- **Changing game settings ends the Multiplayer Session for that player.** Applying settings restarts the game's Game Interaction Protocol server (amnesia-tdd-tcp#66), so the Game Peer loses its local game and has to rejoin. Pausing through the menu or a note does not.
 - **An Avatar stays frozen at its last Pose when its player returns to the main menu.** The game sends no Poses from the main menu and reports no map-left event, so the other player keeps seeing a motionless Avatar where that player last stood. Start the Custom Story again to resynchronize.
 - **Enemies ignore the Joining Player.** Enemy AI is aware only of the player in its own game.
 - Avatar animation, head pitch, crouch visuals, and footstep sounds: an Avatar slides upright and does not animate.
-- Props, doors, levers, inventory, and scripts: every world interaction stays local to the game it happened in.
+- **What Entity Interaction Sync does not share.** Holds share how players move map-placed props, doors, levers, valves, and sliders, and breaks of props a player Holds. These are not shared:
+  - Inventory, including picking up an item spilled from a broken prop.
+  - Script execution and map state beyond the callbacks each game's own prop logic fires. Use-item callbacks, player collide and trigger-area callbacks, and interact callbacks run only in the game of the player who caused them (#43). A script that swaps or disables a prop, such as fitting a cogwheel, leaves the other game's copy as it was. Entity collide callbacks do run in both games when a shared Hold causes the collision.
+  - Breaks a script causes. When a script breaks a prop, for example as a result of an interaction, it breaks only in that game (#44).
+  - Enemies, including what they hear. A prop thrown into water splashes only in the thrower's game, so the other player cannot distract a water lurker that way (amnesia-tdd-tcp#69).
+  - Props moved without a player, such as scripted impulses or enemies.
+  - Anything past the 32-body budget of a Holder's stream.
+  - Runtime-created entities: script spawns, break debris, and contained items. Debris is cosmetic and local.
+  - Click-only interactions, such as buttons, items, and notes.
+  - Brief conflicting collisions between two players' Settling props. Each screen may show its own collision before both settle where their Holders put them.
 - Catch-up for late joiners, sharing the Joining Player's own starts, and checking that both PCs have the same Custom Story version.
 - Arbitrary script execution.
 - UDP or another gameplay transport.
