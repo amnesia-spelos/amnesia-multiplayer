@@ -1,8 +1,8 @@
 <Project>
   <!-- The single definition of the Game Peer's version and codename; see the README's Versioning section. -->
   <PropertyGroup>
-    <Version>0.1.0</Version>
-    <Codename>Whisper</Codename>
+    <Version>0.2.0</Version>
+    <Codename>Grasp</Codename>
   </PropertyGroup>
   <ItemGroup>
     <AssemblyMetadata Include="Codename" Value="$(Codename)" />

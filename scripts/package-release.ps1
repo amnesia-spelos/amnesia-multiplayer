@@ -198,8 +198,8 @@ $releaseNotes = @"
 # Amnesia Multiplayer v$version "$codename"
 
 A trusted-LAN, two-player Multiplayer Session for Amnesia: The Dark Descent. Two players host
-and join over a private network, chat in game, start the same Custom Story together, and see
-each other move.
+and join over a private network, chat in game, start the same Custom Story together, see each
+other move, and share how they move props, doors, levers, valves, and sliders.
 
 ## Install
 
@@ -222,10 +222,11 @@ need this same archive.
 
 ## Known limitations
 
-- Custom Stories only; the main game is not supported.
+- Only Custom Story starts are shared; in the main game, each player starts or loads it themselves.
 - Map changes and returning to the main menu are not shared.
 - An Avatar stays frozen at its last Pose while its player is in the main menu.
 - Enemies ignore the Joining Player.
+- Inventory, script callbacks, and breaks a script causes are not shared.
 
 See the README for the full list and the two-PC walkthrough.
 "@
