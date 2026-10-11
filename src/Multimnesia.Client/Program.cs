@@ -1,10 +1,6 @@
-using Microsoft.Extensions.Configuration;
 using Multimnesia.Client;
 
-var configuration = new ConfigurationManager();
-configuration.AddJsonFile("appsettings.json", optional: true, reloadOnChange: false);
-configuration.AddCommandLine(args);
-var options = configuration.GetSection(GamePeerOptions.SectionName).Get<GamePeerOptions>() ?? new GamePeerOptions();
+var options = GamePeerConfiguration.Load(args, "appsettings.json");
 var errors = options.Validate();
 using var log = GamePeerLog.Open(
     Path.Combine(AppContext.BaseDirectory, "logs"),
@@ -31,7 +27,8 @@ await LocalGameSession.RunReconnectingAsync(
             new SessionNetworkOptions
             {
                 Port = options.RelayPort,
-                JoinTimeout = TimeSpan.FromSeconds(options.JoinTimeoutSeconds)
+                JoinTimeout = TimeSpan.FromSeconds(options.JoinTimeoutSeconds),
+                ChatColor = options.ParsedChatColor
             },
             callbacks.DisplaySystem,
             receiveChat: callbacks.ReceiveChat,

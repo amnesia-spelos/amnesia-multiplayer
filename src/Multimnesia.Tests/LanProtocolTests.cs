@@ -97,10 +97,88 @@ public sealed class LanProtocolTests
         Assert.Empty(stream.ToArray());
     }
 
-    [Fact]
-    public void Protocol_version_is_5_for_Holds()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("FF00FF")]
+    public async Task A_chat_entry_round_trips_with_and_without_an_author_chat_color(string? authorColor)
     {
-        Assert.Equal(5, LanProtocol.CurrentVersion);
+        var message = new LanMessage.ChatEntry("Alice", "hi", authorColor);
+        await using var stream = new MemoryStream();
+
+        await LanProtocol.WriteAsync(stream, message, TestContext.Current.CancellationToken);
+        stream.Position = 0;
+
+        Assert.Equal(message, await LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task An_author_chat_color_crosses_the_wire_in_one_case()
+    {
+        await using var stream = new MemoryStream();
+
+        await LanProtocol.WriteAsync(stream, new LanMessage.ChatEntry("Alice", "hi", "ff00Ff"), TestContext.Current.CancellationToken);
+
+        var bytes = stream.ToArray();
+        Assert.Contains("\"authorColor\":\"FF00FF\"", Encoding.UTF8.GetString(bytes, 4, bytes.Length - 4));
+    }
+
+    [Theory]
+    [InlineData("{\"type\":\"chat-entry\",\"author\":\"Alice\",\"message\":\"hi\"}", null)]
+    [InlineData("{\"type\":\"chat-entry\",\"author\":\"Alice\",\"message\":\"hi\",\"authorColor\":null}", null)]
+    [InlineData("{\"type\":\"chat-entry\",\"author\":\"Alice\",\"message\":\"hi\",\"authorColor\":\"ff00ff\"}", "FF00FF")]
+    public async Task An_absent_or_null_author_chat_color_reads_as_none(string json, string? expected)
+    {
+        await using var stream = Frame(json);
+
+        var entry = Assert.IsType<LanMessage.ChatEntry>(await LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken));
+
+        Assert.Equal(expected, entry.AuthorColor);
+    }
+
+    [Theory]
+    [InlineData("\"FF00\"")]
+    [InlineData("\"#FF00FF\"")]
+    [InlineData("\"FF00FFAA\"")]
+    [InlineData("\"ZZZZZZ\"")]
+    [InlineData("\"\"")]
+    [InlineData("16711935")]
+    public async Task A_malformed_author_chat_color_is_rejected_on_read(string authorColor)
+    {
+        await using var stream = Frame($"{{\"type\":\"chat-entry\",\"author\":\"Alice\",\"message\":\"hi\",\"authorColor\":{authorColor}}}");
+
+        await Assert.ThrowsAsync<LanProtocolException>(() => LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken).AsTask());
+    }
+
+    [Theory]
+    [InlineData("FF00")]
+    [InlineData("#FF00FF")]
+    [InlineData("FF00FFAA")]
+    [InlineData("ZZZZZZ")]
+    [InlineData("")]
+    public async Task A_malformed_author_chat_color_is_never_written(string authorColor)
+    {
+        await using var stream = new MemoryStream();
+
+        var error = await Assert.ThrowsAsync<LanProtocolException>(
+            () => LanProtocol.WriteAsync(stream, new LanMessage.ChatEntry("Alice", "hi", authorColor), TestContext.Current.CancellationToken).AsTask());
+
+        Assert.Equal("Invalid Chat Entry.", error.Message);
+        Assert.Empty(stream.ToArray());
+    }
+
+    [Fact]
+    public void Protocol_version_is_6_for_Chat_Colors()
+    {
+        Assert.Equal(6, LanProtocol.CurrentVersion);
+    }
+
+    private static MemoryStream Frame(string json)
+    {
+        var payload = Encoding.UTF8.GetBytes(json);
+        var bytes = new byte[payload.Length + 4];
+        BinaryPrimitives.WriteInt32BigEndian(bytes, payload.Length);
+        payload.CopyTo(bytes.AsSpan(4));
+        return new MemoryStream(bytes);
     }
 
     public static TheoryData<LanMessage.Pose> Poses => new()

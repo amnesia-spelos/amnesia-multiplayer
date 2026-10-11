@@ -9,7 +9,8 @@ public abstract record LanMessage
     public sealed record JoinRequest(int ProtocolVersion, Guid PeerCorrelationId) : LanMessage;
     public sealed record AdmissionAccepted(int ProtocolVersion, Guid SessionCorrelationId) : LanMessage;
     public sealed record AdmissionRejected(string Reason) : LanMessage;
-    public sealed record ChatEntry(string Author, string Message) : LanMessage;
+    // AuthorColor is the sender's Chat Color as six hex digits, or null for the game default.
+    public sealed record ChatEntry(string Author, string Message, string? AuthorColor = null) : LanMessage;
     public sealed record Departure : LanMessage;
     public sealed record Heartbeat : LanMessage;
     public sealed record CustomStoryStarted(string Identifier) : LanMessage;
@@ -56,7 +57,7 @@ public sealed class LanProtocolException(string message, Exception? innerExcepti
 
 public static class LanProtocol
 {
-    public const int CurrentVersion = 5;
+    public const int CurrentVersion = 6;
     // Fits the largest bodies message: 32 entries of 13 longest-form numbers and a fully escaped map path.
     public const int MaximumFrameBytes = 32 * 1024;
     // Keeps a Pose's numbers within the game's 15-digit, 4-decimal line format; real positions and angles are far smaller.
@@ -78,7 +79,7 @@ public static class LanProtocol
             LanMessage.AdmissionAccepted value => new { type = "admission-accepted", protocolVersion = value.ProtocolVersion, sessionCorrelationId = value.SessionCorrelationId },
             LanMessage.AdmissionRejected value => new { type = "admission-rejected", reason = value.Reason },
             LanMessage.ChatEntry value when IsValidChat(value.Author, value.Message) =>
-                new { type = "chat-entry", author = value.Author, message = value.Message },
+                new { type = "chat-entry", author = value.Author, message = value.Message, authorColor = NormalizedAuthorColor(value.AuthorColor) },
             LanMessage.ChatEntry => throw new LanProtocolException("Invalid Chat Entry."),
             LanMessage.Departure => new { type = "departure" },
             LanMessage.Heartbeat => new { type = "heartbeat" },
@@ -250,10 +251,19 @@ public static class LanProtocol
 
     private static LanMessage.ChatEntry ReadChatEntry(JsonElement root)
     {
-        var entry = new LanMessage.ChatEntry(root.GetProperty("author").GetString()!, root.GetProperty("message").GetString()!);
+        var hasAuthorColor = root.TryGetProperty("authorColor", out var color) && color.ValueKind != JsonValueKind.Null;
+        if (hasAuthorColor && color.ValueKind != JsonValueKind.String) throw new LanProtocolException("Invalid Chat Entry.");
+        var entry = new LanMessage.ChatEntry(
+            root.GetProperty("author").GetString()!, root.GetProperty("message").GetString()!,
+            hasAuthorColor ? NormalizedAuthorColor(color.GetString()) : null);
         if (!IsValidChat(entry.Author, entry.Message)) throw new LanProtocolException("Invalid Chat Entry.");
         return entry;
     }
+
+    // One case on the wire, so the receiving Game Peer never sees two spellings of one Chat Color.
+    private static string? NormalizedAuthorColor(string? authorColor) => authorColor is null ? null
+        : ChatColor.TryParse(authorColor, out var color) ? color.Hex
+        : throw new LanProtocolException("Invalid Chat Entry.");
 
     public static bool IsValid(LanMessage.Pose pose) =>
         IsPoseNumber(pose.X) && IsPoseNumber(pose.Y) && IsPoseNumber(pose.Z) && IsPoseNumber(pose.Yaw) && IsPoseNumber(pose.Pitch) &&

@@ -7,7 +7,7 @@ namespace Multimnesia.Client;
 public enum LocalGameEventName
 {
     Connected, ProtocolNegotiated, UnrecognizedGameReply, AvatarCreated, SharedPoseCommandFailed,
-    HoldClaimed, HoldClaimDenied, HoldEnded, HoldMessageIgnored, HoldCommandFailed
+    HoldClaimed, HoldClaimDenied, HoldEnded, HoldMessageIgnored, HoldCommandFailed, ChatEntryFailed
 }
 
 public sealed record LocalGameLogEntry(
@@ -179,6 +179,9 @@ public sealed class LocalGameSession(
                 }
                 if (GameInteractionProtocol.IsUnrecognizedReply(gameEvent))
                     Log(ConnectionLogSeverity.Warning, LocalGameEventName.UnrecognizedGameReply, line);
+                // Never shown in chat: a chat line about a failed chat line could fail the same way, again and again.
+                if (gameEvent is GameEvent.ChatEntryResponded { Outcome: not ChatEntryOutcome.Ok })
+                    Log(ConnectionLogSeverity.Warning, LocalGameEventName.ChatEntryFailed, line);
 
                 if (gameEvent is GameEvent.ChatSubmitted chat) _ = RunIgnoringDisconnectAsync(HandleCommandAsync(orchestrator, chat.Entry));
                 if (gameEvent is GameEvent.LocalPoseReported reported) sharedPose.HandleLocalPose(reported.Pose);

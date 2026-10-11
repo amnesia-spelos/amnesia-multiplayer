@@ -4,7 +4,7 @@ using Multimnesia.Contracts;
 
 namespace Multimnesia.Client;
 
-public sealed record ChatEntry(string Author, string Message)
+public sealed record ChatEntry(string Author, string Message, ChatColor? AuthorColor = null)
 {
     private const string LocalSubmissionPrefix = "EVENT:CHAT:";
 
@@ -90,6 +90,10 @@ public static class GameInteractionProtocol
         {
             // RESPONSE <keyword> <outcome> [<field>...]
             var fields = line.Split(' ');
+            if (fields is [_, "chatentry", var outcome])
+                return ParseChatEntryOutcome(outcome) is { } chatEntryOutcome
+                    ? new GameEvent.ChatEntryResponded(chatEntryOutcome)
+                    : new GameEvent.Unknown(line);
             return fields.Length >= 3 && !fields.Contains(string.Empty)
                 ? new GameEvent.Responded(fields[1], fields[2], fields[3..])
                 : new GameEvent.Unknown(line);
@@ -150,6 +154,16 @@ public static class GameInteractionProtocol
         }
     }
 
+    private static ChatEntryOutcome? ParseChatEntryOutcome(string wireName) => wireName switch
+    {
+        "ok" => ChatEntryOutcome.Ok,
+        "invalid" => ChatEntryOutcome.Invalid,
+        "invalid-author" => ChatEntryOutcome.InvalidAuthor,
+        "invalid-message" => ChatEntryOutcome.InvalidMessage,
+        "unavailable" => ChatEntryOutcome.Unavailable,
+        _ => null
+    };
+
     private static InteractionEnding? ParseEnding(string wireName) => wireName switch
     {
         "released" => InteractionEnding.Released,
@@ -184,7 +198,8 @@ public static class GameInteractionProtocol
     public static bool IsUnrecognizedReply(GameEvent gameEvent) => gameEvent is
         GameEvent.StartCustomStoryResponded { Outcome: StartCustomStoryOutcome.Unrecognized } or GameEvent.UnknownCommandWarned;
 
-    public static string Display(ChatEntry entry) => $"chat:{entry.Author}:{entry.Message}";
+    // chatentry <authorColor> <messageColor> <author>:<message>, where "-" is the game default color.
+    public static string Display(ChatEntry entry) => $"chatentry {entry.AuthorColor?.Hex ?? "-"} - {entry.Author}:{entry.Message}";
 
     public static string StartCustomStory(string identifier) => $"startcustomstory:{identifier}";
 
@@ -251,6 +266,8 @@ public static class GameInteractionProtocol
 
 public enum StartCustomStoryOutcome { Starting, NotFound, Invalid, NotInMainMenu, Unrecognized }
 
+public enum ChatEntryOutcome { Ok, Invalid, InvalidAuthor, InvalidMessage, Unavailable }
+
 public enum InteractionEnding { Released, Thrown, TooFar, Destroyed }
 
 public abstract record GameEvent
@@ -260,6 +277,7 @@ public abstract record GameEvent
     public sealed record StartCustomStoryResponded(StartCustomStoryOutcome Outcome) : GameEvent;
     public sealed record UnknownCommandWarned : GameEvent;
     public sealed record Ponged : GameEvent;
+    public sealed record ChatEntryResponded(ChatEntryOutcome Outcome) : GameEvent;
     public sealed record LocalPoseReported(LocalPose Pose) : GameEvent;
     // The `interactions` Events about the local player's interactions, and the report of the bodies they decide.
     public sealed record InteractionStarted(int EntityId, int BodyId, string Map) : GameEvent;

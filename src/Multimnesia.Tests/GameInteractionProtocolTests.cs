@@ -1,5 +1,6 @@
 using System.Text;
 using Multimnesia.Client;
+using Multimnesia.Contracts;
 
 namespace Multimnesia.Tests;
 
@@ -99,11 +100,31 @@ public sealed class GameInteractionProtocolTests
     [InlineData("WARNING:Unknown command", true)]
     [InlineData("RESPONSE:startcustomstory:starting", false)]
     [InlineData("RESPONSE:startcustomstory:not in main menu", false)]
-    [InlineData("RESPONSE:chat:message displayed", false)]
+    [InlineData("RESPONSE chatentry unavailable", false)]
     [InlineData("EVENT:CustomStoryStarted:mp-test-cs", false)]
     public void Replies_that_make_a_start_unavailable_are_recognized_for_logging(string line, bool expected)
     {
         Assert.Equal(expected, GameInteractionProtocol.IsUnrecognizedReply(GameInteractionProtocol.ParseEvent(line)));
+    }
+
+    [Theory]
+    [InlineData("RESPONSE chatentry ok", ChatEntryOutcome.Ok)]
+    [InlineData("RESPONSE chatentry invalid", ChatEntryOutcome.Invalid)]
+    [InlineData("RESPONSE chatentry invalid-author", ChatEntryOutcome.InvalidAuthor)]
+    [InlineData("RESPONSE chatentry invalid-message", ChatEntryOutcome.InvalidMessage)]
+    [InlineData("RESPONSE chatentry unavailable", ChatEntryOutcome.Unavailable)]
+    public void Chat_entry_responses_are_typed(string line, ChatEntryOutcome expected)
+    {
+        Assert.Equal(new GameEvent.ChatEntryResponded(expected), GameInteractionProtocol.ParseEvent(line));
+    }
+
+    [Theory]
+    [InlineData("RESPONSE chatentry")]
+    [InlineData("RESPONSE chatentry exploded")]
+    [InlineData("RESPONSE chatentry ok extra")]
+    public void Malformed_chat_entry_responses_are_not_typed(string line)
+    {
+        Assert.IsNotType<GameEvent.ChatEntryResponded>(GameInteractionProtocol.ParseEvent(line));
     }
 
     [Theory]
@@ -128,6 +149,20 @@ public sealed class GameInteractionProtocolTests
         await using (var writer = GameInteractionProtocol.CreateWriter(stream))
             await writer.WriteLineAsync(GameInteractionProtocol.Display(new ChatEntry("SYSTEM", "Příliš žluťoučký 👋")));
 
-        Assert.Equal("chat:SYSTEM:Příliš žluťoučký 👋\n", Encoding.UTF8.GetString(stream.ToArray()));
+        Assert.Equal("chatentry - - SYSTEM:Příliš žluťoučký 👋\n", Encoding.UTF8.GetString(stream.ToArray()));
+    }
+
+    [Fact]
+    public void A_chat_entry_without_a_chat_color_is_displayed_in_default_colors()
+    {
+        Assert.Equal("chatentry - - Alice:hello: there", GameInteractionProtocol.Display(new ChatEntry("Alice", "hello: there")));
+    }
+
+    [Fact]
+    public void A_chat_color_applies_to_the_chat_author_name_only()
+    {
+        Assert.True(ChatColor.TryParse("ff00ff", out var color));
+
+        Assert.Equal("chatentry FF00FF - Alice:hi", GameInteractionProtocol.Display(new ChatEntry("Alice", "hi", color)));
     }
 }

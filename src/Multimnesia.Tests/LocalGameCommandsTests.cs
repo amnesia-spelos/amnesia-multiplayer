@@ -114,7 +114,7 @@ public sealed class LocalGameCommandsTests
 
         commands.Dispatch(new GameEvent.CustomStoryStarted("mp-test-cs"));
         commands.Dispatch(new GameEvent.ChatSubmitted(new ChatEntry("Alice", "hi")));
-        commands.Dispatch(new GameEvent.Unknown("RESPONSE:chat:unavailable"));
+        commands.Dispatch(new GameEvent.ChatEntryResponded(ChatEntryOutcome.Unavailable));
 
         Assert.False(start.IsCompleted);
         ExpireDeadline();

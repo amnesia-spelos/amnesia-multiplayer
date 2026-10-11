@@ -137,8 +137,36 @@ public sealed class MultiplayerSessionOperationsTests
         await joining.HandleAsync(new ChatEntry("René", "nazdar"), TestContext.Current.CancellationToken);
         await WaitUntilAsync(() => hostGame.Length > 0 && joiningGame.Length > 0);
 
-        Assert.Equal("chat:René:nazdar\n", Encoding.UTF8.GetString(hostGame.ToArray()));
-        Assert.Equal("chat:Žofie 👩‍🚀:ahoj: světe 👋\n", Encoding.UTF8.GetString(joiningGame.ToArray()));
+        Assert.Equal("chatentry - - René:nazdar\n", Encoding.UTF8.GetString(hostGame.ToArray()));
+        Assert.Equal("chatentry - - Žofie 👩‍🚀:ahoj: světe 👋\n", Encoding.UTF8.GetString(joiningGame.ToArray()));
+    }
+
+    [Fact]
+    public async Task A_chat_entry_arrives_with_the_chat_color_its_sender_configured()
+    {
+        var port = FreePort();
+        Assert.True(ChatColor.TryParse("ff00ff", out var magenta));
+        await using var hostGame = new MemoryStream();
+        await using var joiningGame = new MemoryStream();
+        await using var hostWriter = GameInteractionProtocol.CreateWriter(hostGame);
+        await using var joiningWriter = GameInteractionProtocol.CreateWriter(joiningGame);
+        await using var hostOperations = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port, ChatColor = magenta },
+            receiveChat: entry => new ValueTask(hostWriter.WriteLineAsync(GameInteractionProtocol.Display(entry))));
+        await using var joinOperations = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            receiveChat: entry => new ValueTask(joiningWriter.WriteLineAsync(GameInteractionProtocol.Display(entry))));
+        var host = new GamePeerOrchestrator(hostOperations);
+        var joining = new GamePeerOrchestrator(joinOperations);
+        await host.HandleAsync(new ChatEntry("Host", "/host"), TestContext.Current.CancellationToken);
+        await joining.HandleAsync(new ChatEntry("Joiner", "/join 127.0.0.1"), TestContext.Current.CancellationToken);
+
+        await host.HandleAsync(new ChatEntry("Alice", "hi"), TestContext.Current.CancellationToken);
+        await joining.HandleAsync(new ChatEntry("Bob", "hello"), TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => hostGame.Length > 0 && joiningGame.Length > 0);
+
+        Assert.Equal("chatentry FF00FF - Alice:hi\n", Encoding.UTF8.GetString(joiningGame.ToArray()));
+        Assert.Equal("chatentry - - Bob:hello\n", Encoding.UTF8.GetString(hostGame.ToArray()));
     }
 
     [Fact]

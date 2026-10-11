@@ -8,8 +8,8 @@ namespace Multimnesia.Tests;
 public sealed class LocalGameSessionTests : IAsyncDisposable
 {
     private const string Negotiate = "protocol 2 avatars localpose interactions";
-    private const string AvatarsUnsupportedNotice = "chat:SYSTEM:Your game does not support Avatars; movement will not be shared.";
-    private const string InteractionsUnsupportedNotice = "chat:SYSTEM:Your game does not support interactions; moving props will not be shared.";
+    private const string AvatarsUnsupportedNotice = "chatentry - - SYSTEM:Your game does not support Avatars; movement will not be shared.";
+    private const string InteractionsUnsupportedNotice = "chatentry - - SYSTEM:Your game does not support interactions; moving props will not be shared.";
     private readonly CancellationTokenSource _cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
     private readonly FakeSessionOperations _sessions = new();
     private readonly List<LocalGameLogEntry> _log = [];
@@ -55,7 +55,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
 
         Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(300)));
         await game.SendAsync("RESPONSE protocol ok 2 avatars localpose");
-        Assert.Equal("chat:Bob:hello", await game.ReadLineAsync());
+        Assert.Equal("chatentry - - Bob:hello", await game.ReadLineAsync());
         await display;
     }
 
@@ -70,7 +70,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         var displays = messages.Select(message => _callbacks.ReceiveChat(new ChatEntry("Bob", message)).AsTask()).ToArray();
         await game.SendAsync("RESPONSE protocol ok 2 avatars localpose");
 
-        foreach (var message in messages) Assert.Equal($"chat:Bob:{message}", await game.ReadLineAsync());
+        foreach (var message in messages) Assert.Equal($"chatentry - - Bob:{message}", await game.ReadLineAsync());
         await Task.WhenAll(displays);
     }
 
@@ -85,7 +85,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         Assert.Equal(InteractionsUnsupportedNotice, await game.ReadLineAsync());
         await _callbacks.DisplaySystem("marker");
 
-        Assert.Equal("chat:SYSTEM:marker", await game.ReadLineAsync());
+        Assert.Equal("chatentry - - SYSTEM:marker", await game.ReadLineAsync());
         Assert.True(session.IsSharedPoseAvailable);
         var logged = Assert.Single(_log, entry => entry.Event == LocalGameEventName.ProtocolNegotiated);
         Assert.Equal(ConnectionLogSeverity.Information, logged.Severity);
@@ -119,7 +119,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
 
         await game.SendAsync("WARNING:Unknown command");
         await _callbacks.DisplaySystem("marker");
-        Assert.Equal("chat:SYSTEM:marker", await game.ReadLineAsync());
+        Assert.Equal("chatentry - - SYSTEM:marker", await game.ReadLineAsync());
     }
 
     [Fact]
@@ -134,7 +134,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
 
         await game.SendAsync("WARNING:Unknown command");
 
-        Assert.Equal("chat:SYSTEM:Version line.", await game.ReadLineAsync());
+        Assert.Equal("chatentry - - SYSTEM:Version line.", await game.ReadLineAsync());
         Assert.Equal(AvatarsUnsupportedNotice, await game.ReadLineAsync());
         Assert.Equal(InteractionsUnsupportedNotice, await game.ReadLineAsync());
     }
@@ -150,13 +150,13 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         Assert.Equal(InteractionsUnsupportedNotice, await game.ReadLineAsync());
 
         await _callbacks.ReceiveChat(new ChatEntry("Bob", "hello"));
-        Assert.Equal("chat:Bob:hello", await game.ReadLineAsync());
+        Assert.Equal("chatentry - - Bob:hello", await game.ReadLineAsync());
 
         await _callbacks.ReceiveCustomStoryStarted("mp-test-cs");
         Assert.Equal("startcustomstory:mp-test-cs", await game.ReadLineAsync());
         await game.SendAsync("RESPONSE:startcustomstory:starting");
 
-        Assert.Equal("chat:SYSTEM:The host started Custom Story mp-test-cs.", await game.ReadLineAsync());
+        Assert.Equal("chatentry - - SYSTEM:The host started Custom Story mp-test-cs.", await game.ReadLineAsync());
         Assert.Equal([("mp-test-cs", SharedCustomStoryStartOutcome.Started)], _sessions.SentOutcomes);
     }
 
@@ -232,7 +232,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         await _callbacks.ReceiveChat(new ChatEntry("Bob", "still loading?")).AsTask().WaitAsync(TimeSpan.FromSeconds(2));
 
         var ahead = new List<string>();
-        for (var line = await game.ReadLineAsync(); line != "chat:Bob:still loading?"; line = await game.ReadLineAsync())
+        for (var line = await game.ReadLineAsync(); line != "chatentry - - Bob:still loading?"; line = await game.ReadLineAsync())
             ahead.Add(line!);
         Assert.True(ahead.Count <= SharedPose.MaxUnconfirmedPoses + 1, $"{ahead.Count} lines were written ahead of the chat.");
     }
@@ -368,13 +368,36 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         await game.SendAsync("RESPONSE avatarcreate model-not-found partner");
         await game.SendAsync("RESPONSE avatarpose invalid partner");
 
-        Assert.Equal("chat:SYSTEM:The Avatar model is not installed; the other player will be invisible.", await game.ReadLineAsync());
+        Assert.Equal("chatentry - - SYSTEM:The Avatar model is not installed; the other player will be invisible.", await game.ReadLineAsync());
         Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(300)));
         lock (_log)
             Assert.Equal(
                 ["RESPONSE avatarpose not-found partner", "RESPONSE avatarcreate model-not-found partner",
                  "RESPONSE avatarcreate model-not-found partner", "RESPONSE avatarpose invalid partner"],
                 _log.Where(entry => entry.Event == LocalGameEventName.SharedPoseCommandFailed).Select(entry => entry.Line));
+    }
+
+    [Fact]
+    public async Task Chat_entry_failures_are_logged_as_warnings_and_never_shown_in_chat()
+    {
+        await using var game = await ConnectWithSharedPoseAsync();
+
+        await game.SendAsync("RESPONSE chatentry ok");
+        await game.SendAsync("RESPONSE chatentry invalid");
+        await game.SendAsync("RESPONSE chatentry invalid-author");
+        await game.SendAsync("RESPONSE chatentry invalid-message");
+        await game.SendAsync("RESPONSE chatentry unavailable");
+
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(300)));
+        lock (_log)
+        {
+            var failures = _log.Where(entry => entry.Event == LocalGameEventName.ChatEntryFailed).ToList();
+            Assert.Equal(
+                ["RESPONSE chatentry invalid", "RESPONSE chatentry invalid-author",
+                 "RESPONSE chatentry invalid-message", "RESPONSE chatentry unavailable"],
+                failures.Select(entry => entry.Line));
+            Assert.All(failures, entry => Assert.Equal(ConnectionLogSeverity.Warning, entry.Severity));
+        }
     }
 
     private static async Task WaitUntilAsync(Func<bool> condition)
