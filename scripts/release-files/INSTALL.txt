@@ -53,6 +53,13 @@ once they find each other. Everything else happens in the game's chat:
 
 Type /leave to end the session. Close the Game Peer console window when done.
 
+To show your name in a color of your own on the other player's screen, start
+it from a command prompt in the Amnesia folder with six hex digits (RRGGBB):
+
+    "Start Multiplayer.bat" --color FF00FF
+
+Your own messages stay in the default color on your own screen.
+
 Reporting a problem
 -------------------
 Send both logs from both PCs:
