@@ -60,6 +60,10 @@ _Avoid_: Callback sync, remote script, trigger relay
 A Shared Callback for a map a player's game is not on, kept until that game enters the map.
 _Avoid_: Queued trigger, deferred callback
 
+**Shared Enemy**:
+A map-placed enemy that is one threat to every player in a Multiplayer Session, able to hunt and attack any of them, rather than a separate copy in each player's game.
+_Avoid_: Synced monster, remote enemy, AI sync
+
 ## Trusted-LAN boundary
 
 The Game Interaction Protocol connection between a Game Peer and its local game is loopback-only and never crosses the network. The Multiplayer Relay's LAN listener is intended for a private, firewalled network between trusted computers: it is unauthenticated, so the Session Host must control access at the firewall, not the protocol. The LAN wire protocol (`LanProtocol`) carries only bounded, structurally validated Chat Entries, each with an optional author Chat Color of exactly six hex digits, Join/Admission negotiation, Heartbeats, Departure notices, Shared Custom Story Starts with their outcomes, Poses for the Shared Pose, and Holds: Claims, Claim Denials, interaction starts and ends, breaks, settles, and the Holder's body stream. A Chat Color is only digits that the receiving Game Peer formats into its own `chatentry` line, a Shared Custom Story Start may name an installed Custom Story by its Custom Story Identifier, and a Pose carries only numbers, two flags, and a map path that the receiving Game Peer formats into its own `avatarpose` line. A Hold message names a map-placed entity only by a map path and integer prop and body IDs, and carries only bounded numbers, unit quaternions, a flag, and at most 32 bodies; the receiving Game Peer composes every `entity...` line it writes to its own game. So `LanProtocol` may name an installed Custom Story to start, carry the other player's Pose, and carry Holds on map-placed entities by integer identifier, but it has no message type that names or executes an arbitrary remote script or command, so a peer on the LAN cannot use it to run code on the other machine.
