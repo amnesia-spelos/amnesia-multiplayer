@@ -267,6 +267,19 @@ Run this after any change to how breaks are shared (#39), with the same builds, 
 
 If a game lacks `interactions` (an older build), that player sees `Your game does not support interactions; moving props will not be shared.` once after connecting. Their Game Peer writes no `entity...` or `reportedbodies` lines, and chat and Avatars keep working.
 
+### Chat Color walkthrough
+
+Run this after any change to how chat is displayed or how Chat Colors are shared (#48), with the Release Game Peer built from the same commit on both PCs and a game build that supports `chatentry` (amnesia-tdd-tcp#72).
+
+1. **Start.** On PC A, start the Game Peer with `--color FF00FF`. On PC B, start it with no color. Confirm each game's chat shows the connected line, and that PC A's `/host` prints its address.
+2. **A colored name.** On PC B, `/join` PC A. On PC A, send a message. On PC B, PC A's name is magenta and the message is in the default color. On PC A, the message is in the default color, because the game always shows a player's own messages that way.
+3. **An uncolored name.** On PC B, send a message. On PC A, PC B's name is in the default color.
+4. **No chat failures.** Both Game Peer logs start with `LanProtocol version: 6` and have no `ChatEntryFailed` line.
+5. **A bad color is rejected.** Start a Game Peer with `--color #FF00FF`. It logs a `GamePeer:ChatColor` configuration error and exits without connecting.
+6. **Mismatched builds fail Admission.** Join from a Game Peer built before #48. The joiner sees `The Multiplayer Session uses an incompatible protocol version.`
+
+On 2026-10-11 these steps all passed.
+
 ## Expected behavior and limitations
 
 Two players host, join, chat, start the same Custom Story together, see each other move, and share how they move props, doors, levers, valves, and sliders. What that does *not* cover:
