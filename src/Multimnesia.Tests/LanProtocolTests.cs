@@ -167,9 +167,9 @@ public sealed class LanProtocolTests
     }
 
     [Fact]
-    public void Protocol_version_is_6_for_Chat_Colors()
+    public void Protocol_version_is_7_for_Shared_Callbacks()
     {
-        Assert.Equal(6, LanProtocol.CurrentVersion);
+        Assert.Equal(7, LanProtocol.CurrentVersion);
     }
 
     private static MemoryStream Frame(string json)
@@ -587,5 +587,120 @@ public sealed class LanProtocolTests
         stream.Position = 0;
 
         Assert.Equal(bodies, await LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken));
+    }
+
+    public static TheoryData<LanMessage, string> WorldMessageWireNames => new()
+    {
+        {
+            new LanMessage.PlayerCollide("maps/a.map", 30, Entered: true),
+            "{\"type\":\"shared-callback\",\"map\":\"maps/a.map\",\"kind\":\"player-collide\",\"entityId\":30,\"state\":1}"
+        },
+        {
+            new LanMessage.PlayerCollide("maps/a.map", 30, Entered: false),
+            "{\"type\":\"shared-callback\",\"map\":\"maps/a.map\",\"kind\":\"player-collide\",\"entityId\":30,\"state\":-1}"
+        },
+        {
+            new LanMessage.EntityCollide("maps/a.map", 30, 12, Entered: true),
+            "{\"type\":\"shared-callback\",\"map\":\"maps/a.map\",\"kind\":\"entity-collide\",\"parentId\":30,\"entityId\":12,\"state\":1}"
+        },
+        {
+            new LanMessage.Interact("maps/a.map", -7),
+            "{\"type\":\"shared-callback\",\"map\":\"maps/a.map\",\"kind\":\"interact\",\"entityId\":-7}"
+        },
+        {
+            new LanMessage.UseItem("maps/a.map", 12, "key_study"),
+            "{\"type\":\"shared-callback\",\"map\":\"maps/a.map\",\"kind\":\"use-item\",\"entityId\":12,\"item\":\"key_study\"}"
+        },
+        { new LanMessage.ButtonState("maps/a.map", 12, SwitchedOn: true), "{\"type\":\"button-state\",\"map\":\"maps/a.map\",\"entityId\":12,\"switchedOn\":true}" },
+        { new LanMessage.LampState("maps/a.map", 13, Lit: false), "{\"type\":\"lamp-state\",\"map\":\"maps/a.map\",\"entityId\":13,\"lit\":false}" },
+    };
+
+    [Theory]
+    [MemberData(nameof(WorldMessageWireNames))]
+    public async Task World_messages_use_their_wire_names_and_round_trip(LanMessage message, string json)
+    {
+        await using var stream = new MemoryStream();
+
+        await LanProtocol.WriteAsync(stream, message, TestContext.Current.CancellationToken);
+        Assert.Equal(json, Encoding.UTF8.GetString(stream.ToArray(), 4, (int)stream.Length - 4));
+        stream.Position = 0;
+
+        Assert.Equal(message, await LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken));
+    }
+
+    [Fact]
+    public async Task World_messages_keep_long_maps_extreme_identifiers_and_the_longest_item_name()
+    {
+        await using var stream = new MemoryStream();
+        var message = new LanMessage.UseItem(HoldMap, int.MinValue, "!" + new string('~', LanProtocol.MaximumItemNameLength - 1));
+
+        await LanProtocol.WriteAsync(stream, message, TestContext.Current.CancellationToken);
+        stream.Position = 0;
+
+        Assert.Equal(message, await LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken));
+    }
+
+    public static TheoryData<LanMessage> InvalidWorldMessages => new()
+    {
+        new LanMessage.PlayerCollide("", 30, true),
+        new LanMessage.EntityCollide("maps/a\n.map", 30, 12, true),
+        new LanMessage.Interact(new string('m', LanProtocol.MaximumPoseMapScalars + 1), 12),
+        new LanMessage.UseItem("maps/a.map", 12, ""),
+        new LanMessage.UseItem("maps/a.map", 12, "rusty key"),
+        new LanMessage.UseItem("maps/a.map", 12, "keyé"),
+        new LanMessage.UseItem("maps/a.map", 12, new string('k', LanProtocol.MaximumItemNameLength + 1)),
+        new LanMessage.ButtonState("", 12, true),
+        new LanMessage.LampState("", 13, true),
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidWorldMessages))]
+    public async Task Invalid_world_messages_are_rejected_when_written(LanMessage message)
+    {
+        await using var stream = new MemoryStream();
+
+        await Assert.ThrowsAsync<LanProtocolException>(
+            () => LanProtocol.WriteAsync(stream, message, TestContext.Current.CancellationToken).AsTask());
+        Assert.Empty(stream.ToArray());
+    }
+
+    private const string SharedCallbackOn = "{\"type\":\"shared-callback\",\"map\":\"maps/a.map\",";
+
+    public static TheoryData<string> InvalidWorldFrames => new()
+    {
+        SharedCallbackOn + "\"entityId\":30,\"state\":1}",
+        SharedCallbackOn + "\"kind\":\"look-at\",\"entityId\":30}",
+        SharedCallbackOn + "\"kind\":\"PlayerCollide\",\"entityId\":30,\"state\":1}",
+        SharedCallbackOn + "\"kind\":\"player-collide\",\"state\":1}",
+        SharedCallbackOn + "\"kind\":\"player-collide\",\"entityId\":30}",
+        SharedCallbackOn + "\"kind\":\"player-collide\",\"entityId\":30,\"state\":0}",
+        SharedCallbackOn + "\"kind\":\"player-collide\",\"entityId\":30,\"state\":2}",
+        SharedCallbackOn + "\"kind\":\"player-collide\",\"entityId\":2147483648,\"state\":1}",
+        SharedCallbackOn + "\"kind\":\"entity-collide\",\"entityId\":12,\"state\":1}",
+        SharedCallbackOn + "\"kind\":\"interact\"}",
+        SharedCallbackOn + "\"kind\":\"interact\",\"entityId\":\"12\"}",
+        "{\"type\":\"shared-callback\",\"kind\":\"interact\",\"entityId\":12}",
+        "{\"type\":\"shared-callback\",\"map\":\"\",\"kind\":\"interact\",\"entityId\":12}",
+        SharedCallbackOn + "\"kind\":\"use-item\",\"entityId\":12}",
+        SharedCallbackOn + "\"kind\":\"use-item\",\"entityId\":12,\"item\":\"\"}",
+        SharedCallbackOn + "\"kind\":\"use-item\",\"entityId\":12,\"item\":\"rusty key\"}",
+        SharedCallbackOn + "\"kind\":\"use-item\",\"entityId\":12,\"item\":\"key\\u0007\"}",
+        SharedCallbackOn + "\"kind\":\"use-item\",\"entityId\":12,\"item\":\"" + new string('k', LanProtocol.MaximumItemNameLength + 1) + "\"}",
+        SharedCallbackOn + "\"kind\":\"use-item\",\"entityId\":12,\"item\":42}",
+        "{\"type\":\"button-state\",\"map\":\"maps/a.map\",\"entityId\":12}",
+        "{\"type\":\"button-state\",\"map\":\"maps/a.map\",\"entityId\":12,\"switchedOn\":1}",
+        "{\"type\":\"button-state\",\"map\":\"maps/a.map\",\"switchedOn\":true}",
+        "{\"type\":\"lamp-state\",\"map\":\"maps/a.map\",\"entityId\":13}",
+        "{\"type\":\"lamp-state\",\"entityId\":13,\"lit\":true}",
+    };
+
+    [Theory]
+    [MemberData(nameof(InvalidWorldFrames))]
+    public async Task Invalid_world_messages_are_rejected_when_read(string json)
+    {
+        await using var stream = Frame(json);
+
+        await Assert.ThrowsAsync<LanProtocolException>(
+            () => LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken).AsTask());
     }
 }

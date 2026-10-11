@@ -1009,6 +1009,38 @@ public sealed class MultiplayerSessionOperationsTests
     }
 
     [Fact]
+    public async Task World_messages_travel_both_ways_in_order_between_admitted_Game_Peers()
+    {
+        var port = FreePort();
+        var hostReceived = new List<LanMessage.WorldMessage>();
+        var joiningReceived = new List<LanMessage.WorldMessage>();
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            receiveWorldMessage: message => { lock (hostReceived) hostReceived.Add(message); return ValueTask.CompletedTask; });
+        await using var joining = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            receiveWorldMessage: message => { lock (joiningReceived) joiningReceived.Add(message); return ValueTask.CompletedTask; });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        await joining.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => host.IsOtherPlayerPresent);
+        LanMessage.WorldMessage[] fromJoining =
+        [
+            new LanMessage.PlayerCollide("maps/a.map", 30, true),
+            new LanMessage.EntityCollide("maps/a.map", 30, 12, false),
+            new LanMessage.Interact("maps/a.map", 12),
+            new LanMessage.UseItem("maps/a.map", 12, "key_study"),
+        ];
+        LanMessage.WorldMessage[] fromHost = [new LanMessage.ButtonState("maps/a.map", 5, true), new LanMessage.LampState("maps/b.map", 6, true)];
+
+        foreach (var message in fromJoining) await joining.SendWorldMessageAsync(message, TestContext.Current.CancellationToken);
+        foreach (var message in fromHost) await host.SendWorldMessageAsync(message, TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => { lock (hostReceived) lock (joiningReceived) return hostReceived.Count == 4 && joiningReceived.Count == 2; });
+
+        lock (hostReceived) Assert.Equal(fromJoining, hostReceived);
+        lock (joiningReceived) Assert.Equal(fromHost, joiningReceived);
+    }
+
+    [Fact]
     public async Task Bodies_travel_both_ways_between_admitted_Game_Peers()
     {
         var port = FreePort();

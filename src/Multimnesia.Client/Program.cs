@@ -37,7 +37,8 @@ await LocalGameSession.RunReconnectingAsync(
             receiveCustomStoryStartOutcome: callbacks.ReceiveCustomStoryStartOutcome,
             receivePose: callbacks.ReceivePose,
             receiveHoldMessage: callbacks.ReceiveHoldMessage,
-            receiveBodies: callbacks.ReceiveBodies),
+            receiveBodies: callbacks.ReceiveBodies,
+            receiveWorldMessage: callbacks.ReceiveWorldMessage),
         entry =>
         {
             if (entry.Event == LocalGameEventName.Connected)

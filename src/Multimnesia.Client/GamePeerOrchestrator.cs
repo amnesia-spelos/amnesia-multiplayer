@@ -73,6 +73,8 @@ public interface ISessionOperations
     void SendBodies(LanMessage.Bodies bodies);
     // Ordered and exactly once; never waits behind Poses or bodies.
     Task SendHoldMessageAsync(LanMessage.HoldMessage message, CancellationToken cancellationToken);
+    // Ordered and exactly once, on the same lane as Hold messages.
+    Task SendWorldMessageAsync(LanMessage.WorldMessage message, CancellationToken cancellationToken);
 }
 
 public sealed class GamePeerOrchestrator

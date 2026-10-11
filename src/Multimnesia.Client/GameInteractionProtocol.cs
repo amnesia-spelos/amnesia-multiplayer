@@ -85,7 +85,16 @@ public static class GameInteractionProtocol
         if (line.StartsWith(ReportedBodiesStatePrefix, StringComparison.Ordinal))
             return TryParseReportedBodies(line) ?? new GameEvent.Unknown(line);
         if (line.StartsWith(Version2EventPrefix, StringComparison.Ordinal))
-            return TryParseInteractionEvent(line) ?? new GameEvent.Unknown(line);
+            return line.Split(' ', 3)[1] switch
+            {
+                "mapentered" => ProtocolVersion2Line.TrySplit(line, fixedFieldCount: 2, hasPath: true, out var fields)
+                    ? new GameEvent.MapEntered(fields[2])
+                    : new GameEvent.Unknown(line),
+                "sharedcallback" or "buttonstate" or "lampstate" => TryParseWorldMessage(line) is { } change
+                    ? new GameEvent.WorldChanged(change)
+                    : new GameEvent.Unknown(line),
+                _ => TryParseInteractionEvent(line) ?? new GameEvent.Unknown(line)
+            };
         if (line.StartsWith(Version2ResponsePrefix, StringComparison.Ordinal))
         {
             // RESPONSE <keyword> <outcome> [<field>...]
@@ -120,8 +129,54 @@ public static class GameInteractionProtocol
         return true;
     }
 
+    // EVENT sharedcallback playercollide <entityId> <state> <map>, EVENT sharedcallback entitycollide <parentId> <entityId>
+    // <state> <map>, EVENT sharedcallback interact <entityId> <map>, EVENT sharedcallback useitem <entityId> <item> <map>,
+    // EVENT buttonstate|lampstate <entityId> <0|1> <map>
+    private static LanMessage.WorldMessage? TryParseWorldMessage(string line)
+    {
+        var parts = line.Split(' ', 4);
+        var (keyword, kind) = (parts[1], parts.Length > 2 ? parts[2] : "");
+        var fixedFieldCount = (keyword, kind) switch
+        {
+            ("sharedcallback", "playercollide" or "useitem") => 5,
+            ("sharedcallback", "entitycollide") => 6,
+            ("sharedcallback", "interact") => 4,
+            ("buttonstate" or "lampstate", _) => 4,
+            _ => 0
+        };
+        if (fixedFieldCount == 0 || !ProtocolVersion2Line.TrySplit(line, fixedFieldCount, hasPath: true, out var fields)) return null;
+        var map = fields[fixedFieldCount];
+        var first = keyword == "sharedcallback" ? 3 : 2;
+        if (!ProtocolVersion2Line.TryParseIdentifier(fields[first], out var entityId)) return null;
+        switch (keyword, kind)
+        {
+            case ("sharedcallback", "playercollide") when ParseCollideState(fields[4]) is { } entered:
+                return new LanMessage.PlayerCollide(map, entityId, entered);
+            case ("sharedcallback", "entitycollide") when ProtocolVersion2Line.TryParseIdentifier(fields[4], out var childId) &&
+                ParseCollideState(fields[5]) is { } entered:
+                return new LanMessage.EntityCollide(map, entityId, childId, entered);
+            case ("sharedcallback", "interact"):
+                return new LanMessage.Interact(map, entityId);
+            case ("sharedcallback", "useitem") when LanProtocol.IsValidItemName(fields[4]):
+                return new LanMessage.UseItem(map, entityId, fields[4]);
+            case ("buttonstate", _) when fields[3] is "0" or "1":
+                return new LanMessage.ButtonState(map, entityId, fields[3] == "1");
+            case ("lampstate", _) when fields[3] is "0" or "1":
+                return new LanMessage.LampState(map, entityId, fields[3] == "1");
+            default:
+                return null;
+        }
+    }
+
+    private static bool? ParseCollideState(string wireName) => wireName switch
+    {
+        "1" => true,
+        "-1" => false,
+        _ => null
+    };
+
     // EVENT interactionstart <entityId> <bodyId> <map>, EVENT interactionend <entityId> <bodyId> <ending> <map>,
-    // EVENT reportcontact|reportsettled <entityId> <map>, EVENT reportbroke <entityId> <state> <map>
+    // EVENT reportcontact|reportsettled|entityreleased <entityId> <map>, EVENT reportbroke <entityId> <state> <map>
     private static GameEvent? TryParseInteractionEvent(string line)
     {
         var name = line.Split(' ', 3)[1];
@@ -129,7 +184,7 @@ public static class GameInteractionProtocol
         {
             "interactionstart" => 4,
             "interactionend" => 5,
-            "reportcontact" or "reportsettled" => 3,
+            "reportcontact" or "reportsettled" or "entityreleased" => 3,
             "reportbroke" => 3 + ProtocolVersion2Line.BodyStateFieldCount,
             _ => 0
         };
@@ -147,6 +202,8 @@ public static class GameInteractionProtocol
                 return new GameEvent.ReportContacted(entityId, map);
             case "reportsettled":
                 return new GameEvent.ReportSettled(entityId, map);
+            case "entityreleased":
+                return new GameEvent.EntityReleased(entityId, map);
             case "reportbroke" when ProtocolVersion2Line.TryParseBodyState(fields.AsSpan(3, ProtocolVersion2Line.BodyStateFieldCount), out var state):
                 return new GameEvent.ReportBroke(entityId, state, map);
             default:
@@ -194,6 +251,22 @@ public static class GameInteractionProtocol
         return new GameEvent.ReportedBodies(timeMs, entries, fields[^1]);
     }
 
+    // The map an Event or State Update shows the local game on, if it names one.
+    public static string? LocalMapOf(GameEvent gameEvent) => gameEvent switch
+    {
+        GameEvent.LocalPoseReported reported => reported.Pose.Map,
+        GameEvent.MapEntered entered => entered.Map,
+        GameEvent.InteractionStarted started => started.Map,
+        GameEvent.InteractionEnded ended => ended.Map,
+        GameEvent.ReportContacted contacted => contacted.Map,
+        GameEvent.ReportSettled settled => settled.Map,
+        GameEvent.ReportBroke broke => broke.Map,
+        GameEvent.ReportedBodies reported => reported.Map,
+        GameEvent.EntityReleased released => released.Map,
+        GameEvent.WorldChanged changed => changed.Change.Map,
+        _ => null
+    };
+
     // Replies that LocalGameCommands turns into an Unrecognized start, which the Joining Player reports as unavailable.
     public static bool IsUnrecognizedReply(GameEvent gameEvent) => gameEvent is
         GameEvent.StartCustomStoryResponded { Outcome: StartCustomStoryOutcome.Unrecognized } or GameEvent.UnknownCommandWarned;
@@ -203,9 +276,11 @@ public static class GameInteractionProtocol
 
     public static string StartCustomStory(string identifier) => $"startcustomstory:{identifier}";
 
-    // The first Command of every game Session; the Shared Pose needs the first two Capabilities, Holds the third.
+    // The first Command of every game Session; the Shared Pose needs the first two Capabilities, Holds the third, and
+    // Shared Callbacks the fourth.
     public const string Negotiate =
-        $"protocol 2 {ProtocolNegotiation.Avatars} {ProtocolNegotiation.LocalPose} {ProtocolNegotiation.Interactions}";
+        $"protocol 2 {ProtocolNegotiation.Avatars} {ProtocolNegotiation.LocalPose} {ProtocolNegotiation.Interactions} " +
+        ProtocolNegotiation.SharedCallbacks;
 
     // Uses the default model, with collision on.
     public static string AvatarCreate(string avatarIdentifier) => $"avatarcreate {avatarIdentifier}";
@@ -260,6 +335,26 @@ public static class GameInteractionProtocol
         map
     ]);
 
+    // The Command that makes another player's change in the local game. Every field is an identifier, a state, or a
+    // validated item name; the game looks up its own Map Script registration and never runs text it was sent.
+    public static string Apply(LanMessage.WorldMessage change) => change switch
+    {
+        LanMessage.PlayerCollide collide =>
+            $"sharedcallback playercollide {ProtocolVersion2Line.FormatIdentifier(collide.EntityId)} {CollideState(collide.Entered)} {collide.Map}",
+        LanMessage.EntityCollide collide => string.Join(' ',
+            "sharedcallback entitycollide", ProtocolVersion2Line.FormatIdentifier(collide.ParentId),
+            ProtocolVersion2Line.FormatIdentifier(collide.EntityId), CollideState(collide.Entered), collide.Map),
+        LanMessage.Interact interact => $"sharedcallback interact {ProtocolVersion2Line.FormatIdentifier(interact.EntityId)} {interact.Map}",
+        LanMessage.UseItem useItem when LanProtocol.IsValidItemName(useItem.Item) =>
+            $"sharedcallback useitem {ProtocolVersion2Line.FormatIdentifier(useItem.EntityId)} {useItem.Item} {useItem.Map}",
+        LanMessage.ButtonState button =>
+            $"buttonstate {ProtocolVersion2Line.FormatIdentifier(button.EntityId)} {(button.SwitchedOn ? "1" : "0")} {button.Map}",
+        LanMessage.LampState lamp => $"lampstate {ProtocolVersion2Line.FormatIdentifier(lamp.EntityId)} {(lamp.Lit ? "1" : "0")} {lamp.Map}",
+        _ => throw new ArgumentException("The change cannot be applied.", nameof(change))
+    };
+
+    private static string CollideState(bool entered) => entered ? "1" : "-1";
+
     // A legacy Command; the game answers it after processing every line written before it.
     public const string Ping = "ping";
 }
@@ -286,6 +381,12 @@ public abstract record GameEvent
     public sealed record ReportSettled(int EntityId, string Map) : GameEvent;
     public sealed record ReportBroke(int EntityId, BodyState State, string Map) : GameEvent;
     public sealed record ReportedBodies(ulong TimeMs, IReadOnlyList<BodyEntry> Entries, string Map) : GameEvent;
+    // A Map Visit started; the previous one's Peer-Driven Entities are released and its report is empty.
+    public sealed record MapEntered(string Map) : GameEvent;
+    // A script deactivated, removed, or moved a Peer-Driven Entity, and the game stopped following it.
+    public sealed record EntityReleased(int EntityId, string Map) : GameEvent;
+    // The local player triggered a Shared Callback, or switched a button or lit a lamp (the `sharedcallbacks` Events).
+    public sealed record WorldChanged(LanMessage.WorldMessage Change) : GameEvent;
     public sealed record Responded(string Keyword, string Outcome, IReadOnlyList<string> Fields) : GameEvent;
     public sealed record Unknown(string Line) : GameEvent;
 }

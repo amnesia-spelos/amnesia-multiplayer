@@ -42,6 +42,7 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     private readonly Func<LanMessage.Pose, ValueTask> _receivePose;
     private readonly Func<LanMessage.HoldMessage, ValueTask> _receiveHoldMessage;
     private readonly Func<LanMessage.Bodies, ValueTask> _receiveBodies;
+    private readonly Func<LanMessage.WorldMessage, ValueTask> _receiveWorldMessage;
     private readonly SemaphoreSlim _handshakeSlots = new(MaxConcurrentHandshakes, MaxConcurrentHandshakes);
     private readonly object _gate = new();
     private readonly CancellationTokenSource _lifetime = new();
@@ -64,7 +65,8 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         Func<string, SharedCustomStoryStartOutcome, ValueTask>? receiveCustomStoryStartOutcome = null,
         Func<LanMessage.Pose, ValueTask>? receivePose = null,
         Func<LanMessage.HoldMessage, ValueTask>? receiveHoldMessage = null,
-        Func<LanMessage.Bodies, ValueTask>? receiveBodies = null)
+        Func<LanMessage.Bodies, ValueTask>? receiveBodies = null,
+        Func<LanMessage.WorldMessage, ValueTask>? receiveWorldMessage = null)
     {
         _options = options;
         _notice = notice ?? (_ => ValueTask.CompletedTask);
@@ -76,6 +78,7 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         _receivePose = receivePose ?? (_ => ValueTask.CompletedTask);
         _receiveHoldMessage = receiveHoldMessage ?? (_ => ValueTask.CompletedTask);
         _receiveBodies = receiveBodies ?? (_ => ValueTask.CompletedTask);
+        _receiveWorldMessage = receiveWorldMessage ?? (_ => ValueTask.CompletedTask);
     }
 
     public Guid SessionCorrelationId { get; private set; }
@@ -244,7 +247,14 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     }
 
     // Ordered and exactly once, like chat: a Hold message that cannot be queued ends the Multiplayer Session.
-    public async Task SendHoldMessageAsync(LanMessage.HoldMessage message, CancellationToken cancellationToken)
+    public Task SendHoldMessageAsync(LanMessage.HoldMessage message, CancellationToken cancellationToken) =>
+        SendOrderedAsync(message);
+
+    // A world message that cannot be queued ends the Multiplayer Session the same way.
+    public Task SendWorldMessageAsync(LanMessage.WorldMessage message, CancellationToken cancellationToken) =>
+        SendOrderedAsync(message);
+
+    private async Task SendOrderedAsync(LanMessage message)
     {
         LanOutbound? outbound;
         TcpClient? connection;
@@ -545,6 +555,9 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
                     // Only the Multiplayer Relay's arbiter denies Claims.
                     case LanMessage.HoldMessage hold when hold is not LanMessage.ClaimDenied || !isHost:
                         await _receiveHoldMessage(hold);
+                        break;
+                    case LanMessage.WorldMessage world:
+                        await _receiveWorldMessage(world);
                         break;
                     case LanMessage.Heartbeat:
                         break;

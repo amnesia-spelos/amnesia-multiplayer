@@ -21,4 +21,5 @@ public sealed class UnavailableSessionOperations : ISessionOperations
     public void SendPose(LanMessage.Pose pose) { }
     public void SendBodies(LanMessage.Bodies bodies) { }
     public Task SendHoldMessageAsync(LanMessage.HoldMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task SendWorldMessageAsync(LanMessage.WorldMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
 }

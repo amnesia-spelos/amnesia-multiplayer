@@ -862,6 +862,38 @@ public sealed class HoldsTests
             hostGame.Lines);
     }
 
+    [Fact]
+    public async Task A_script_deactivating_the_other_players_entity_ends_their_Hold_without_releasing_it_again()
+    {
+        var holds = await CreatePresentHoldsAsync();
+        holds.HandleReceivedHoldMessage(ClaimOf12);
+        await _game.WaitForLinesAsync(2);
+
+        await holds.HandleLocalGameEventAsync(new GameEvent.EntityReleased(12, Map));
+        // The Holder's game ran the same script, so its streamed bodies and settling arrive after the Hold ended.
+        holds.HandleReceivedBodies(new(1000, Map, [new(12, 3, Carried)]));
+        holds.HandleReceivedHoldMessage(new LanMessage.Settled(Map, 12));
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        Assert.Equal([Subscribe, Drive], _game.Lines);
+        Assert.True(LoggedHoldEnding("The other player's Hold on entity 12", "a script in the local game ended it."));
+        // The entity is free again: the local player can Claim it.
+        await holds.HandleLocalGameEventAsync(Grab);
+        Assert.Contains(ClaimOf12, _sessions.SentHoldMessages);
+    }
+
+    [Fact]
+    public async Task A_release_of_an_entity_nobody_Holds_changes_nothing()
+    {
+        var holds = await CreatePresentHoldsAsync();
+        await holds.HandleLocalGameEventAsync(Grab);
+
+        await holds.HandleLocalGameEventAsync(new GameEvent.EntityReleased(12, Map));
+        await holds.HandleLocalGameEventAsync(new GameEvent.EntityReleased(40, Map));
+
+        Assert.DoesNotContain(_game.Logged, entry => entry.Event == LocalGameEventName.HoldEnded);
+    }
+
     [Theory]
     [InlineData("entitydrive", "not-found", new[] { "12" })]
     [InlineData("entitydrive", "wrong-map", new[] { "12" })]
@@ -977,6 +1009,8 @@ public sealed class HoldsTests
             lock (_sentHoldMessages) _sentHoldMessages.Add(message);
             return Task.CompletedTask;
         }
+
+        public Task SendWorldMessageAsync(LanMessage.WorldMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
 
         public void SendPose(LanMessage.Pose pose) { }
         public Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken) => throw new NotSupportedException();

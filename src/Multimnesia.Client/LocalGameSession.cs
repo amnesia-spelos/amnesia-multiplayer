@@ -7,7 +7,8 @@ namespace Multimnesia.Client;
 public enum LocalGameEventName
 {
     Connected, ProtocolNegotiated, UnrecognizedGameReply, AvatarCreated, SharedPoseCommandFailed,
-    HoldClaimed, HoldClaimDenied, HoldEnded, HoldMessageIgnored, HoldCommandFailed, ChatEntryFailed
+    HoldClaimed, HoldClaimDenied, HoldEnded, HoldMessageIgnored, HoldCommandFailed, ChatEntryFailed,
+    SharedCallbackNotFound, SharedCallbackFailed, SharedCallbacksDiscarded
 }
 
 public sealed record LocalGameLogEntry(
@@ -44,7 +45,8 @@ public sealed record SessionCallbacks(
     Func<string, SharedCustomStoryStartOutcome, ValueTask> ReceiveCustomStoryStartOutcome,
     Func<LanMessage.Pose, ValueTask> ReceivePose,
     Func<LanMessage.HoldMessage, ValueTask> ReceiveHoldMessage,
-    Func<LanMessage.Bodies, ValueTask> ReceiveBodies);
+    Func<LanMessage.Bodies, ValueTask> ReceiveBodies,
+    Func<LanMessage.WorldMessage, ValueTask> ReceiveWorldMessage);
 
 // One Game Interaction Protocol Session with the local game: from its greeting until the connection is lost.
 public sealed class LocalGameSession(
@@ -55,6 +57,8 @@ public sealed class LocalGameSession(
 {
     public const string AvatarsUnsupportedNotice = "Your game does not support Avatars; movement will not be shared.";
     public const string InteractionsUnsupportedNotice = "Your game does not support interactions; moving props will not be shared.";
+    public const string SharedCallbacksUnsupportedNotice =
+        "Your game does not support Shared Callbacks; triggers, buttons, and lamps will not be shared.";
 
     // Completes when the local game answers the negotiation; every other write waits for it.
     private readonly TaskCompletionSource<ProtocolNegotiation> _negotiation = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -118,6 +122,7 @@ public sealed class LocalGameSession(
         SharedCustomStoryStart sharedStart = null!;
         SharedPose sharedPose = null!;
         Holds holds = null!;
+        SharedCallbacks sharedCallbacks = null!;
 
         var sessions = createSessions(new SessionCallbacks(
             DisplaySystemAsync,
@@ -125,6 +130,8 @@ public sealed class LocalGameSession(
             // Not awaited: the exchange with the local game must not stall reading Heartbeats from the Session Host.
             identifier =>
             {
+                // Before the next message is received, so only the changes sent after the start are kept.
+                sharedCallbacks.HandleReceivedCustomStoryStart();
                 _ = RunIgnoringDisconnectAsync(sharedStart.HandleHostStartAsync(identifier, cancellationToken));
                 return ValueTask.CompletedTask;
             },
@@ -152,6 +159,12 @@ public sealed class LocalGameSession(
             {
                 holds.HandleReceivedBodies(bodies);
                 return ValueTask.CompletedTask;
+            },
+            // Never blocks: the change is written to the local game later, in order, or kept for its map.
+            change =>
+            {
+                sharedCallbacks.HandleReceivedWorldMessage(change);
+                return ValueTask.CompletedTask;
             }));
         try
         {
@@ -161,6 +174,8 @@ public sealed class LocalGameSession(
                 sessions, WriteLineAsync, DisplaySystemAsync, (severity, eventName, line) => Log(severity, eventName, line),
                 _negotiation.Task, cancellationToken);
             holds = new Holds(
+                sessions, WriteLineAsync, (severity, eventName, line) => Log(severity, eventName, line), _negotiation.Task, cancellationToken);
+            sharedCallbacks = new SharedCallbacks(
                 sessions, WriteLineAsync, (severity, eventName, line) => Log(severity, eventName, line), _negotiation.Task, cancellationToken);
 
             // Bypasses the gate: every other writer waits there until the negotiation is answered.
@@ -190,9 +205,12 @@ public sealed class LocalGameSession(
                 {
                     _ = RunIgnoringDisconnectAsync(sharedPose.HandleResponseAsync(responded).AsTask());
                     holds.HandleResponse(responded);
+                    sharedCallbacks.HandleResponse(responded);
                 }
                 // Not awaited, but it queues its Hold messages before its first await, so they keep the order the game sent them in.
                 _ = RunIgnoringDisconnectAsync(holds.HandleLocalGameEventAsync(gameEvent));
+                // Likewise for the changes it sends, and it observes the local map before its first await.
+                _ = RunIgnoringDisconnectAsync(sharedCallbacks.HandleLocalGameEventAsync(gameEvent));
                 // Not awaited, but it records the event before its first await, so events are observed in the order the game sent them.
                 _ = RunIgnoringDisconnectAsync(sharedStart.HandleLocalGameEventAsync(gameEvent, cancellationToken));
                 localGameCommands.Dispatch(gameEvent);
@@ -219,6 +237,7 @@ public sealed class LocalGameSession(
         {
             if (!negotiation.GrantsSharedPose) await DisplaySystemAsync(AvatarsUnsupportedNotice);
             if (!negotiation.GrantsInteractions) await DisplaySystemAsync(InteractionsUnsupportedNotice);
+            if (!negotiation.GrantsSharedCallbacks) await DisplaySystemAsync(SharedCallbacksUnsupportedNotice);
         }
 
         async Task HandleCommandAsync(GamePeerOrchestrator orchestrator, ChatEntry entry)

@@ -7,9 +7,11 @@ namespace Multimnesia.Tests;
 
 public sealed class LocalGameSessionTests : IAsyncDisposable
 {
-    private const string Negotiate = "protocol 2 avatars localpose interactions";
+    private const string Negotiate = "protocol 2 avatars localpose interactions sharedcallbacks";
     private const string AvatarsUnsupportedNotice = "chatentry - - SYSTEM:Your game does not support Avatars; movement will not be shared.";
     private const string InteractionsUnsupportedNotice = "chatentry - - SYSTEM:Your game does not support interactions; moving props will not be shared.";
+    private const string SharedCallbacksUnsupportedNotice =
+        "chatentry - - SYSTEM:Your game does not support Shared Callbacks; triggers, buttons, and lamps will not be shared.";
     private readonly CancellationTokenSource _cancellation = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
     private readonly FakeSessionOperations _sessions = new();
     private readonly List<LocalGameLogEntry> _log = [];
@@ -83,6 +85,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
 
         await game.SendAsync("RESPONSE protocol ok 2 avatars localpose");
         Assert.Equal(InteractionsUnsupportedNotice, await game.ReadLineAsync());
+        Assert.Equal(SharedCallbacksUnsupportedNotice, await game.ReadLineAsync());
         await _callbacks.DisplaySystem("marker");
 
         Assert.Equal("chatentry - - SYSTEM:marker", await game.ReadLineAsync());
@@ -111,6 +114,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
 
         Assert.Equal(AvatarsUnsupportedNotice, await game.ReadLineAsync());
         Assert.Equal(InteractionsUnsupportedNotice, await game.ReadLineAsync());
+        Assert.Equal(SharedCallbacksUnsupportedNotice, await game.ReadLineAsync());
         Assert.False(session.IsSharedPoseAvailable);
         var logged = Assert.Single(_log, entry => entry.Event == LocalGameEventName.ProtocolNegotiated);
         Assert.Equal(ConnectionLogSeverity.Warning, logged.Severity);
@@ -137,6 +141,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         Assert.Equal("chatentry - - SYSTEM:Version line.", await game.ReadLineAsync());
         Assert.Equal(AvatarsUnsupportedNotice, await game.ReadLineAsync());
         Assert.Equal(InteractionsUnsupportedNotice, await game.ReadLineAsync());
+        Assert.Equal(SharedCallbacksUnsupportedNotice, await game.ReadLineAsync());
     }
 
     [Fact]
@@ -148,6 +153,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         await game.SendAsync("WARNING:Unknown command");
         Assert.Equal(AvatarsUnsupportedNotice, await game.ReadLineAsync());
         Assert.Equal(InteractionsUnsupportedNotice, await game.ReadLineAsync());
+        Assert.Equal(SharedCallbacksUnsupportedNotice, await game.ReadLineAsync());
 
         await _callbacks.ReceiveChat(new ChatEntry("Bob", "hello"));
         Assert.Equal("chatentry - - Bob:hello", await game.ReadLineAsync());
@@ -197,6 +203,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         Assert.Equal(Negotiate, await game.ReadLineAsync());
         await game.SendAsync("RESPONSE protocol ok 2 avatars localpose");
         Assert.Equal(InteractionsUnsupportedNotice, await game.ReadLineAsync());
+        Assert.Equal(SharedCallbacksUnsupportedNotice, await game.ReadLineAsync());
         _sessions.SetPresent(true);
         Assert.Equal("avatarcreate partner", await game.ReadLineAsync());
         Assert.Equal("localpose subscribe 30", await game.ReadLineAsync());
@@ -264,7 +271,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
     {
         var (game, _, _) = await ConnectAsync();
         Assert.Equal(Negotiate, await game.ReadLineAsync());
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions");
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks");
         _sessions.SetPresent(true);
         Assert.Equal(["avatarcreate partner", "localpose subscribe 30", "reportedbodies subscribe 30"], await ReadSetupAsync(game));
         return game;
@@ -327,6 +334,47 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Shared_Callbacks_are_relayed_both_ways_and_kept_for_the_map_the_local_game_enters()
+    {
+        var (game, _, _) = await ConnectAsync();
+        await using var _ = game;
+        Assert.Equal(Negotiate, await game.ReadLineAsync());
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks");
+
+        await game.SendAsync($"EVENT sharedcallback useitem 12 key_study {HoldMap}");
+        await WaitUntilAsync(() => _sessions.SentWorldMessages.Count == 1);
+        Assert.Equal([new LanMessage.UseItem(HoldMap, 12, "key_study")], _sessions.SentWorldMessages);
+
+        await _callbacks.ReceiveWorldMessage(new LanMessage.ButtonState("maps/next.map", 5, true));
+        await _callbacks.ReceiveWorldMessage(new LanMessage.Interact(HoldMap, 7));
+        Assert.Equal($"sharedcallback interact 7 {HoldMap}", await game.ReadLineAsync());
+        await game.SendAsync("RESPONSE sharedcallback not-found");
+        await game.SendAsync("EVENT mapentered maps/next.map");
+        Assert.Equal("buttonstate 5 1 maps/next.map", await game.ReadLineAsync());
+
+        await WaitUntilAsync(() => { lock (_log) return _log.Any(entry => entry.Event == LocalGameEventName.SharedCallbackNotFound); });
+    }
+
+    [Fact]
+    public async Task A_new_Shared_Custom_Story_Start_from_the_Session_Host_discards_the_kept_changes()
+    {
+        var (game, _, _) = await ConnectAsync();
+        await using var _ = game;
+        Assert.Equal(Negotiate, await game.ReadLineAsync());
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks");
+
+        await _callbacks.ReceiveWorldMessage(new LanMessage.ButtonState("maps/old.map", 5, true));
+        await _callbacks.ReceiveCustomStoryStarted("mp-test-cs");
+        await _callbacks.ReceiveWorldMessage(new LanMessage.ButtonState("maps/first.map", 6, true));
+        await game.SendAsync("EVENT mapentered maps/old.map");
+        await game.SendAsync("EVENT mapentered maps/first.map");
+
+        string? line;
+        do line = await game.ReadLineAsync(); while (line!.StartsWith("startcustomstory:", StringComparison.Ordinal));
+        Assert.Equal("buttonstate 6 1 maps/first.map", line);
+    }
+
+    [Fact]
     public async Task After_a_local_game_reconnect_the_Avatar_is_recreated_and_received_Poses_drive_it_again()
     {
         _sessions.SetPresent(true);
@@ -343,13 +391,13 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         {
             await first.SendAsync("Welcome");
             Assert.Equal(Negotiate, await first.ReadLineAsync());
-            await first.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions");
+            await first.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks");
             Assert.Equal(["avatarcreate partner", "localpose subscribe 30", "reportedbodies subscribe 30"], await ReadSetupAsync(first));
         }
 
         await second.SendAsync("Welcome");
         Assert.Equal(Negotiate, await second.ReadLineAsync());
-        await second.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions");
+        await second.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks");
 
         Assert.Equal(["avatarcreate partner", "localpose subscribe 30", "reportedbodies subscribe 30"], await ReadSetupAsync(second));
         await _callbacks.ReceivePose(ReceivedPose);
@@ -497,6 +545,14 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         public Task SendHoldMessageAsync(LanMessage.HoldMessage message, CancellationToken cancellationToken)
         {
             lock (_sentHoldMessages) _sentHoldMessages.Add(message);
+            return Task.CompletedTask;
+        }
+        public List<LanMessage.WorldMessage> SentWorldMessages { get { lock (_sentWorldMessages) return [.. _sentWorldMessages]; } }
+        private readonly List<LanMessage.WorldMessage> _sentWorldMessages = [];
+
+        public Task SendWorldMessageAsync(LanMessage.WorldMessage message, CancellationToken cancellationToken)
+        {
+            lock (_sentWorldMessages) _sentWorldMessages.Add(message);
             return Task.CompletedTask;
         }
         public bool IsJoined => true;

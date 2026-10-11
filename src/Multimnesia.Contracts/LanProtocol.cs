@@ -38,6 +38,20 @@ public abstract record LanMessage
 
         public override int GetHashCode() => HashCode.Combine(TimeMs, Map, Entries.Count);
     }
+
+    // A change one player made to a map's world that every other player's game makes for itself (ADR 0006). Each names a
+    // Map Script registration, a button, or a lamp only by its map path and integer entity IDs, plus a bounded item name.
+    public abstract record WorldMessage(string Map) : LanMessage;
+    // A Shared Callback: the receiving game runs the callback its own Map Script registered for the same entities.
+    public abstract record SharedCallback(string Map) : WorldMessage(Map);
+    // A collide callback whose parent is "Player", with EntityId as its child; Entered is false when they stopped colliding.
+    public sealed record PlayerCollide(string Map, int EntityId, bool Entered) : SharedCallback(Map);
+    // A collide callback between two entities, one of which the sender Holds.
+    public sealed record EntityCollide(string Map, int ParentId, int EntityId, bool Entered) : SharedCallback(Map);
+    public sealed record Interact(string Map, int EntityId) : SharedCallback(Map);
+    public sealed record UseItem(string Map, int EntityId, string Item) : SharedCallback(Map);
+    public sealed record ButtonState(string Map, int EntityId, bool SwitchedOn) : WorldMessage(Map);
+    public sealed record LampState(string Map, int EntityId, bool Lit) : WorldMessage(Map);
 }
 
 public enum ClaimReason { Interact, Contact }
@@ -57,7 +71,7 @@ public sealed class LanProtocolException(string message, Exception? innerExcepti
 
 public static class LanProtocol
 {
-    public const int CurrentVersion = 6;
+    public const int CurrentVersion = 7;
     // Fits the largest bodies message: 32 entries of 13 longest-form numbers and a fully escaped map path.
     public const int MaximumFrameBytes = 32 * 1024;
     // Keeps a Pose's numbers within the game's 15-digit, 4-decimal line format; real positions and angles are far smaller.
@@ -69,6 +83,8 @@ public static class LanProtocol
     public const int MaximumBodies = 32;
     // The game's tolerance for a unit quaternion's length.
     public const double UnitQuaternionTolerance = 0.01;
+    // The game's own bound on an item name in a Shared Callback, whose characters are printable ASCII without spaces.
+    public const int MaximumItemNameLength = 64;
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
     public static async ValueTask WriteAsync(Stream stream, LanMessage message, CancellationToken cancellationToken = default)
@@ -140,6 +156,28 @@ public static class LanProtocol
                 }).ToArray()
             },
             LanMessage.Bodies => throw new LanProtocolException("Invalid bodies message."),
+            LanMessage.WorldMessage value when !IsValidMap(value.Map) => throw new LanProtocolException("Invalid world message."),
+            LanMessage.PlayerCollide value => new
+            {
+                type = "shared-callback", map = value.Map, kind = "player-collide", entityId = value.EntityId, state = CollideState(value.Entered)
+            },
+            LanMessage.EntityCollide value => new
+            {
+                type = "shared-callback",
+                map = value.Map,
+                kind = "entity-collide",
+                parentId = value.ParentId,
+                entityId = value.EntityId,
+                state = CollideState(value.Entered)
+            },
+            LanMessage.Interact value => new { type = "shared-callback", map = value.Map, kind = "interact", entityId = value.EntityId },
+            LanMessage.UseItem value when IsValidItemName(value.Item) => new
+            {
+                type = "shared-callback", map = value.Map, kind = "use-item", entityId = value.EntityId, item = value.Item
+            },
+            LanMessage.UseItem => throw new LanProtocolException("Invalid world message."),
+            LanMessage.ButtonState value => new { type = "button-state", map = value.Map, entityId = value.EntityId, switchedOn = value.SwitchedOn },
+            LanMessage.LampState value => new { type = "lamp-state", map = value.Map, entityId = value.EntityId, lit = value.Lit },
             _ => throw new LanProtocolException("Unsupported LAN message type.")
         });
         if (payload.Length > MaximumFrameBytes) throw new LanProtocolException("LAN message exceeds the maximum frame size.");
@@ -188,6 +226,10 @@ public static class LanProtocol
                 "broke" => new LanMessage.Broke(RequiredMap(root), RequiredInt32(root, "propId"), RequiredBodyState(root)),
                 "settled" => new LanMessage.Settled(RequiredMap(root), RequiredInt32(root, "propId")),
                 "bodies" => ReadBodies(root),
+                "shared-callback" => ReadSharedCallback(root),
+                "button-state" => new LanMessage.ButtonState(
+                    RequiredMap(root), RequiredInt32(root, "entityId"), root.GetProperty("switchedOn").GetBoolean()),
+                "lamp-state" => new LanMessage.LampState(RequiredMap(root), RequiredInt32(root, "entityId"), root.GetProperty("lit").GetBoolean()),
                 _ => throw new LanProtocolException("Unknown LAN message type.")
             };
         }
@@ -338,6 +380,41 @@ public static class LanProtocol
         return new(timeMs, map, [.. entries.EnumerateArray().Select(entry =>
             new BodyEntry(RequiredInt32(entry, "propId"), RequiredInt32(entry, "bodyId"), RequiredBodyState(entry)))]);
     }
+
+    // A function name or script text is never read: an unknown kind is malformed.
+    private static LanMessage.SharedCallback ReadSharedCallback(JsonElement root)
+    {
+        var map = RequiredMap(root);
+        return RequiredString(root, "kind", 32) switch
+        {
+            "player-collide" => new LanMessage.PlayerCollide(map, RequiredInt32(root, "entityId"), RequiredCollideState(root)),
+            "entity-collide" => new LanMessage.EntityCollide(
+                map, RequiredInt32(root, "parentId"), RequiredInt32(root, "entityId"), RequiredCollideState(root)),
+            "interact" => new LanMessage.Interact(map, RequiredInt32(root, "entityId")),
+            "use-item" => new LanMessage.UseItem(map, RequiredInt32(root, "entityId"), RequiredItemName(root)),
+            _ => throw new LanProtocolException("Unknown Shared Callback kind.")
+        };
+    }
+
+    // The game's collide state: 1 when the bodies started colliding, -1 when they stopped.
+    private static int CollideState(bool entered) => entered ? 1 : -1;
+
+    private static bool RequiredCollideState(JsonElement root) => RequiredInt32(root, "state") switch
+    {
+        1 => true,
+        -1 => false,
+        _ => throw new LanProtocolException("Invalid collide state.")
+    };
+
+    private static string RequiredItemName(JsonElement root)
+    {
+        var item = root.GetProperty("item").GetString();
+        return IsValidItemName(item) ? item! : throw new LanProtocolException("Invalid item name.");
+    }
+
+    // 1 to 64 printable ASCII characters, '!' through '~', so an item name is one field of a game line.
+    public static bool IsValidItemName(string? item) =>
+        item is { Length: > 0 and <= MaximumItemNameLength } && item.All(character => character is >= '!' and <= '~');
 
     private static bool IsPoseNumber(double value) => double.IsFinite(value) && Math.Abs(value) <= MaximumPoseMagnitude;
 

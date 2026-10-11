@@ -154,6 +154,7 @@ public sealed class CommandOrchestratorTests
         public void SendPose(LanMessage.Pose pose) { }
         public void SendBodies(LanMessage.Bodies bodies) { }
         public Task SendHoldMessageAsync(LanMessage.HoldMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task SendWorldMessageAsync(LanMessage.WorldMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
         public bool IsJoined => false;
         public List<ChatEntry> SentChat { get; } = [];
         public SessionOperationResult HostResult { get; init; } = SessionOperationResult.Succeeded;
