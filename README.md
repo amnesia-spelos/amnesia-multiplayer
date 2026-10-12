@@ -280,6 +280,20 @@ Run this after any change to how chat is displayed or how Chat Colors are shared
 
 On 2026-10-11 these steps all passed.
 
+### Shared Callbacks walkthrough
+
+Run this after any change to how Shared Callbacks are shared (#43), with the Release Game Peer built from the same commit on both PCs and a game build that grants `sharedcallbacks`. Play chapter 1 of the main game together, both players on the same map unless a step says otherwise.
+
+1. **`13_machine_room` cogwheel.** The Session Host fits `cogwheel03_dyn`. In the Joining Player's game, the mounted cogwheel appears, and the loose copy disappears and can't be grabbed. Neither Game Peer log has an `entitybodies not-found` line.
+2. **Guiding rods.** One player fits them. The other player's game shows them fitted, and the other player's inventory is unchanged.
+3. **`03_archives` jar.** The Holder carries `vase02_ghost_1` out of `AreaJar`. The other game runs `CollideJarLeaveArea` once, through the Shared Callback, every time.
+4. **Trigger area while together.** One player walks into a scare or music area. Both games run it, and the other player keeps control of their character and camera.
+5. **Trigger area on another map.** The Session Host runs ahead to a new map and triggers areas there. When the Joining Player arrives, the Pending Shared Callbacks run on arrival. The Joining Player isn't frozen or teleported, and nothing soft-locks.
+6. **Button and lamp.** One player presses a button and lights a candle. Both show in the other game.
+7. **Both players trigger the same one-shot area.** It runs once in each game.
+
+On 2026-10-11 the chapter 1 playtest passed. Two Custom Stories played afterwards, My Lady's Insanity and Quiet, were each ended by a rate-limit disconnect. See the contact Claim loop under [Expected behavior and limitations](#expected-behavior-and-limitations).
+
 ## Expected behavior and limitations
 
 Two players host, join, chat, start the same Custom Story together, see each other move, and share how they move props, doors, levers, valves, and sliders. What that does *not* cover:
@@ -288,6 +302,7 @@ Two players host, join, chat, start the same Custom Story together, see each oth
 - **Map changes and returning to the main menu are not shared.** Only the Session Host's fresh Custom Story start is. Continue, Load Game, death reloads, quitting, and every map transition after the start are local.
 - **Changing game settings ends the Multiplayer Session for that player.** Applying settings restarts the game's Game Interaction Protocol server (amnesia-tdd-tcp#66), so the Game Peer loses its local game and has to rejoin. Pausing through the menu or a note does not.
 - **An Avatar stays frozen at its last Pose when its player returns to the main menu.** The game sends no Poses from the main menu and reports no map-left event, so the other player keeps seeing a motionless Avatar where that player last stood. Start the Custom Story again to resynchronize.
+- **Standing against a pile of props can disconnect the session.** A player resting against a heap of loose props, such as a scripted cave-in or rubble a map places, keeps Claiming the whole heap by contact several times a second. With more than about five props, the other Game Peer disconnects them with `You were disconnected for exceeding the Multiplayer Session's message rate limit.` Step away from the heap and rejoin. Tracked in amnesia-tdd-tcp#85 and #60.
 - **Enemies ignore the Joining Player.** Enemy AI is aware only of the player in its own game.
 - Avatar footstep sounds.
 - **What Entity Interaction Sync does not share.** Holds share how players move map-placed props, doors, levers, valves, and sliders, and breaks of props a player Holds. These are not shared:
