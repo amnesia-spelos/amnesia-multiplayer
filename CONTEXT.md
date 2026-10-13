@@ -21,15 +21,15 @@ The player whose computer runs the Multiplayer Relay.
 _Avoid_: Server, authority
 
 **Joining Player**:
-The second player whose Game Peer joins the Session Host's Multiplayer Session over the local network.
+A player whose Game Peer joins the Session Host's Multiplayer Session over the local network; a Multiplayer Session may have several.
 _Avoid_: Client, guest
 
 **Shared Custom Story Start**:
-The Session Host's fresh start of a Custom Story, reproduced on the Joining Player's game within the same Multiplayer Session.
+The Session Host's fresh start of a Custom Story, reproduced on every Joining Player's game within the same Multiplayer Session.
 _Avoid_: Story sync, map sync, remote start
 
 **Shared Pose**:
-A player's Pose, continuously reproduced as an Avatar in the other player's game within the same Multiplayer Session.
+A player's Pose, continuously reproduced as an Avatar in every other player's game within the same Multiplayer Session.
 _Avoid_: Movement sync, position sync, remote player, ghost
 
 **Hold**:
