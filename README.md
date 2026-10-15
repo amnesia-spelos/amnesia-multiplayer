@@ -299,6 +299,8 @@ Run this after any change to how Shared Callbacks are shared (#43), with the Rel
 
 On 2026-10-11 the chapter 1 playtest passed. Two Custom Stories played afterwards, My Lady's Insanity and Quiet, were each ended by a rate-limit disconnect. See the contact Claim loop under [Expected behavior and limitations](#expected-behavior-and-limitations).
 
+On 2026-10-15 the pickup, combine, and flashback steps (2–7 and 12) passed on two PCs, along with the earlier steps. Rate-limit disconnects while players touched rubble came more often than before; they are the same contact Claim loop, not yet addressed.
+
 ## Expected behavior and limitations
 
 Two players host, join, chat, start the same Custom Story together, see each other move, and share how they move props, doors, levers, valves, and sliders. What that does *not* cover:
