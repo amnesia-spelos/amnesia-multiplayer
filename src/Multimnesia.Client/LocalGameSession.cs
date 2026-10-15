@@ -163,7 +163,7 @@ public sealed class LocalGameSession(
             // Never blocks: the change is written to the local game later, in order, or kept for its map.
             change =>
             {
-                sharedCallbacks.HandleReceivedWorldMessage(change);
+                if (holds.HandleReceivedWorldMessage(change)) sharedCallbacks.HandleReceivedWorldMessage(change);
                 return ValueTask.CompletedTask;
             }));
         try
@@ -176,7 +176,8 @@ public sealed class LocalGameSession(
             holds = new Holds(
                 sessions, WriteLineAsync, (severity, eventName, line) => Log(severity, eventName, line), _negotiation.Task, cancellationToken);
             sharedCallbacks = new SharedCallbacks(
-                sessions, WriteLineAsync, (severity, eventName, line) => Log(severity, eventName, line), _negotiation.Task, cancellationToken);
+                sessions, WriteLineAsync, (severity, eventName, line) => Log(severity, eventName, line), _negotiation.Task,
+                cancellationToken, holds.HandleStickyAttachAnswered);
 
             // Bypasses the gate: every other writer waits there until the negotiation is answered.
             await writer.WriteLineAsync(GameInteractionProtocol.Negotiate.AsMemory(), cancellationToken);

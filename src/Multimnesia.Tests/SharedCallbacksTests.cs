@@ -95,6 +95,51 @@ public sealed class SharedCallbacksTests
     }
 
     [Fact]
+    public async Task Sticky_attaches_are_sent_applied_and_kept_like_the_other_kinds()
+    {
+        var sharedCallbacks = CreateSharedCallbacks();
+        var stuckPipe = new LanMessage.StickyAttach(Cellar, 21, 30, 7);
+        var stuckJar = new LanMessage.StickyAttach(Study, 22, 31, 0);
+        await sharedCallbacks.HandleLocalGameEventAsync(Entered(Cellar));
+
+        await sharedCallbacks.HandleLocalGameEventAsync(new GameEvent.WorldChanged(stuckPipe));
+        sharedCallbacks.HandleReceivedWorldMessage(stuckJar);
+        sharedCallbacks.HandleReceivedWorldMessage(stuckPipe);
+        await _game.WaitForLinesAsync(1);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        Assert.Equal([stuckPipe], _sessions.SentWorldMessages);
+        Assert.Equal([$"sharedcallback stickyattach 21 30 7 {Cellar}"], _game.Lines);
+
+        await sharedCallbacks.HandleLocalGameEventAsync(Entered(Study));
+
+        await _game.WaitForLinesAsync(2);
+        Assert.Equal($"sharedcallback stickyattach 22 31 0 {Study}", _game.Lines[1]);
+    }
+
+    [Fact]
+    public async Task Each_answer_to_a_sticky_attach_Command_except_wrong_map_reports_whether_it_attached()
+    {
+        List<(LanMessage.StickyAttach, bool)> answers = [];
+        var sharedCallbacks = new SharedCallbacks(
+            _sessions, _game.WriteLineAsync, _game.Log, Task.FromResult(Granted), TestContext.Current.CancellationToken,
+            (attach, attached) => answers.Add((attach, attached)));
+        var stuckPipe = new LanMessage.StickyAttach(Cellar, 21, 30, 7);
+        var stuckJar = new LanMessage.StickyAttach(Cellar, 22, 31, 0);
+        await sharedCallbacks.HandleLocalGameEventAsync(Entered(Cellar));
+        foreach (var change in new LanMessage.WorldMessage[] { stuckPipe, stuckJar, PressedButton with { Map = Cellar }, stuckPipe })
+            sharedCallbacks.HandleReceivedWorldMessage(change);
+        await _game.WaitForLinesAsync(4);
+
+        sharedCallbacks.HandleResponse(new GameEvent.Responded("sharedcallback", "ok", []));
+        sharedCallbacks.HandleResponse(new GameEvent.Responded("sharedcallback", "not-found", []));
+        sharedCallbacks.HandleResponse(new GameEvent.Responded("buttonstate", "not-found", []));
+        sharedCallbacks.HandleResponse(new GameEvent.Responded("sharedcallback", "wrong-map", []));
+
+        Assert.Equal([(stuckPipe, true), (stuckJar, false)], answers);
+    }
+
+    [Fact]
     public async Task Changes_kept_for_a_map_are_applied_only_once()
     {
         var sharedCallbacks = CreateSharedCallbacks();

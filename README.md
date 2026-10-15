@@ -296,6 +296,7 @@ Run this after any change to how Shared Callbacks are shared (#43), with the Rel
 10. **Trigger area on another map.** The Session Host runs ahead to a new map and triggers areas there. When the Joining Player arrives, the Pending Shared Callbacks run on arrival. The Joining Player isn't frozen or teleported, and nothing soft-locks.
 11. **Button and lamp.** One player presses a button and lights a candle. Both show in the other game.
 12. **Both players trigger the same one-shot area.** It runs once in each game. Two players picking up the same item at nearly the same time also run its pickup callback once in each game.
+13. **Sticky area.** In My Lady's Insanity's `Prison_torture` map, the Holder fits `playpipesmall` into one of the `StickySmallArea` areas. It snaps into the same place in both games and stays there, the area's attach callback runs once in each game, and carrying it through the area without letting it attach in the Holder's game never attaches it in the other game. Then the other player grabs it out: it detaches in both games and follows that player's hands.
 
 On 2026-10-11 the chapter 1 playtest passed. Two Custom Stories played afterwards, My Lady's Insanity and Quiet, were each ended by a rate-limit disconnect. See the contact Claim loop under [Expected behavior and limitations](#expected-behavior-and-limitations).
 
@@ -314,7 +315,7 @@ Two players host, join, chat, start the same Custom Story together, see each oth
 - Avatar footstep sounds.
 - **What Entity Interaction Sync does not share.** Holds share how players move map-placed props, doors, levers, valves, and sliders, and breaks of props a player Holds. These are not shared:
   - Consumable items. Tinderboxes, lamp oil, sanity potions, and laudanum are picked up and combined by each player alone, and so is any item a script or a broken prop spawns, such as a potion spilled from a jar. Non-consumable pickups and combines are Shared Callbacks.
-  - Map Script callbacks outside the shared kinds. Use-item, interact, player collide and trigger-area, pickup, combine, and Flashback area callbacks are Shared Callbacks (ADR 0006). Look-at, timer, checkpoint, ignite, and the other kept-local callbacks run only in the game of the player who caused them, and a script that depends on drifted script state may diverge.
+  - Map Script callbacks outside the shared kinds. Use-item, interact, player collide and trigger-area, pickup, combine, Flashback area, and sticky area attach callbacks are Shared Callbacks (ADR 0006). Look-at, timer, checkpoint, ignite, and the other kept-local callbacks run only in the game of the player who caused them, and a script that depends on drifted script state may diverge.
   - Breaks a script causes. When a script breaks a prop, for example as a result of an interaction, it breaks only in that game (#44).
   - Enemies, including what they hear. A prop thrown into water splashes only in the thrower's game, so the other player cannot distract a water lurker that way (amnesia-tdd-tcp#69).
   - Props moved without a player, such as scripted impulses or enemies.

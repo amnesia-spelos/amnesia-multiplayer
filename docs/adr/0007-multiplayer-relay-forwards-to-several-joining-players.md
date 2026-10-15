@@ -28,7 +28,7 @@ Alternatives considered:
 - **A Joining Player's departure ends only that player's part.** Their Avatar is removed and their Holds end in every other game, and the Multiplayer Session continues. The Session Host's departure still ends it for everyone (ADR 0001: no host migration).
 - **Joining after a Shared Custom Story Start is admitted unchanged.** The late Joining Player starts the Custom Story by hand; replaying the start is left to #23 and amnesia-spelos/amnesia-tdd-tcp#38.
 
-`LanProtocol` becomes version 9 so that a version 8 Game Peer is rejected at admission instead of failing on its first forwarded frame. (This read version 8 when recorded; #62 took version 8 for the pickup, combine, and flashback Shared Callbacks first.)
+`LanProtocol` becomes version 10 so that a version 9 Game Peer is rejected at admission instead of failing on its first forwarded frame. (This read version 8 when recorded; #62 took version 8 for the pickup, combine, and flashback Shared Callbacks first, and #64 took version 9 for the sticky attach Shared Callback.)
 
 ## Consequences
 

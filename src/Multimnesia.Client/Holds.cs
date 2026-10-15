@@ -9,14 +9,15 @@ namespace Multimnesia.Client;
 // Contention resolves by the order Claims reach the Session Host's table, and the loser's game drives the entity for the
 // winner. Every line written to the local game is composed here.
 // Active only while the other player is present and the local game granted `interactions`.
-// Every Hold ends when it settles or breaks, when a script deactivates, removes, or moves its entity (ADR 0006), when the
-// other player leaves or is replaced, or when its Holder or the local player leaves its map. Maps are known from Poses and
-// `interactions` Events, so a reload of the same map is not seen, and the Holder leaving a map is not seen without their
-// Poses. One per local game Session: the game releases its Peer-Driven Entities and subscription when that Session ends,
+// Every Hold ends when it settles, breaks, or attaches to a sticky area, when a script deactivates, removes, or moves its
+// entity (ADR 0006), when the other player leaves or is replaced, or when its Holder or the local player leaves its map.
+// Maps are known from Poses and `interactions` Events, so a reload of the same map is not seen, and the Holder leaving a
+// map is not seen without their Poses. One per local game Session: the game releases its Peer-Driven Entities and subscription when that Session ends,
 // and the other player sees this Game Peer depart.
 public sealed class Holds
 {
     public const int ReportedBodiesRateHz = 30;
+    private const string AttachedReason = "attached to a sticky area";
 
     private enum Holder { Local, Other }
 
@@ -37,6 +38,9 @@ public sealed class Holds
     // each with whether the Session Host is interacting. The Multiplayer Relay ordered them before the local player's
     // Claim, which it denies unless the Session Host's Hold settles first.
     private readonly Dictionary<Entity, bool> _earlierClaims = [];
+    // Guarded by the _holds lock: the other player's entities whose Hold a sticky attach ended, until the local game
+    // answers the attach Command.
+    private readonly HashSet<Entity> _attaching = [];
     // Guarded by the _holds lock: the other player's arrival the table belongs to, and the map the local player was last seen on.
     private int _arrival;
     private string? _localMap;
@@ -142,18 +146,24 @@ public sealed class Holds
                     if (!IsHeldByLocked(settled, Holder.Local)) break;
                     EndLocked(settled, "settled");
                     settledSent = SendLocked(new LanMessage.Settled(settled.Map, settled.PropId));
-                    // The Multiplayer Relay ordered the Session Host's Claim first, so its denial of the local player's
-                    // is on its way; until then, a grab would send a new Claim that the denial could be taken to answer.
-                    driven = _earlierClaims.Remove(settled, out var interacting);
-                    if (driven)
-                    {
-                        _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldClaimed,
-                            $"The other player's Claim on {settled}, ordered ahead of the local player's, took effect.");
-                        DriveLocked(settled, interacting);
-                    }
+                    driven = TryDriveEarlierClaimLocked(settled);
                 }
                 if (driven) Update();
                 await settledSent;
+                break;
+            // The sticky attach itself, which SharedCallbacks sends, ends the Hold in the other player's game, and the
+            // attached body settling later is no Hold's.
+            case GameEvent.WorldChanged { Change: LanMessage.StickyAttach attach }:
+                var attached = new Entity(attach.Map, attach.EntityId);
+                bool attachedDriven;
+                lock (_holds)
+                {
+                    if (!IsHeldByLocked(attached, Holder.Local)) break;
+                    EndLocked(attached, AttachedReason);
+                    // Driving the entity detaches it again.
+                    attachedDriven = TryDriveEarlierClaimLocked(attached);
+                }
+                if (attachedDriven) Update();
                 break;
             case GameEvent.ReportBroke reportBroke:
                 var broken = new Entity(reportBroke.Map, reportBroke.EntityId);
@@ -262,6 +272,51 @@ public sealed class Holds
         Update();
     }
 
+    // Called for each world message the other player sends, before it is applied. A sticky attach ends their Hold on the
+    // attached entity, and the attach Command ends driving it; without Shared Callbacks the entity is released instead.
+    // False for a sticky attach of an entity the local player Holds: their Claim won, so their game decides, and the
+    // other player's game drives the entity for them. Never blocks.
+    public bool HandleReceivedWorldMessage(LanMessage.WorldMessage message)
+    {
+        if (!IsActive || message is not LanMessage.StickyAttach attach) return true;
+        var entity = new Entity(attach.Map, attach.EntityId);
+        lock (_holds)
+        {
+            // The Multiplayer Relay accepts the local player's Claim now that the Session Host's Hold ended.
+            if (_earlierClaims.Remove(entity))
+                _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldEnded,
+                    $"The other player's Hold on {entity} ended: {AttachedReason} before the local player's Claim was ordered.");
+            if (IsHeldByLocked(entity, Holder.Local))
+            {
+                _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldMessageIgnored,
+                    $"Ignored {message}: the local player Holds {entity}.");
+                return false;
+            }
+            if (IsHeldByLocked(entity, Holder.Other))
+            {
+                var attaches = _negotiation.Result.GrantsSharedCallbacks;
+                EndLocked(entity, AttachedReason, releaseInLocalGame: !attaches);
+                if (attaches) _attaching.Add(entity);
+            }
+        }
+        Update();
+        return true;
+    }
+
+    // Called with the local game's answer to each sticky attach Command. One that attached nothing, as when this game's
+    // area already holds a body, leaves the entity it ended the Hold on to local physics rather than driven.
+    public void HandleStickyAttachAnswered(LanMessage.StickyAttach attach, bool attached)
+    {
+        var entity = new Entity(attach.Map, attach.EntityId);
+        lock (_holds)
+        {
+            // A Hold taken since then drives the entity anew.
+            if (!_attaching.Remove(entity) || attached || _holds.ContainsKey(entity)) return;
+            _lines.Enqueue(GameInteractionProtocol.EntityRelease(entity.PropId, entity.Map));
+        }
+        Update();
+    }
+
     // Called for each Pose the other player sends: they Hold nothing outside the map they are on. Never blocks.
     // A Claim is sent ahead of any later Pose, so a Pose never predates the Claims it is compared with.
     public void HandleReceivedPose(LanMessage.Pose pose)
@@ -305,6 +360,18 @@ public sealed class Holds
         _holds[entity] = Holder.Other;
         _lines.Enqueue(GameInteractionProtocol.EntityDrive(entity.PropId, entity.Map));
         if (interacting) _lines.Enqueue(GameInteractionProtocol.EntityInteracting(entity.PropId, true, entity.Map));
+    }
+
+    // The local player's Hold ended without a break. The Multiplayer Relay ordered the Session Host's Claim first, so its
+    // denial of the local player's is on its way; until then, a grab would send a new Claim that the denial could be taken
+    // to answer, so the Session Host's Claim takes effect at once.
+    private bool TryDriveEarlierClaimLocked(Entity entity)
+    {
+        if (!_earlierClaims.Remove(entity, out var interacting)) return false;
+        _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldClaimed,
+            $"The other player's Claim on {entity}, ordered ahead of the local player's, took effect.");
+        DriveLocked(entity, interacting);
+        return true;
     }
 
     // The other player's entity breaks from their final state instead of returning to local physics.

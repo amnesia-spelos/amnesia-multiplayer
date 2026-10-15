@@ -32,6 +32,8 @@ public sealed class SharedCallbacksProtocolTests
             $"EVENT sharedcallback combine hollow_needle_1 stone_hammer_1 {StoryMap}",
             new LanMessage.Combine(StoryMap, "hollow_needle_1", "stone_hammer_1")
         },
+        { $"EVENT sharedcallback stickyattach 21 30 7 {StoryMap}", new LanMessage.StickyAttach(StoryMap, 21, 30, 7) },
+        { "EVENT sharedcallback stickyattach -21 0030 -7 maps/a.map", new LanMessage.StickyAttach("maps/a.map", -21, 30, -7) },
         { "EVENT buttonstate 12 1 maps/a.map", new LanMessage.ButtonState("maps/a.map", 12, SwitchedOn: true) },
         { "EVENT buttonstate 12 0 maps/a.map", new LanMessage.ButtonState("maps/a.map", 12, SwitchedOn: false) },
         { $"EVENT lampstate -13 1 {StoryMap}", new LanMessage.LampState(StoryMap, -13, Lit: true) },
@@ -63,6 +65,11 @@ public sealed class SharedCallbacksProtocolTests
     [InlineData("EVENT sharedcallback combine hollow_needle_1 maps/a.map")]
     [InlineData("EVENT sharedcallback combine hollow_needle_1 stoné maps/a.map")]
     [InlineData("EVENT sharedcallback combine hollow_needle_1 stone_hammer_1")]
+    [InlineData("EVENT sharedcallback stickyattach 21 30 maps/a.map")]
+    [InlineData("EVENT sharedcallback stickyattach 21 30 7")]
+    [InlineData("EVENT sharedcallback stickyattach area 30 7 maps/a.map")]
+    [InlineData("EVENT sharedcallback stickyattach 21 30 body maps/a.map")]
+    [InlineData("EVENT sharedcallback stickyattach 21 30 2147483648 maps/a.map")]
     [InlineData("EVENT sharedcallback")]
     [InlineData("EVENT buttonstate 12 2 maps/a.map")]
     [InlineData("EVENT buttonstate 12 1")]
@@ -102,6 +109,8 @@ public sealed class SharedCallbacksProtocolTests
             new LanMessage.Combine(StoryMap, "hollow_needle_1", "stone_hammer_1"),
             $"sharedcallback combine hollow_needle_1 stone_hammer_1 {StoryMap}"
         },
+        { new LanMessage.StickyAttach(StoryMap, 21, 30, 7), $"sharedcallback stickyattach 21 30 7 {StoryMap}" },
+        { new LanMessage.StickyAttach("maps/a.map", -21, 30, -7), "sharedcallback stickyattach -21 30 -7 maps/a.map" },
         { new LanMessage.ButtonState("maps/a.map", 12, SwitchedOn: true), "buttonstate 12 1 maps/a.map" },
         { new LanMessage.LampState("maps/a.map", 13, Lit: false), "lampstate 13 0 maps/a.map" },
     };

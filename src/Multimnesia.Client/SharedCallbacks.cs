@@ -26,6 +26,7 @@ public sealed class SharedCallbacks
     private readonly Action<ConnectionLogSeverity, LocalGameEventName, string> _log;
     private readonly Task<ProtocolNegotiation> _negotiation;
     private readonly CancellationToken _cancellationToken;
+    private readonly Action<LanMessage.StickyAttach, bool>? _stickyAttachAnswered;
     // Guards the local map, the Map Visits seen, the arrivals, and the kept changes; lines are enqueued under it so they
     // follow the order the changes arrived in.
     private readonly object _gate = new();
@@ -46,13 +47,16 @@ public sealed class SharedCallbacks
         Func<string, CancellationToken, ValueTask> writeLine,
         Action<ConnectionLogSeverity, LocalGameEventName, string> log,
         Task<ProtocolNegotiation> negotiation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        // Told whether each sticky attach Command attached the body, once the local game answers it.
+        Action<LanMessage.StickyAttach, bool>? stickyAttachAnswered = null)
     {
         _sessions = sessions;
         _writeLine = writeLine;
         _log = log;
         _negotiation = negotiation;
         _cancellationToken = cancellationToken;
+        _stickyAttachAnswered = stickyAttachAnswered;
     }
 
     private bool IsRefused => _negotiation.IsCompletedSuccessfully && !_negotiation.Result.GrantsSharedCallbacks;
@@ -116,6 +120,9 @@ public sealed class SharedCallbacks
             _log(ConnectionLogSeverity.Warning, LocalGameEventName.SharedCallbackFailed, $"{line} answered no Command.");
             return;
         }
+        // A change turned away for the wrong map is answered again on its next visit.
+        if (change.Message is LanMessage.StickyAttach attach && response.Outcome != "wrong-map")
+            _stickyAttachAnswered?.Invoke(attach, response.Outcome == "ok");
         switch (response.Outcome)
         {
             case "ok":

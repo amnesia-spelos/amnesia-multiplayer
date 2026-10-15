@@ -44,7 +44,7 @@ public abstract record LanMessage
     // plus bounded item names.
     public abstract record WorldMessage(string Map) : LanMessage;
     // A Shared Callback: the receiving game runs the callback its own Map Script registered for the same entities, or makes
-    // the same pickup, combine, or flashback with its own entities and inventory.
+    // the same pickup, combine, flashback, or sticky attach with its own entities and inventory.
     public abstract record SharedCallback(string Map) : WorldMessage(Map);
     // A collide callback whose parent is "Player", with EntityId as its child; Entered is false when they stopped colliding.
     public sealed record PlayerCollide(string Map, int EntityId, bool Entered) : SharedCallback(Map);
@@ -58,6 +58,8 @@ public abstract record LanMessage
     public sealed record Flashback(string Map, int EntityId) : SharedCallback(Map);
     // The sender combined the inventory items ItemA and ItemB, which have a combine callback.
     public sealed record Combine(string Map, string ItemA, string ItemB) : SharedCallback(Map);
+    // The sticky area AreaId attached the body BodyId of EntityId, which the sender Held.
+    public sealed record StickyAttach(string Map, int AreaId, int EntityId, int BodyId) : SharedCallback(Map);
     public sealed record ButtonState(string Map, int EntityId, bool SwitchedOn) : WorldMessage(Map);
     public sealed record LampState(string Map, int EntityId, bool Lit) : WorldMessage(Map);
 }
@@ -79,7 +81,7 @@ public sealed class LanProtocolException(string message, Exception? innerExcepti
 
 public static class LanProtocol
 {
-    public const int CurrentVersion = 8;
+    public const int CurrentVersion = 9;
     // Fits the largest bodies message: 32 entries of 13 longest-form numbers and a fully escaped map path.
     public const int MaximumFrameBytes = 32 * 1024;
     // Keeps a Pose's numbers within the game's 15-digit, 4-decimal line format; real positions and angles are far smaller.
@@ -191,6 +193,11 @@ public static class LanProtocol
                 type = "shared-callback", map = value.Map, kind = "combine", itemA = value.ItemA, itemB = value.ItemB
             },
             LanMessage.Combine => throw new LanProtocolException("Invalid world message."),
+            LanMessage.StickyAttach value => new
+            {
+                type = "shared-callback", map = value.Map, kind = "sticky-attach", areaId = value.AreaId, entityId = value.EntityId,
+                bodyId = value.BodyId
+            },
             LanMessage.ButtonState value => new { type = "button-state", map = value.Map, entityId = value.EntityId, switchedOn = value.SwitchedOn },
             LanMessage.LampState value => new { type = "lamp-state", map = value.Map, entityId = value.EntityId, lit = value.Lit },
             _ => throw new LanProtocolException("Unsupported LAN message type.")
@@ -410,6 +417,8 @@ public static class LanProtocol
             "pickup" => new LanMessage.Pickup(map, RequiredInt32(root, "entityId")),
             "flashback" => new LanMessage.Flashback(map, RequiredInt32(root, "entityId")),
             "combine" => new LanMessage.Combine(map, RequiredItemName(root, "itemA"), RequiredItemName(root, "itemB")),
+            "sticky-attach" => new LanMessage.StickyAttach(
+                map, RequiredInt32(root, "areaId"), RequiredInt32(root, "entityId"), RequiredInt32(root, "bodyId")),
             _ => throw new LanProtocolException("Unknown Shared Callback kind.")
         };
     }

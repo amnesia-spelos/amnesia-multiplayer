@@ -706,6 +706,41 @@ public sealed class HoldsTests
     }
 
     [Fact]
+    public async Task A_local_Hold_attaching_to_a_sticky_area_before_its_denial_hands_the_entity_to_the_Session_Host_at_once()
+    {
+        _sessions.IsJoined = true;
+        var holds = await CreatePresentHoldsAsync();
+        await holds.HandleLocalGameEventAsync(Grab);
+        holds.HandleReceivedHoldMessage(ClaimOf12);
+
+        await holds.HandleLocalGameEventAsync(new GameEvent.WorldChanged(new LanMessage.StickyAttach(Map, 21, 12, 3)));
+        await _game.WaitForLinesAsync(2);
+        holds.HandleReceivedHoldMessage(new LanMessage.ClaimDenied(Map, 12));
+        holds.HandleReceivedHoldMessage(new LanMessage.Settled(Map, 12));
+
+        await _game.WaitForLinesAsync(3);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        Assert.Equal([Subscribe, Drive, Release], _game.Lines);
+    }
+
+    [Fact]
+    public async Task A_Session_Host_Claim_that_attaches_to_a_sticky_area_before_the_local_one_is_ordered_leaves_the_local_Hold_standing()
+    {
+        _sessions.IsJoined = true;
+        var holds = await CreatePresentHoldsAsync();
+        await holds.HandleLocalGameEventAsync(Grab);
+
+        holds.HandleReceivedHoldMessage(ClaimOf12);
+        holds.HandleReceivedWorldMessage(new LanMessage.StickyAttach(Map, 21, 12, 3));
+        await holds.HandleLocalGameEventAsync(Report(1000, new BodyEntry(12, 3, Carried)));
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        Assert.Equal([Subscribe], _game.Lines);
+        Assert.Equal([new LanMessage.Bodies(1000, Map, [new(12, 3, Carried)])], _sessions.SentBodies);
+        Assert.True(LoggedHoldEnding("The other player's Hold on entity 12", "attached to a sticky area before the local player's Claim was ordered."));
+    }
+
+    [Fact]
     public async Task Two_Game_Peers_grabbing_at_once_agree_on_exactly_one_Holder()
     {
         var port = FreePort();
@@ -880,6 +915,97 @@ public sealed class HoldsTests
         // The entity is free again: the local player can Claim it.
         await holds.HandleLocalGameEventAsync(Grab);
         Assert.Contains(ClaimOf12, _sessions.SentHoldMessages);
+    }
+
+    [Fact]
+    public async Task The_other_players_sticky_attach_ends_their_Hold_and_leaves_the_entity_to_the_attach_Command()
+    {
+        var holds = CreateHolds(new ProtocolNegotiation("ok", 2, ["avatars", "localpose", "interactions", "sharedcallbacks"]));
+        _sessions.SetPresent(true);
+        await _game.WaitForLinesAsync(1);
+        holds.HandleReceivedHoldMessage(ClaimOf12);
+        await _game.WaitForLinesAsync(2);
+
+        holds.HandleReceivedWorldMessage(new LanMessage.StickyAttach(Map, 21, 12, 3));
+        // The attached body stops in the Holder's game, which settles it there after the attach.
+        holds.HandleReceivedBodies(new(1000, Map, [new(12, 3, Carried)]));
+        holds.HandleReceivedHoldMessage(new LanMessage.Settled(Map, 12));
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        Assert.Equal([Subscribe, Drive], _game.Lines);
+        Assert.True(LoggedHoldEnding("The other player's Hold on entity 12", "attached to a sticky area."));
+        await holds.HandleLocalGameEventAsync(Grab);
+        Assert.Contains(ClaimOf12, _sessions.SentHoldMessages);
+    }
+
+    [Fact]
+    public async Task An_attach_Command_that_attached_nothing_returns_the_other_players_entity_to_local_physics()
+    {
+        var holds = CreateHolds(new ProtocolNegotiation("ok", 2, ["avatars", "localpose", "interactions", "sharedcallbacks"]));
+        _sessions.SetPresent(true);
+        await _game.WaitForLinesAsync(1);
+        holds.HandleReceivedHoldMessage(ClaimOf12);
+        holds.HandleReceivedHoldMessage(new LanMessage.Claim(Map, 40, ClaimReason.Contact));
+        await _game.WaitForLinesAsync(3);
+        var stuck = new LanMessage.StickyAttach(Map, 21, 12, 3);
+        var refused = new LanMessage.StickyAttach(Map, 21, 40, 0);
+
+        Assert.True(holds.HandleReceivedWorldMessage(stuck));
+        Assert.True(holds.HandleReceivedWorldMessage(refused));
+        holds.HandleStickyAttachAnswered(stuck, attached: true);
+        holds.HandleStickyAttachAnswered(refused, attached: false);
+        // Answered once only.
+        holds.HandleStickyAttachAnswered(refused, attached: false);
+
+        await _game.WaitForLinesAsync(4);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        Assert.Equal([Subscribe, Drive, $"entitydrive 40 {Map}", $"entityrelease 40 {Map}"], _game.Lines);
+    }
+
+    [Fact]
+    public async Task A_sticky_attach_of_an_entity_the_local_player_Holds_is_not_applied()
+    {
+        var holds = await CreatePresentHoldsAsync();
+        await holds.HandleLocalGameEventAsync(Grab);
+
+        Assert.False(holds.HandleReceivedWorldMessage(new LanMessage.StickyAttach(Map, 21, 12, 3)));
+        Assert.True(holds.HandleReceivedWorldMessage(new LanMessage.StickyAttach(Map, 21, 40, 0)));
+        Assert.True(holds.HandleReceivedWorldMessage(new LanMessage.Interact(Map, 12)));
+        await holds.HandleLocalGameEventAsync(Report(1000, new BodyEntry(12, 3, Carried)));
+
+        Assert.Equal([new LanMessage.Bodies(1000, Map, [new(12, 3, Carried)])], _sessions.SentBodies);
+    }
+
+    [Fact]
+    public async Task Without_Shared_Callbacks_the_other_players_sticky_attach_returns_their_entity_to_local_physics()
+    {
+        var holds = await CreatePresentHoldsAsync();
+        holds.HandleReceivedHoldMessage(ClaimOf12);
+        await _game.WaitForLinesAsync(2);
+
+        holds.HandleReceivedWorldMessage(new LanMessage.StickyAttach(Map, 21, 12, 3));
+
+        await _game.WaitForLinesAsync(3);
+        Assert.Equal([Subscribe, Drive, Release], _game.Lines);
+    }
+
+    [Fact]
+    public async Task A_local_sticky_attach_ends_the_local_Hold_and_a_later_grab_Claims_it_anew()
+    {
+        var holds = await CreatePresentHoldsAsync();
+        await holds.HandleLocalGameEventAsync(Grab);
+        await holds.HandleLocalGameEventAsync(Throw);
+
+        await holds.HandleLocalGameEventAsync(new GameEvent.WorldChanged(new LanMessage.StickyAttach(Map, 21, 12, 3)));
+        await holds.HandleLocalGameEventAsync(Report(1000, new BodyEntry(12, 3, Carried)));
+        await holds.HandleLocalGameEventAsync(Rest);
+        await holds.HandleLocalGameEventAsync(Grab);
+
+        var start = new LanMessage.Interaction(Map, 12, 3, true);
+        // The sticky attach itself, sent beside these, ends the Hold in the other player's game.
+        Assert.Equal([ClaimOf12, start, new LanMessage.Interaction(Map, 12, 3, false), ClaimOf12, start], _sessions.SentHoldMessages);
+        Assert.Empty(_sessions.SentBodies);
+        Assert.True(LoggedHoldEnding("The local player's Hold on entity 12", "attached to a sticky area."));
     }
 
     [Fact]

@@ -132,7 +132,7 @@ public static class GameInteractionProtocol
     // EVENT sharedcallback playercollide <entityId> <state> <map>, EVENT sharedcallback entitycollide <parentId> <entityId>
     // <state> <map>, EVENT sharedcallback interact <entityId> <map>, EVENT sharedcallback useitem <entityId> <item> <map>,
     // EVENT sharedcallback pickup|flashback <entityId> <map>, EVENT sharedcallback combine <item> <otherItem> <map>,
-    // EVENT buttonstate|lampstate <entityId> <0|1> <map>
+    // EVENT sharedcallback stickyattach <areaId> <entityId> <bodyId> <map>, EVENT buttonstate|lampstate <entityId> <0|1> <map>
     private static LanMessage.WorldMessage? TryParseWorldMessage(string line)
     {
         var parts = line.Split(' ', 4);
@@ -140,7 +140,7 @@ public static class GameInteractionProtocol
         var fixedFieldCount = (keyword, kind) switch
         {
             ("sharedcallback", "playercollide" or "useitem" or "combine") => 5,
-            ("sharedcallback", "entitycollide") => 6,
+            ("sharedcallback", "entitycollide" or "stickyattach") => 6,
             ("sharedcallback", "interact" or "pickup" or "flashback") => 4,
             ("buttonstate" or "lampstate", _) => 4,
             _ => 0
@@ -168,6 +168,9 @@ public static class GameInteractionProtocol
                 return new LanMessage.Pickup(map, entityId);
             case ("sharedcallback", "flashback"):
                 return new LanMessage.Flashback(map, entityId);
+            case ("sharedcallback", "stickyattach") when ProtocolVersion2Line.TryParseIdentifier(fields[4], out var attachedId) &&
+                ProtocolVersion2Line.TryParseIdentifier(fields[5], out var bodyId):
+                return new LanMessage.StickyAttach(map, entityId, attachedId, bodyId);
             case ("buttonstate", _) when fields[3] is "0" or "1":
                 return new LanMessage.ButtonState(map, entityId, fields[3] == "1");
             case ("lampstate", _) when fields[3] is "0" or "1":
@@ -361,6 +364,8 @@ public static class GameInteractionProtocol
             $"sharedcallback flashback {ProtocolVersion2Line.FormatIdentifier(flashback.EntityId)} {flashback.Map}",
         LanMessage.Combine combine when LanProtocol.IsValidItemName(combine.ItemA) && LanProtocol.IsValidItemName(combine.ItemB) =>
             $"sharedcallback combine {combine.ItemA} {combine.ItemB} {combine.Map}",
+        LanMessage.StickyAttach sticky => $"sharedcallback stickyattach {ProtocolVersion2Line.FormatIdentifier(sticky.AreaId)} " +
+            $"{ProtocolVersion2Line.FormatIdentifier(sticky.EntityId)} {ProtocolVersion2Line.FormatIdentifier(sticky.BodyId)} {sticky.Map}",
         LanMessage.ButtonState button =>
             $"buttonstate {ProtocolVersion2Line.FormatIdentifier(button.EntityId)} {(button.SwitchedOn ? "1" : "0")} {button.Map}",
         LanMessage.LampState lamp => $"lampstate {ProtocolVersion2Line.FormatIdentifier(lamp.EntityId)} {(lamp.Lit ? "1" : "0")} {lamp.Map}",
