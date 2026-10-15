@@ -69,6 +69,32 @@ public sealed class SharedCallbacksTests
     }
 
     [Fact]
+    public async Task Pickups_combines_and_flashbacks_are_sent_applied_and_kept_like_the_other_kinds()
+    {
+        var sharedCallbacks = CreateSharedCallbacks();
+        var pickedUpKey = new LanMessage.Pickup(Cellar, 42);
+        var combinedDrill = new LanMessage.Combine(Cellar, "hollow_needle_1", "stone_hammer_1");
+        var flashback = new LanMessage.Flashback(Study, 17);
+        await sharedCallbacks.HandleLocalGameEventAsync(Entered(Cellar));
+
+        foreach (var change in new LanMessage.WorldMessage[] { pickedUpKey, combinedDrill })
+            await sharedCallbacks.HandleLocalGameEventAsync(new GameEvent.WorldChanged(change));
+        sharedCallbacks.HandleReceivedWorldMessage(flashback);
+        sharedCallbacks.HandleReceivedWorldMessage(pickedUpKey);
+        sharedCallbacks.HandleReceivedWorldMessage(combinedDrill);
+        await _game.WaitForLinesAsync(2);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        Assert.Equal([pickedUpKey, combinedDrill], _sessions.SentWorldMessages);
+        Assert.Equal([$"sharedcallback pickup 42 {Cellar}", $"sharedcallback combine hollow_needle_1 stone_hammer_1 {Cellar}"], _game.Lines);
+
+        await sharedCallbacks.HandleLocalGameEventAsync(Entered(Study));
+
+        await _game.WaitForLinesAsync(3);
+        Assert.Equal($"sharedcallback flashback 17 {Study}", _game.Lines[2]);
+    }
+
+    [Fact]
     public async Task Changes_kept_for_a_map_are_applied_only_once()
     {
         var sharedCallbacks = CreateSharedCallbacks();

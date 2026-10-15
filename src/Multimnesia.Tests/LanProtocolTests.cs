@@ -167,9 +167,9 @@ public sealed class LanProtocolTests
     }
 
     [Fact]
-    public void Protocol_version_is_7_for_Shared_Callbacks()
+    public void Protocol_version_is_8_for_pickup_combine_and_flashback_Shared_Callbacks()
     {
-        Assert.Equal(7, LanProtocol.CurrentVersion);
+        Assert.Equal(8, LanProtocol.CurrentVersion);
     }
 
     private static MemoryStream Frame(string json)
@@ -611,6 +611,18 @@ public sealed class LanProtocolTests
             new LanMessage.UseItem("maps/a.map", 12, "key_study"),
             "{\"type\":\"shared-callback\",\"map\":\"maps/a.map\",\"kind\":\"use-item\",\"entityId\":12,\"item\":\"key_study\"}"
         },
+        {
+            new LanMessage.Pickup("maps/a.map", 12),
+            "{\"type\":\"shared-callback\",\"map\":\"maps/a.map\",\"kind\":\"pickup\",\"entityId\":12}"
+        },
+        {
+            new LanMessage.Flashback("maps/a.map", -17),
+            "{\"type\":\"shared-callback\",\"map\":\"maps/a.map\",\"kind\":\"flashback\",\"entityId\":-17}"
+        },
+        {
+            new LanMessage.Combine("maps/a.map", "hollow_needle_1", "stone_hammer_1"),
+            "{\"type\":\"shared-callback\",\"map\":\"maps/a.map\",\"kind\":\"combine\",\"itemA\":\"hollow_needle_1\",\"itemB\":\"stone_hammer_1\"}"
+        },
         { new LanMessage.ButtonState("maps/a.map", 12, SwitchedOn: true), "{\"type\":\"button-state\",\"map\":\"maps/a.map\",\"entityId\":12,\"switchedOn\":true}" },
         { new LanMessage.LampState("maps/a.map", 13, Lit: false), "{\"type\":\"lamp-state\",\"map\":\"maps/a.map\",\"entityId\":13,\"lit\":false}" },
     };
@@ -649,6 +661,10 @@ public sealed class LanProtocolTests
         new LanMessage.UseItem("maps/a.map", 12, "rusty key"),
         new LanMessage.UseItem("maps/a.map", 12, "keyé"),
         new LanMessage.UseItem("maps/a.map", 12, new string('k', LanProtocol.MaximumItemNameLength + 1)),
+        new LanMessage.Combine("maps/a.map", "", "stone_hammer_1"),
+        new LanMessage.Combine("maps/a.map", "hollow_needle_1", "stone hammer"),
+        new LanMessage.Combine("maps/a.map", new string('k', LanProtocol.MaximumItemNameLength + 1), "stone_hammer_1"),
+        new LanMessage.Combine("", "hollow_needle_1", "stone_hammer_1"),
         new LanMessage.ButtonState("", 12, true),
         new LanMessage.LampState("", 13, true),
     };
@@ -687,6 +703,15 @@ public sealed class LanProtocolTests
         SharedCallbackOn + "\"kind\":\"use-item\",\"entityId\":12,\"item\":\"key\\u0007\"}",
         SharedCallbackOn + "\"kind\":\"use-item\",\"entityId\":12,\"item\":\"" + new string('k', LanProtocol.MaximumItemNameLength + 1) + "\"}",
         SharedCallbackOn + "\"kind\":\"use-item\",\"entityId\":12,\"item\":42}",
+        SharedCallbackOn + "\"kind\":\"pickup\"}",
+        SharedCallbackOn + "\"kind\":\"pickup\",\"entityId\":\"12\"}",
+        SharedCallbackOn + "\"kind\":\"flashback\"}",
+        SharedCallbackOn + "\"kind\":\"flashback\",\"entityId\":2147483648}",
+        SharedCallbackOn + "\"kind\":\"combine\",\"itemA\":\"hollow_needle_1\"}",
+        SharedCallbackOn + "\"kind\":\"combine\",\"itemB\":\"stone_hammer_1\"}",
+        SharedCallbackOn + "\"kind\":\"combine\",\"itemA\":\"hollow needle\",\"itemB\":\"stone_hammer_1\"}",
+        SharedCallbackOn + "\"kind\":\"combine\",\"itemA\":\"hollow_needle_1\",\"itemB\":\"" + new string('k', LanProtocol.MaximumItemNameLength + 1) + "\"}",
+        SharedCallbackOn + "\"kind\":\"combine\",\"itemA\":\"hollow_needle_1\",\"itemB\":7}",
         "{\"type\":\"button-state\",\"map\":\"maps/a.map\",\"entityId\":12}",
         "{\"type\":\"button-state\",\"map\":\"maps/a.map\",\"entityId\":12,\"switchedOn\":1}",
         "{\"type\":\"button-state\",\"map\":\"maps/a.map\",\"switchedOn\":true}",

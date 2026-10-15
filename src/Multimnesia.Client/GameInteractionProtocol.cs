@@ -131,6 +131,7 @@ public static class GameInteractionProtocol
 
     // EVENT sharedcallback playercollide <entityId> <state> <map>, EVENT sharedcallback entitycollide <parentId> <entityId>
     // <state> <map>, EVENT sharedcallback interact <entityId> <map>, EVENT sharedcallback useitem <entityId> <item> <map>,
+    // EVENT sharedcallback pickup|flashback <entityId> <map>, EVENT sharedcallback combine <item> <otherItem> <map>,
     // EVENT buttonstate|lampstate <entityId> <0|1> <map>
     private static LanMessage.WorldMessage? TryParseWorldMessage(string line)
     {
@@ -138,14 +139,18 @@ public static class GameInteractionProtocol
         var (keyword, kind) = (parts[1], parts.Length > 2 ? parts[2] : "");
         var fixedFieldCount = (keyword, kind) switch
         {
-            ("sharedcallback", "playercollide" or "useitem") => 5,
+            ("sharedcallback", "playercollide" or "useitem" or "combine") => 5,
             ("sharedcallback", "entitycollide") => 6,
-            ("sharedcallback", "interact") => 4,
+            ("sharedcallback", "interact" or "pickup" or "flashback") => 4,
             ("buttonstate" or "lampstate", _) => 4,
             _ => 0
         };
         if (fixedFieldCount == 0 || !ProtocolVersion2Line.TrySplit(line, fixedFieldCount, hasPath: true, out var fields)) return null;
         var map = fields[fixedFieldCount];
+        if (kind == "combine")
+            return keyword == "sharedcallback" && LanProtocol.IsValidItemName(fields[3]) && LanProtocol.IsValidItemName(fields[4])
+                ? new LanMessage.Combine(map, fields[3], fields[4])
+                : null;
         var first = keyword == "sharedcallback" ? 3 : 2;
         if (!ProtocolVersion2Line.TryParseIdentifier(fields[first], out var entityId)) return null;
         switch (keyword, kind)
@@ -159,6 +164,10 @@ public static class GameInteractionProtocol
                 return new LanMessage.Interact(map, entityId);
             case ("sharedcallback", "useitem") when LanProtocol.IsValidItemName(fields[4]):
                 return new LanMessage.UseItem(map, entityId, fields[4]);
+            case ("sharedcallback", "pickup"):
+                return new LanMessage.Pickup(map, entityId);
+            case ("sharedcallback", "flashback"):
+                return new LanMessage.Flashback(map, entityId);
             case ("buttonstate", _) when fields[3] is "0" or "1":
                 return new LanMessage.ButtonState(map, entityId, fields[3] == "1");
             case ("lampstate", _) when fields[3] is "0" or "1":
@@ -347,6 +356,11 @@ public static class GameInteractionProtocol
         LanMessage.Interact interact => $"sharedcallback interact {ProtocolVersion2Line.FormatIdentifier(interact.EntityId)} {interact.Map}",
         LanMessage.UseItem useItem when LanProtocol.IsValidItemName(useItem.Item) =>
             $"sharedcallback useitem {ProtocolVersion2Line.FormatIdentifier(useItem.EntityId)} {useItem.Item} {useItem.Map}",
+        LanMessage.Pickup pickup => $"sharedcallback pickup {ProtocolVersion2Line.FormatIdentifier(pickup.EntityId)} {pickup.Map}",
+        LanMessage.Flashback flashback =>
+            $"sharedcallback flashback {ProtocolVersion2Line.FormatIdentifier(flashback.EntityId)} {flashback.Map}",
+        LanMessage.Combine combine when LanProtocol.IsValidItemName(combine.ItemA) && LanProtocol.IsValidItemName(combine.ItemB) =>
+            $"sharedcallback combine {combine.ItemA} {combine.ItemB} {combine.Map}",
         LanMessage.ButtonState button =>
             $"buttonstate {ProtocolVersion2Line.FormatIdentifier(button.EntityId)} {(button.SwitchedOn ? "1" : "0")} {button.Map}",
         LanMessage.LampState lamp => $"lampstate {ProtocolVersion2Line.FormatIdentifier(lamp.EntityId)} {(lamp.Lit ? "1" : "0")} {lamp.Map}",

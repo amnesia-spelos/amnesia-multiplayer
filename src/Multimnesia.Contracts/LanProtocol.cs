@@ -40,9 +40,11 @@ public abstract record LanMessage
     }
 
     // A change one player made to a map's world that every other player's game makes for itself (ADR 0006). Each names a
-    // Map Script registration, a button, or a lamp only by its map path and integer entity IDs, plus a bounded item name.
+    // Map Script registration, an item, a Flashback area, a button, or a lamp only by its map path and integer entity IDs,
+    // plus bounded item names.
     public abstract record WorldMessage(string Map) : LanMessage;
-    // A Shared Callback: the receiving game runs the callback its own Map Script registered for the same entities.
+    // A Shared Callback: the receiving game runs the callback its own Map Script registered for the same entities, or makes
+    // the same pickup, combine, or flashback with its own entities and inventory.
     public abstract record SharedCallback(string Map) : WorldMessage(Map);
     // A collide callback whose parent is "Player", with EntityId as its child; Entered is false when they stopped colliding.
     public sealed record PlayerCollide(string Map, int EntityId, bool Entered) : SharedCallback(Map);
@@ -50,6 +52,12 @@ public abstract record LanMessage
     public sealed record EntityCollide(string Map, int ParentId, int EntityId, bool Entered) : SharedCallback(Map);
     public sealed record Interact(string Map, int EntityId) : SharedCallback(Map);
     public sealed record UseItem(string Map, int EntityId, string Item) : SharedCallback(Map);
+    // The sender picked up the map-placed, non-consumable item EntityId.
+    public sealed record Pickup(string Map, int EntityId) : SharedCallback(Map);
+    // The sender set off the Flashback area EntityId, which started its flashback.
+    public sealed record Flashback(string Map, int EntityId) : SharedCallback(Map);
+    // The sender combined the inventory items ItemA and ItemB, which have a combine callback.
+    public sealed record Combine(string Map, string ItemA, string ItemB) : SharedCallback(Map);
     public sealed record ButtonState(string Map, int EntityId, bool SwitchedOn) : WorldMessage(Map);
     public sealed record LampState(string Map, int EntityId, bool Lit) : WorldMessage(Map);
 }
@@ -71,7 +79,7 @@ public sealed class LanProtocolException(string message, Exception? innerExcepti
 
 public static class LanProtocol
 {
-    public const int CurrentVersion = 7;
+    public const int CurrentVersion = 8;
     // Fits the largest bodies message: 32 entries of 13 longest-form numbers and a fully escaped map path.
     public const int MaximumFrameBytes = 32 * 1024;
     // Keeps a Pose's numbers within the game's 15-digit, 4-decimal line format; real positions and angles are far smaller.
@@ -176,6 +184,13 @@ public static class LanProtocol
                 type = "shared-callback", map = value.Map, kind = "use-item", entityId = value.EntityId, item = value.Item
             },
             LanMessage.UseItem => throw new LanProtocolException("Invalid world message."),
+            LanMessage.Pickup value => new { type = "shared-callback", map = value.Map, kind = "pickup", entityId = value.EntityId },
+            LanMessage.Flashback value => new { type = "shared-callback", map = value.Map, kind = "flashback", entityId = value.EntityId },
+            LanMessage.Combine value when IsValidItemName(value.ItemA) && IsValidItemName(value.ItemB) => new
+            {
+                type = "shared-callback", map = value.Map, kind = "combine", itemA = value.ItemA, itemB = value.ItemB
+            },
+            LanMessage.Combine => throw new LanProtocolException("Invalid world message."),
             LanMessage.ButtonState value => new { type = "button-state", map = value.Map, entityId = value.EntityId, switchedOn = value.SwitchedOn },
             LanMessage.LampState value => new { type = "lamp-state", map = value.Map, entityId = value.EntityId, lit = value.Lit },
             _ => throw new LanProtocolException("Unsupported LAN message type.")
@@ -391,7 +406,10 @@ public static class LanProtocol
             "entity-collide" => new LanMessage.EntityCollide(
                 map, RequiredInt32(root, "parentId"), RequiredInt32(root, "entityId"), RequiredCollideState(root)),
             "interact" => new LanMessage.Interact(map, RequiredInt32(root, "entityId")),
-            "use-item" => new LanMessage.UseItem(map, RequiredInt32(root, "entityId"), RequiredItemName(root)),
+            "use-item" => new LanMessage.UseItem(map, RequiredInt32(root, "entityId"), RequiredItemName(root, "item")),
+            "pickup" => new LanMessage.Pickup(map, RequiredInt32(root, "entityId")),
+            "flashback" => new LanMessage.Flashback(map, RequiredInt32(root, "entityId")),
+            "combine" => new LanMessage.Combine(map, RequiredItemName(root, "itemA"), RequiredItemName(root, "itemB")),
             _ => throw new LanProtocolException("Unknown Shared Callback kind.")
         };
     }
@@ -406,9 +424,9 @@ public static class LanProtocol
         _ => throw new LanProtocolException("Invalid collide state.")
     };
 
-    private static string RequiredItemName(JsonElement root)
+    private static string RequiredItemName(JsonElement root, string name)
     {
-        var item = root.GetProperty("item").GetString();
+        var item = root.GetProperty(name).GetString();
         return IsValidItemName(item) ? item! : throw new LanProtocolException("Invalid item name.");
     }
 

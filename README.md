@@ -285,12 +285,17 @@ On 2026-10-11 these steps all passed.
 Run this after any change to how Shared Callbacks are shared (#43), with the Release Game Peer built from the same commit on both PCs and a game build that grants `sharedcallbacks`. Play chapter 1 of the main game together, both players on the same map unless a step says otherwise.
 
 1. **`13_machine_room` cogwheel.** The Session Host fits `cogwheel03_dyn`. In the Joining Player's game, the mounted cogwheel appears, and the loose copy disappears and can't be grabbed. Neither Game Peer log has an `entitybodies not-found` line.
-2. **Guiding rods.** One player fits them. The other player's game shows them fitted, and the other player's inventory is unchanged.
-3. **`03_archives` jar.** The Holder carries `vase02_ghost_1` out of `AreaJar`. The other game runs `CollideJarLeaveArea` once, through the Shared Callback, every time.
-4. **Trigger area while together.** One player walks into a scare or music area. Both games run it, and the other player keeps control of their character and camera.
-5. **Trigger area on another map.** The Session Host runs ahead to a new map and triggers areas there. When the Joining Player arrives, the Pending Shared Callbacks run on arrival. The Joining Player isn't frozen or teleported, and nothing soft-locks.
-6. **Button and lamp.** One player presses a button and lights a candle. Both show in the other game.
-7. **Both players trigger the same one-shot area.** It runs once in each game.
+2. **Guiding rods.** One player fits them. The other player's game shows them fitted, and the rods leave both players' inventories.
+3. **`03_archives` key.** One player picks up `key_study_1`. Both games play the growl, claw, and door break, the key leaves both worlds and enters both inventories, and neither player can pick it up again.
+4. **Voiced note or diary.** One player picks up a note or diary. It opens, and its voice plays, in both games at once.
+5. **Combine.** One player combines two parts whose combine callback makes a whole item. Both inventories end up with the whole item and neither keeps the parts. Combining a tinderbox or oil changes only that player's inventory.
+6. **`02_entrance_hall` flashback.** One player walks into `AreaFlashBack`. Both players get the full `CH01L02_JourneyToSanctum01` flashback, with voice, subtitles, sepia, and slowdown, and walking into the area afterwards does nothing in either game.
+7. **Consumables.** One player picks up a tinderbox, oil, or a potion. It stays in the other player's world.
+8. **`03_archives` jar.** The Holder carries `vase02_ghost_1` out of `AreaJar`. The other game runs `CollideJarLeaveArea` once, through the Shared Callback, every time.
+9. **Trigger area while together.** One player walks into a scare or music area. Both games run it, and the other player keeps control of their character and camera.
+10. **Trigger area on another map.** The Session Host runs ahead to a new map and triggers areas there. When the Joining Player arrives, the Pending Shared Callbacks run on arrival. The Joining Player isn't frozen or teleported, and nothing soft-locks.
+11. **Button and lamp.** One player presses a button and lights a candle. Both show in the other game.
+12. **Both players trigger the same one-shot area.** It runs once in each game. Two players picking up the same item at nearly the same time also run its pickup callback once in each game.
 
 On 2026-10-11 the chapter 1 playtest passed. Two Custom Stories played afterwards, My Lady's Insanity and Quiet, were each ended by a rate-limit disconnect. See the contact Claim loop under [Expected behavior and limitations](#expected-behavior-and-limitations).
 
@@ -306,14 +311,13 @@ Two players host, join, chat, start the same Custom Story together, see each oth
 - **Enemies ignore the Joining Player.** Enemy AI is aware only of the player in its own game.
 - Avatar footstep sounds.
 - **What Entity Interaction Sync does not share.** Holds share how players move map-placed props, doors, levers, valves, and sliders, and breaks of props a player Holds. These are not shared:
-  - Inventory, including picking up an item spilled from a broken prop.
-  - Script execution and map state beyond the callbacks each game's own prop logic fires. Use-item callbacks, player collide and trigger-area callbacks, and interact callbacks run only in the game of the player who caused them (#43). A script that swaps or disables a prop, such as fitting a cogwheel, leaves the other game's copy as it was. Entity collide callbacks do run in both games when a shared Hold causes the collision.
+  - Consumable items. Tinderboxes, lamp oil, sanity potions, and laudanum are picked up and combined by each player alone, and so is any item a script or a broken prop spawns, such as a potion spilled from a jar. Non-consumable pickups and combines are Shared Callbacks.
+  - Map Script callbacks outside the shared kinds. Use-item, interact, player collide and trigger-area, pickup, combine, and Flashback area callbacks are Shared Callbacks (ADR 0006). Look-at, timer, checkpoint, ignite, and the other kept-local callbacks run only in the game of the player who caused them, and a script that depends on drifted script state may diverge.
   - Breaks a script causes. When a script breaks a prop, for example as a result of an interaction, it breaks only in that game (#44).
   - Enemies, including what they hear. A prop thrown into water splashes only in the thrower's game, so the other player cannot distract a water lurker that way (amnesia-tdd-tcp#69).
   - Props moved without a player, such as scripted impulses or enemies.
   - Anything past the 32-body budget of a Holder's stream.
   - Runtime-created entities: script spawns, break debris, and contained items. Debris is cosmetic and local.
-  - Click-only interactions, such as buttons, items, and notes.
   - Brief conflicting collisions between two players' Settling props. Each screen may show its own collision before both settle where their Holders put them.
 - Catch-up for late joiners, sharing the Joining Player's own starts, and checking that both PCs have the same Custom Story version.
 - Arbitrary script execution.

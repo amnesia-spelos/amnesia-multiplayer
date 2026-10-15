@@ -26,6 +26,12 @@ public sealed class SharedCallbacksProtocolTests
         { "EVENT sharedcallback entitycollide 30 12 1 maps/a.map", new LanMessage.EntityCollide("maps/a.map", 30, 12, Entered: true) },
         { "EVENT sharedcallback interact 0012 maps/a.map", new LanMessage.Interact("maps/a.map", 12) },
         { $"EVENT sharedcallback useitem 12 key_study {StoryMap}", new LanMessage.UseItem(StoryMap, 12, "key_study") },
+        { $"EVENT sharedcallback pickup 42 {StoryMap}", new LanMessage.Pickup(StoryMap, 42) },
+        { "EVENT sharedcallback flashback -17 maps/a.map", new LanMessage.Flashback("maps/a.map", -17) },
+        {
+            $"EVENT sharedcallback combine hollow_needle_1 stone_hammer_1 {StoryMap}",
+            new LanMessage.Combine(StoryMap, "hollow_needle_1", "stone_hammer_1")
+        },
         { "EVENT buttonstate 12 1 maps/a.map", new LanMessage.ButtonState("maps/a.map", 12, SwitchedOn: true) },
         { "EVENT buttonstate 12 0 maps/a.map", new LanMessage.ButtonState("maps/a.map", 12, SwitchedOn: false) },
         { $"EVENT lampstate -13 1 {StoryMap}", new LanMessage.LampState(StoryMap, -13, Lit: true) },
@@ -50,6 +56,13 @@ public sealed class SharedCallbacksProtocolTests
     [InlineData("EVENT sharedcallback interact  12 maps/a.map")]
     [InlineData("EVENT sharedcallback useitem 12 maps/a.map")]
     [InlineData("EVENT sharedcallback useitem 12 keyé maps/a.map")]
+    [InlineData("EVENT sharedcallback pickup maps/a.map")]
+    [InlineData("EVENT sharedcallback pickup key_study maps/a.map")]
+    [InlineData("EVENT sharedcallback flashback maps/a.map")]
+    [InlineData("EVENT sharedcallback flashback 17")]
+    [InlineData("EVENT sharedcallback combine hollow_needle_1 maps/a.map")]
+    [InlineData("EVENT sharedcallback combine hollow_needle_1 stoné maps/a.map")]
+    [InlineData("EVENT sharedcallback combine hollow_needle_1 stone_hammer_1")]
     [InlineData("EVENT sharedcallback")]
     [InlineData("EVENT buttonstate 12 2 maps/a.map")]
     [InlineData("EVENT buttonstate 12 1")]
@@ -68,6 +81,14 @@ public sealed class SharedCallbacksProtocolTests
         Assert.Equal(new GameEvent.Unknown(line), GameInteractionProtocol.ParseEvent(line));
     }
 
+    [Fact]
+    public void An_overlong_combined_item_name_is_unknown()
+    {
+        var line = $"EVENT sharedcallback combine hollow_needle_1 {new string('k', LanProtocol.MaximumItemNameLength + 1)} maps/a.map";
+
+        Assert.Equal(new GameEvent.Unknown(line), GameInteractionProtocol.ParseEvent(line));
+    }
+
     public static TheoryData<LanMessage.WorldMessage, string> Commands => new()
     {
         { new LanMessage.PlayerCollide(StoryMap, 30, Entered: true), $"sharedcallback playercollide 30 1 {StoryMap}" },
@@ -75,6 +96,12 @@ public sealed class SharedCallbacksProtocolTests
         { new LanMessage.EntityCollide("maps/a.map", 30, 12, Entered: false), "sharedcallback entitycollide 30 12 -1 maps/a.map" },
         { new LanMessage.Interact("maps/a.map", 12), "sharedcallback interact 12 maps/a.map" },
         { new LanMessage.UseItem(StoryMap, 12, "key_study"), $"sharedcallback useitem 12 key_study {StoryMap}" },
+        { new LanMessage.Pickup(StoryMap, 42), $"sharedcallback pickup 42 {StoryMap}" },
+        { new LanMessage.Flashback("maps/a.map", -17), "sharedcallback flashback -17 maps/a.map" },
+        {
+            new LanMessage.Combine(StoryMap, "hollow_needle_1", "stone_hammer_1"),
+            $"sharedcallback combine hollow_needle_1 stone_hammer_1 {StoryMap}"
+        },
         { new LanMessage.ButtonState("maps/a.map", 12, SwitchedOn: true), "buttonstate 12 1 maps/a.map" },
         { new LanMessage.LampState("maps/a.map", 13, Lit: false), "lampstate 13 0 maps/a.map" },
     };
