@@ -64,6 +64,10 @@ _Avoid_: Queued trigger, deferred callback
 A map-placed enemy that is one threat to every player in a Multiplayer Session, able to hunt and attack any of them, rather than a separate copy in each player's game.
 _Avoid_: Synced monster, remote enemy, AI sync
 
+**Enemy Pose**:
+The Session Host's report of one Shared Enemy's position, rotation, and animation, from which every other game drives its copy of that enemy.
+_Avoid_: Enemy sync, monster state
+
 **Inbound Allowance**:
 How many messages of one kind a Game Peer accepts on one connection, as a burst it may receive at once and a rate at which that burst refills, before it disconnects the connection for flooding. A Joining Player's Inbound Allowance covers every other player in the largest Multiplayer Session.
 _Avoid_: Budget, rate limit, quota

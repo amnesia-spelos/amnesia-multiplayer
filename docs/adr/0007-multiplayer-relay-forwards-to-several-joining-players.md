@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Amends ADR 0001, which pairs the Session Host with exactly one other Game Peer, and settles the consequence of ADR 0004 that more than one Joining Player "requires Relay forwarding, sender identifiers, and per-player Avatars".
+Accepted; implementation paused by ADR 0008. Amends ADR 0001, which pairs the Session Host with exactly one other Game Peer, and settles the consequence of ADR 0004 that more than one Joining Player "requires Relay forwarding, sender identifiers, and per-player Avatars".
 
 ## Context
 
