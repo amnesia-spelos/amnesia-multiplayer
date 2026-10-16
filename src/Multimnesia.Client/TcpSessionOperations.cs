@@ -29,6 +29,9 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     // Bodies have an allowance of their own like Poses, so carrying a prop never spends the session message budget.
     public const int MaxInboundBodiesBurst = 600;
     public const int InboundBodiesPerSecond = 60;
+    // Hold messages have their own allowance: a cave-in Claims and settles up to 32 entities at once, but never for long.
+    public const int MaxInboundHoldBurst = 96;
+    public const int InboundHoldsPerSecond = 20;
     private const string Incompatible = "The Multiplayer Session uses an incompatible protocol version.";
     private const string Full = "The Multiplayer Session is full.";
     private const string RateLimited = "You were disconnected for exceeding the Multiplayer Session's message rate limit.";
@@ -494,6 +497,8 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         var poseAllowanceAt = windowStart;
         var bodiesAllowance = (double)MaxInboundBodiesBurst;
         var bodiesAllowanceAt = windowStart;
+        var holdAllowance = (double)MaxInboundHoldBurst;
+        var holdAllowanceAt = windowStart;
         try
         {
             while (!cancellationToken.IsCancellationRequested)
@@ -516,6 +521,13 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
                         bodiesAllowance + (now - bodiesAllowanceAt).TotalSeconds * InboundBodiesPerSecond);
                     bodiesAllowanceAt = now;
                     withinAllowance = --bodiesAllowance >= 0;
+                }
+                else if (message is LanMessage.HoldMessage)
+                {
+                    holdAllowance = Math.Min(MaxInboundHoldBurst,
+                        holdAllowance + (now - holdAllowanceAt).TotalSeconds * InboundHoldsPerSecond);
+                    holdAllowanceAt = now;
+                    withinAllowance = --holdAllowance >= 0;
                 }
                 else
                 {
