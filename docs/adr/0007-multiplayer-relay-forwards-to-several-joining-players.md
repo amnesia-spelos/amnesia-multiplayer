@@ -33,6 +33,6 @@ Alternatives considered:
 ## Consequences
 
 - A Joining Player sees another Joining Player's Pose and bodies after two LAN hops instead of one, which is small next to the game's 100 ms interpolation delay.
-- The Session Host's upload grows with each Joining Player, and a Joining Player's inbound link carries the traffic of every other player. #61 decides how the budgets scale or are enforced per sender.
+- The Session Host's upload grows with each Joining Player, and a Joining Player's inbound link carries the traffic of every other player. #61 settled the Inbound Allowances: the Session Host applies a Sender Allowance sized for one player to each Joining Player and forwards only the messages within it, dropping the frame that exceeds it as it disconnects that player. A Joining Player's Inbound Allowances are fixed at the four-player maximum less one, times one player's, so they never change as players come and go and only catch a misbehaving Session Host. A Joining Player does not count per sender, because its only remedy, disconnecting the Session Host, would end its Multiplayer Session for one other player's fault. Game Peers do not pace what they send: each one-player allowance stays above what one player legitimately sends.
 - The Session Host's computer is a single point of failure for every Joining Player, as it already was for one.
 - Shared Custom Story Start now reports one outcome per Joining Player.
