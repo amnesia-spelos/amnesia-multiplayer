@@ -32,6 +32,8 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     // Hold messages have their own allowance: a cave-in Claims and settles up to 32 entities at once, but never for long.
     public const int MaxInboundHoldBurst = 96;
     public const int InboundHoldsPerSecond = 20;
+    // The Session Host and three Joining Players (ADR 0007).
+    public const int MaxPlayers = 4;
     private const string Incompatible = "The Multiplayer Session uses an incompatible protocol version.";
     private const string Full = "The Multiplayer Session is full.";
     private const string RateLimited = "You were disconnected for exceeding the Multiplayer Session's message rate limit.";
@@ -491,14 +493,14 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     {
         var role = isHost ? RelayRole.Host : RelayRole.Joining;
         var failure = RelayFailureCategory.None;
+        // The Session Host applies one player's Sender Allowance to each Joining Player; a Joining Player's
+        // connection to the Session Host carries every other player in the largest Multiplayer Session.
+        var playersCarried = isHost ? 1 : MaxPlayers - 1;
         var windowStart = DateTime.UtcNow;
         var windowCount = 0;
-        var poseAllowance = (double)MaxInboundPoseBurst;
-        var poseAllowanceAt = windowStart;
-        var bodiesAllowance = (double)MaxInboundBodiesBurst;
-        var bodiesAllowanceAt = windowStart;
-        var holdAllowance = (double)MaxInboundHoldBurst;
-        var holdAllowanceAt = windowStart;
+        var poseAllowance = new InboundAllowance(playersCarried * MaxInboundPoseBurst, playersCarried * InboundPosesPerSecond, windowStart);
+        var bodiesAllowance = new InboundAllowance(playersCarried * MaxInboundBodiesBurst, playersCarried * InboundBodiesPerSecond, windowStart);
+        var holdAllowance = new InboundAllowance(playersCarried * MaxInboundHoldBurst, playersCarried * InboundHoldsPerSecond, windowStart);
         try
         {
             while (!cancellationToken.IsCancellationRequested)
@@ -508,31 +510,13 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
 
                 var now = DateTime.UtcNow;
                 bool withinAllowance;
-                if (message is LanMessage.Pose)
-                {
-                    poseAllowance = Math.Min(MaxInboundPoseBurst,
-                        poseAllowance + (now - poseAllowanceAt).TotalSeconds * InboundPosesPerSecond);
-                    poseAllowanceAt = now;
-                    withinAllowance = --poseAllowance >= 0;
-                }
-                else if (message is LanMessage.Bodies)
-                {
-                    bodiesAllowance = Math.Min(MaxInboundBodiesBurst,
-                        bodiesAllowance + (now - bodiesAllowanceAt).TotalSeconds * InboundBodiesPerSecond);
-                    bodiesAllowanceAt = now;
-                    withinAllowance = --bodiesAllowance >= 0;
-                }
-                else if (message is LanMessage.HoldMessage)
-                {
-                    holdAllowance = Math.Min(MaxInboundHoldBurst,
-                        holdAllowance + (now - holdAllowanceAt).TotalSeconds * InboundHoldsPerSecond);
-                    holdAllowanceAt = now;
-                    withinAllowance = --holdAllowance >= 0;
-                }
+                if (message is LanMessage.Pose) withinAllowance = poseAllowance.TryTake(now);
+                else if (message is LanMessage.Bodies) withinAllowance = bodiesAllowance.TryTake(now);
+                else if (message is LanMessage.HoldMessage) withinAllowance = holdAllowance.TryTake(now);
                 else
                 {
                     if (now - windowStart >= InboundRateWindow) { windowStart = now; windowCount = 0; }
-                    withinAllowance = ++windowCount <= MaxInboundMessagesPerWindow;
+                    withinAllowance = ++windowCount <= playersCarried * MaxInboundMessagesPerWindow;
                 }
                 if (!withinAllowance)
                 {

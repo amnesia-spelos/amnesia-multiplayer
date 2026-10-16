@@ -1288,6 +1288,88 @@ public sealed class MultiplayerSessionOperationsTests
         Assert.True(accepted.NoDelay);
     }
 
+    // A Joining Player's connection to the Session Host carries the messages of every other player in the largest session.
+    private const int OtherPlayers = TcpSessionOperations.MaxPlayers - 1;
+
+    [Fact]
+    public async Task A_Joining_Player_accepts_a_burst_from_every_other_player_without_disconnecting_the_Session_Host()
+    {
+        var port = FreePort();
+        var notices = new List<string>();
+        var chats = new List<ChatEntry>();
+        var poses = 0;
+        var bodies = 0;
+        var holds = 0;
+        await using var joining = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            notice => { lock (notices) notices.Add(notice); return ValueTask.CompletedTask; },
+            receiveChat: chat => { lock (chats) chats.Add(chat); return ValueTask.CompletedTask; },
+            receivePose: _ => { Interlocked.Increment(ref poses); return ValueTask.CompletedTask; },
+            receiveHoldMessage: _ => { Interlocked.Increment(ref holds); return ValueTask.CompletedTask; },
+            receiveBodies: _ => { Interlocked.Increment(ref bodies); return ValueTask.CompletedTask; });
+        using var host = await JoinRawHostAsync(joining, port);
+        var stream = host.GetStream();
+
+        for (var i = 0; i < OtherPlayers * TcpSessionOperations.MaxInboundPoseBurst; i++)
+            await LanProtocol.WriteAsync(stream, HostPose with { TimeMs = (ulong)i }, TestContext.Current.CancellationToken);
+        for (var i = 0; i < OtherPlayers * TcpSessionOperations.MaxInboundBodiesBurst; i++)
+            await LanProtocol.WriteAsync(stream, HostBodies with { TimeMs = (ulong)i }, TestContext.Current.CancellationToken);
+        for (var i = 0; i < OtherPlayers * TcpSessionOperations.MaxInboundHoldBurst; i++)
+            await LanProtocol.WriteAsync(stream, new LanMessage.Settled("maps/a.map", i), TestContext.Current.CancellationToken);
+        for (var i = 0; i < OtherPlayers * TcpSessionOperations.MaxInboundMessagesPerWindow; i++)
+            await LanProtocol.WriteAsync(stream, new LanMessage.ChatEntry("Host", $"message {i}"), TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => { lock (chats) return chats.Count == OtherPlayers * TcpSessionOperations.MaxInboundMessagesPerWindow; });
+
+        Assert.Equal(OtherPlayers * TcpSessionOperations.MaxInboundPoseBurst, Volatile.Read(ref poses));
+        Assert.Equal(OtherPlayers * TcpSessionOperations.MaxInboundBodiesBurst, Volatile.Read(ref bodies));
+        Assert.Equal(OtherPlayers * TcpSessionOperations.MaxInboundHoldBurst, Volatile.Read(ref holds));
+        Assert.True(joining.IsOtherPlayerPresent);
+        lock (notices) Assert.DoesNotContain(notices, notice => notice.Contains("rate limit", StringComparison.Ordinal));
+    }
+
+    public static TheoryData<LanMessage, int> FloodsPastEveryOtherPlayersAllowance => new()
+    {
+        { HostPose, OtherPlayers * TcpSessionOperations.MaxInboundPoseBurst * 2 },
+        { HostBodies, OtherPlayers * TcpSessionOperations.MaxInboundBodiesBurst * 2 },
+        { new LanMessage.Settled("maps/a.map", 1), OtherPlayers * TcpSessionOperations.MaxInboundHoldBurst * 2 },
+        { new LanMessage.Heartbeat(), OtherPlayers * TcpSessionOperations.MaxInboundMessagesPerWindow + 5 },
+    };
+
+    [Theory]
+    [MemberData(nameof(FloodsPastEveryOtherPlayersAllowance))]
+    public async Task A_Joining_Player_disconnects_the_Session_Host_flooding_past_every_other_players_allowance(LanMessage message, int count)
+    {
+        var port = FreePort();
+        var notices = new List<string>();
+        await using var joining = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            notice => { lock (notices) notices.Add(notice); return ValueTask.CompletedTask; });
+        using var host = await JoinRawHostAsync(joining, port);
+
+        try
+        {
+            for (var i = 0; i < count; i++)
+                await LanProtocol.WriteAsync(host.GetStream(), message, TestContext.Current.CancellationToken);
+        }
+        catch (IOException) { }
+
+        await WaitUntilAsync(() => { lock (notices) return notices.Any(notice => notice.Contains("rate limit", StringComparison.Ordinal)); });
+        await WaitUntilAsync(() => !joining.IsOtherPlayerPresent);
+    }
+
+    private static async Task<TcpClient> JoinRawHostAsync(TcpSessionOperations joining, int port)
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, port);
+        listener.Start();
+        var join = joining.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken);
+        var host = await listener.AcceptTcpClientAsync(TestContext.Current.CancellationToken);
+        Assert.IsType<LanMessage.JoinRequest>(await LanProtocol.ReadAsync(host.GetStream(), TestContext.Current.CancellationToken));
+        await LanProtocol.WriteAsync(host.GetStream(),
+            new LanMessage.AdmissionAccepted(LanProtocol.CurrentVersion, Guid.NewGuid()), TestContext.Current.CancellationToken);
+        Assert.True((await join).Success);
+        return host;
+    }
+
     private static async Task<TcpClient> AdmitRawPeerAsync(int port)
     {
         var peer = new TcpClient(AddressFamily.InterNetwork);
