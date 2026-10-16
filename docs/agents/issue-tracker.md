@@ -38,7 +38,7 @@ Wayfinder maps live in this repository. Game- and engine-side tickets are create
 - **The map**: an issue labelled `wayfinder:map`. Tickets carry `wayfinder:research`, `wayfinder:prototype`, `wayfinder:grilling`, or `wayfinder:task`. All five labels exist in both repositories.
 - **Attach a ticket to the map**: `gh api --method POST repos/amnesia-spelos/amnesia-multiplayer/issues/<map>/sub_issues -F sub_issue_id=<database id>`. Works across repositories within the org. Use the issue's **database** `id`, not its `node_id`.
 - **Wire a blocking edge**: `gh api --method POST repos/<owner>/<repo>/issues/<blocked>/dependencies/blocked_by -F issue_id=<blocker database id>`. Also works cross-repo, and renders in GitHub's own UI.
-- **Read the frontier**: `gh api repos/amnesia-spelos/amnesia-multiplayer/issues/<map>/sub_issues --jq '.[] | select(.state=="open") | "\(.repository.name)#\(.number) \(.title)"'`, then check each one's `dependencies/blocked_by` for open blockers and its assignee for a claim.
+- **Read the frontier**: `gh api repos/amnesia-spelos/amnesia-multiplayer/issues/<map>/sub_issues --jq '.[] | select(.state=="open") | "\(.repository.name)#\(.number) \(.title)"'`, then check each one's `dependencies/blocked_by` for open blockers and its assignee for a claim. Skip a map or ticket labelled `on-hold` (both repositories): a decision paused it, and its map says which one. Resuming it means removing `on-hold` and restoring its `ready-for-agent` or `ready-for-human` label.
 - **Claim a ticket**: `gh issue edit <number> --add-assignee petrspelos` before doing any work.
 - **Get database ids**: `gh api repos/<owner>/<repo>/issues/<n> --jq .id`.
 
