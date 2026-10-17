@@ -67,7 +67,26 @@ void RoomLightLeverChanged(string &in asEntity, int alState)
         // if the light is off, players no longer heal in case we need to test death.
         EnableHealing(false);
         SetLightVisible("RoomLight", false);
+        // From then on a death runs a checkpoint callback (Shared Deaths, #75). Until the light is first
+        // turned off, the map has only the automatic _auto checkpoint, without one. Registering the same
+        // name again changes nothing, so turning the light off again keeps the count.
+        CheckPoint("light_off", "PlayerStartArea_1", "LightOffDeath", "", "");
     }
+}
+
+// Shows the count this game's callback received: the room light comes on red for 0, green for 1, and
+// blue for 2. The checkpoint reset the Grunt, so it comes back for the next death. The death at count 1
+// replaces this checkpoint, so its next death receives 1 again, as vanilla. The death at count 3 changes
+// maps.
+void LightOffDeath(string &in asName, int alCount)
+{
+    SetLightVisible("RoomLight", true);
+    SetEntityActive("grunt", true);
+    RoomLightColorChanged(asName, alCount);
+    if(asName == "light_off" && alCount == 1)
+        CheckPoint("light_off_again", "PlayerStartArea_1", "LightOffDeath", "", "");
+    if(alCount >= 3)
+        ChangeMap("alt-map.map", "PlayerStartArea_1", "", "");
 }
 
 void TestButtonChanged(string &in asEntity, int alState)
