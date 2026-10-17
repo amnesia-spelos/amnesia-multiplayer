@@ -16,7 +16,7 @@ public sealed class InteractionsProtocolTests
     [Fact]
     public void The_negotiation_requests_interactions_after_the_Shared_Pose_Capabilities_then_Shared_Callbacks_and_playerplace()
     {
-        Assert.Equal("protocol 2 avatars localpose interactions sharedcallbacks playerplace", GameInteractionProtocol.Negotiate);
+        Assert.Equal("protocol 2 avatars localpose interactions sharedcallbacks playerplace enemies", GameInteractionProtocol.Negotiate);
     }
 
     [Theory]

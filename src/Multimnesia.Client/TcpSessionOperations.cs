@@ -32,6 +32,12 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     // Hold messages have their own allowance: a cave-in Claims and settles up to 32 entities at once, but never for long.
     public const int MaxInboundHoldBurst = 96;
     public const int InboundHoldsPerSecond = 20;
+    // One Session Host reports all enemies, independently of the number of players. Headroom for 64 active enemies
+    // at up to 60 Hz, including a second of queued samples released after a network stall. Custom maps beyond this
+    // envelope need a larger allowance; the mp-test-cs encounter uses one.
+    public const int EnemyStreams = 64;
+    public const int MaxInboundEnemyPoseBurst = EnemyStreams * 60;
+    public const int InboundEnemyPosesPerSecond = EnemyStreams * 60;
     // The Session Host and three Joining Players (ADR 0007).
     public const int MaxPlayers = 4;
     private const string Incompatible = "The Multiplayer Session uses an incompatible protocol version.";
@@ -44,6 +50,7 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     private readonly Action<RelayLogEntry> _log;
     private readonly Func<string, ValueTask> _receiveCustomStoryStarted;
     private readonly Func<string, SharedCustomStoryStartOutcome, ValueTask> _receiveCustomStoryStartOutcome;
+    private readonly Func<LanMessage.EnemyPose, ValueTask> _receiveEnemyPose;
     private readonly Func<LanMessage.Pose, ValueTask> _receivePose;
     private readonly Func<LanMessage.HoldMessage, ValueTask> _receiveHoldMessage;
     private readonly Func<LanMessage.Bodies, ValueTask> _receiveBodies;
@@ -71,7 +78,8 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         Func<LanMessage.Pose, ValueTask>? receivePose = null,
         Func<LanMessage.HoldMessage, ValueTask>? receiveHoldMessage = null,
         Func<LanMessage.Bodies, ValueTask>? receiveBodies = null,
-        Func<LanMessage.WorldMessage, ValueTask>? receiveWorldMessage = null)
+        Func<LanMessage.WorldMessage, ValueTask>? receiveWorldMessage = null,
+        Func<LanMessage.EnemyPose, ValueTask>? receiveEnemyPose = null)
     {
         _options = options;
         _notice = notice ?? (_ => ValueTask.CompletedTask);
@@ -80,6 +88,7 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         _log = log ?? (_ => { });
         _receiveCustomStoryStarted = receiveCustomStoryStarted ?? (_ => ValueTask.CompletedTask);
         _receiveCustomStoryStartOutcome = receiveCustomStoryStartOutcome ?? ((_, _) => ValueTask.CompletedTask);
+        _receiveEnemyPose = receiveEnemyPose ?? (_ => ValueTask.CompletedTask);
         _receivePose = receivePose ?? (_ => ValueTask.CompletedTask);
         _receiveHoldMessage = receiveHoldMessage ?? (_ => ValueTask.CompletedTask);
         _receiveBodies = receiveBodies ?? (_ => ValueTask.CompletedTask);
@@ -240,6 +249,12 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         LanOutbound? outbound;
         lock (_gate) outbound = _joinedOutbound ?? _admittedOutbound;
         outbound?.OfferPose(pose);
+    }
+
+    public void SendEnemyPose(LanMessage.EnemyPose pose)
+    {
+        if (!LanProtocol.IsValid(pose)) return;
+        lock (_gate) _admittedOutbound?.OfferEnemyPose(pose);
     }
 
     // Latest-wins like the Pose, and validated here for the same reason.
@@ -499,6 +514,7 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         var windowStart = DateTime.UtcNow;
         var windowCount = 0;
         var poseAllowance = new InboundAllowance(playersCarried * MaxInboundPoseBurst, playersCarried * InboundPosesPerSecond, windowStart);
+        var enemyAllowance = new InboundAllowance(MaxInboundEnemyPoseBurst, InboundEnemyPosesPerSecond, windowStart);
         var bodiesAllowance = new InboundAllowance(playersCarried * MaxInboundBodiesBurst, playersCarried * InboundBodiesPerSecond, windowStart);
         var holdAllowance = new InboundAllowance(playersCarried * MaxInboundHoldBurst, playersCarried * InboundHoldsPerSecond, windowStart);
         try
@@ -511,6 +527,7 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
                 var now = DateTime.UtcNow;
                 bool withinAllowance;
                 if (message is LanMessage.Pose) withinAllowance = poseAllowance.TryTake(now);
+                else if (message is LanMessage.EnemyPose) withinAllowance = enemyAllowance.TryTake(now);
                 else if (message is LanMessage.Bodies) withinAllowance = bodiesAllowance.TryTake(now);
                 else if (message is LanMessage.HoldMessage) withinAllowance = holdAllowance.TryTake(now);
                 else
@@ -541,6 +558,9 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
                             peerCorrelationId: peerCorrelationId, customStoryIdentifier: reported.Identifier,
                             customStoryStartOutcome: reported.Outcome);
                         await _receiveCustomStoryStartOutcome(reported.Identifier, reported.Outcome);
+                        break;
+                    case LanMessage.EnemyPose enemy when !isHost:
+                        await _receiveEnemyPose(enemy);
                         break;
                     case LanMessage.Pose pose:
                         await _receivePose(pose);

@@ -19,6 +19,11 @@ public abstract record LanMessage
     public sealed record Pose(
         ulong TimeMs, uint TeleportCounter, double X, double Y, double Z, double Yaw, double Pitch, bool Crouch, bool Lantern, string Map) : LanMessage;
 
+    // One Shared Enemy, using the game's enemy report clock and animation fields (ADR 0009).
+    public sealed record EnemyPose(
+        string Map, int EntityId, ulong TimeMs, uint TeleportCounter,
+        double X, double Y, double Z, double Yaw, string Clip, double ClipTime, bool Loop) : LanMessage;
+
     // The discrete Hold messages, which ride the ordered session lane (ADR 0004). Each names one map-placed entity by
     // its map path and the integer ID it has in its map file.
     public abstract record HoldMessage(string Map, int PropId) : LanMessage;
@@ -81,7 +86,7 @@ public sealed class LanProtocolException(string message, Exception? innerExcepti
 
 public static class LanProtocol
 {
-    public const int CurrentVersion = 9;
+    public const int CurrentVersion = 10;
     // Fits the largest bodies message: 32 entries of 13 longest-form numbers and a fully escaped map path.
     public const int MaximumFrameBytes = 32 * 1024;
     // Keeps a Pose's numbers within the game's 15-digit, 4-decimal line format; real positions and angles are far smaller.
@@ -101,6 +106,13 @@ public static class LanProtocol
     {
         var payload = JsonSerializer.SerializeToUtf8Bytes<object>(message switch
         {
+            LanMessage.EnemyPose value when IsValid(value) => new
+            {
+                type = "enemy-pose", map = value.Map, entityId = value.EntityId, timeMs = value.TimeMs,
+                teleportCounter = value.TeleportCounter, x = value.X, y = value.Y, z = value.Z, yaw = value.Yaw,
+                clip = value.Clip, clipTime = value.ClipTime, loop = value.Loop
+            },
+            LanMessage.EnemyPose => throw new LanProtocolException("Invalid Enemy Pose."),
             LanMessage.JoinRequest value => new { type = "join-request", protocolVersion = value.ProtocolVersion, peerCorrelationId = value.PeerCorrelationId },
             LanMessage.AdmissionAccepted value => new { type = "admission-accepted", protocolVersion = value.ProtocolVersion, sessionCorrelationId = value.SessionCorrelationId },
             LanMessage.AdmissionRejected value => new { type = "admission-rejected", reason = value.Reason },
@@ -240,6 +252,7 @@ public static class LanProtocol
                 "custom-story-start-outcome" => new LanMessage.CustomStoryStartOutcome(
                     RequiredIdentifier(root), ParseOutcome(RequiredString(root, "outcome", 32))),
                 "pose" => ReadPose(root),
+                "enemy-pose" => ReadEnemyPose(root),
                 "claim" => new LanMessage.Claim(
                     RequiredMap(root), RequiredInt32(root, "propId"), ParseReason(RequiredString(root, "reason", 32))),
                 "claim-denied" => new LanMessage.ClaimDenied(RequiredMap(root), RequiredInt32(root, "propId")),
@@ -328,6 +341,24 @@ public static class LanProtocol
     private static string? NormalizedAuthorColor(string? authorColor) => authorColor is null ? null
         : ChatColor.TryParse(authorColor, out var color) ? color.Hex
         : throw new LanProtocolException("Invalid Chat Entry.");
+
+    // Clip names are identifiers, never command text. The game accepts one non-space field, at most 128 characters.
+    public static bool IsValidEnemyClip(string? clip) =>
+        clip is { Length: > 0 and <= 128 } && clip.All(c => !char.IsWhiteSpace(c) && !char.IsControl(c) && !char.IsSurrogate(c));
+
+    public static bool IsValid(LanMessage.EnemyPose pose) =>
+        IsValidMap(pose.Map) && IsPoseNumber(pose.X) && IsPoseNumber(pose.Y) && IsPoseNumber(pose.Z) &&
+        IsPoseNumber(pose.Yaw) && IsValidEnemyClip(pose.Clip) && IsPoseNumber(pose.ClipTime) && pose.ClipTime >= 0;
+
+    private static LanMessage.EnemyPose ReadEnemyPose(JsonElement root)
+    {
+        var pose = new LanMessage.EnemyPose(
+            RequiredMap(root), RequiredInt32(root, "entityId"), root.GetProperty("timeMs").GetUInt64(),
+            root.GetProperty("teleportCounter").GetUInt32(), root.GetProperty("x").GetDouble(),
+            root.GetProperty("y").GetDouble(), root.GetProperty("z").GetDouble(), root.GetProperty("yaw").GetDouble(),
+            RequiredString(root, "clip", 128), root.GetProperty("clipTime").GetDouble(), root.GetProperty("loop").GetBoolean());
+        return IsValid(pose) ? pose : throw new LanProtocolException("Invalid Enemy Pose.");
+    }
 
     public static bool IsValid(LanMessage.Pose pose) =>
         IsPoseNumber(pose.X) && IsPoseNumber(pose.Y) && IsPoseNumber(pose.Z) && IsPoseNumber(pose.Yaw) && IsPoseNumber(pose.Pitch) &&

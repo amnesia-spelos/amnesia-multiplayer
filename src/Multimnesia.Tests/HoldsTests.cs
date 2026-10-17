@@ -1138,6 +1138,7 @@ public sealed class HoldsTests
 
         public Task SendWorldMessageAsync(LanMessage.WorldMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
 
+        public void SendEnemyPose(LanMessage.EnemyPose pose) { }
         public void SendPose(LanMessage.Pose pose) { }
         public Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<SessionOperationResult> JoinAsync(string destination, CancellationToken cancellationToken) => throw new NotSupportedException();

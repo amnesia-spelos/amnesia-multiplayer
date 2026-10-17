@@ -74,6 +74,7 @@ public interface ISessionOperations
     Task SendCustomStoryStartOutcomeAsync(string identifier, SharedCustomStoryStartOutcome outcome, CancellationToken cancellationToken);
     // Latest-wins: replaces any Pose not yet sent to the other player.
     void SendPose(LanMessage.Pose pose);
+    void SendEnemyPose(LanMessage.EnemyPose pose);
     // Latest-wins, beside the Pose: replaces any bodies not yet sent to the other player.
     void SendBodies(LanMessage.Bodies bodies);
     // Ordered and exactly once; never waits behind Poses or bodies.

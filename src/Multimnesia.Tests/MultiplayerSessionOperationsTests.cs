@@ -1357,6 +1357,67 @@ public sealed class MultiplayerSessionOperationsTests
         await WaitUntilAsync(() => !joining.IsOtherPlayerPresent);
     }
 
+    [Fact]
+    public async Task Only_the_Session_Host_sends_Enemy_Poses_and_the_Joining_Player_receives_them()
+    {
+        var port = FreePort();
+        var received = new System.Collections.Concurrent.ConcurrentQueue<LanMessage.EnemyPose>();
+        await using var host = new TcpSessionOperations(new SessionNetworkOptions { Port = port });
+        await using var joining = new TcpSessionOperations(new SessionNetworkOptions { Port = port }, receiveEnemyPose: pose =>
+        {
+            received.Enqueue(pose);
+            return ValueTask.CompletedTask;
+        });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        Assert.True((await joining.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken)).Success);
+        await WaitUntilAsync(() => host.IsOtherPlayerPresent);
+        host.SendEnemyPose(EnemyPosesProtocolTests.Sample);
+        await WaitUntilAsync(() => received.Count == 1);
+        Assert.Equal(EnemyPosesProtocolTests.Sample, Assert.Single(received));
+        // An invalid game report is dropped locally, without terminating the Multiplayer Session.
+        host.SendEnemyPose(EnemyPosesProtocolTests.Sample with { ClipTime = -1 });
+        joining.SendEnemyPose(EnemyPosesProtocolTests.Sample);
+        await joining.SendChatAsync(new("Joiner", "still joined"), TestContext.Current.CancellationToken);
+        Assert.True(host.IsOtherPlayerPresent);
+    }
+
+    [Fact]
+    public async Task A_Joining_Player_cannot_supply_Enemy_Poses_to_the_Session_Host()
+    {
+        var port = FreePort();
+        var log = new System.Collections.Concurrent.ConcurrentQueue<RelayLogEntry>();
+        await using var host = new TcpSessionOperations(new SessionNetworkOptions { Port = port }, log: log.Enqueue);
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        using var peer = await AdmitRawPeerAsync(port);
+        await LanProtocol.WriteAsync(peer.GetStream(), EnemyPosesProtocolTests.Sample, TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => log.Any(entry => entry.Failure == RelayFailureCategory.Protocol));
+        await WaitUntilAsync(() => !host.IsOtherPlayerPresent);
+    }
+
+    [Fact]
+    public async Task Enemy_Poses_have_their_own_allowance_and_flood_disconnect_category()
+    {
+        var port = FreePort();
+        var received = 0;
+        var log = new System.Collections.Concurrent.ConcurrentQueue<RelayLogEntry>();
+        await using var joining = new TcpSessionOperations(new SessionNetworkOptions { Port = port },
+            log: log.Enqueue, receiveEnemyPose: _ => { Interlocked.Increment(ref received); return ValueTask.CompletedTask; });
+        using var host = await JoinRawHostAsync(joining, port);
+        var stream = host.GetStream();
+        // A simultaneous sample from 64 enemies at 30 Hz must not spend the chat allowance.
+        for (var i = 0; i < 64 * 30; i++)
+            await LanProtocol.WriteAsync(stream, EnemyPosesProtocolTests.Sample with { EntityId = i % 64 }, TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => Volatile.Read(ref received) == 64 * 30);
+        Assert.True(joining.IsOtherPlayerPresent);
+        using var burst = new MemoryStream();
+        for (var i = 0; i < TcpSessionOperations.MaxInboundEnemyPoseBurst * 3; i++)
+            await LanProtocol.WriteAsync(burst, EnemyPosesProtocolTests.Sample, TestContext.Current.CancellationToken);
+        try { await stream.WriteAsync(burst.ToArray(), TestContext.Current.CancellationToken); }
+        catch (IOException) { }
+        await WaitUntilAsync(() => log.Any(entry => entry.Failure == RelayFailureCategory.Flood));
+        await WaitUntilAsync(() => !joining.IsOtherPlayerPresent);
+    }
+
     private static async Task<TcpClient> JoinRawHostAsync(TcpSessionOperations joining, int port)
     {
         using var listener = new TcpListener(IPAddress.Loopback, port);

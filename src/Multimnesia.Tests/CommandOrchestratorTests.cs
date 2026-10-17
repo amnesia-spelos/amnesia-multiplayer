@@ -196,6 +196,7 @@ public sealed class CommandOrchestratorTests
         public event Action? MultiplayerSessionEnded { add { } remove { } }
         public event Action? OtherPlayerPresenceChanged { add { } remove { } }
         public int OtherPlayerArrival => 0;
+        public void SendEnemyPose(LanMessage.EnemyPose pose) { }
         public void SendPose(LanMessage.Pose pose) { }
         public void SendBodies(LanMessage.Bodies bodies) { }
         public Task SendHoldMessageAsync(LanMessage.HoldMessage message, CancellationToken cancellationToken) => Task.CompletedTask;

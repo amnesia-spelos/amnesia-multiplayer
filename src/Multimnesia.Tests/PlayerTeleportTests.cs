@@ -206,6 +206,7 @@ public sealed class PlayerTeleportTests
             OtherPlayerPresenceChanged?.Invoke();
         }
 
+        public void SendEnemyPose(LanMessage.EnemyPose pose) { }
         public void SendPose(LanMessage.Pose pose) => throw new NotSupportedException();
         public void SendBodies(LanMessage.Bodies bodies) => throw new NotSupportedException();
         public Task SendHoldMessageAsync(LanMessage.HoldMessage message, CancellationToken cancellationToken) => throw new NotSupportedException();

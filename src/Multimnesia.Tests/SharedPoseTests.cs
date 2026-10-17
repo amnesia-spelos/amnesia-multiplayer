@@ -469,6 +469,7 @@ public sealed class SharedPoseTests
             OtherPlayerPresenceChanged?.Invoke();
         }
 
+        public void SendEnemyPose(LanMessage.EnemyPose pose) { }
         public void SendPose(LanMessage.Pose pose) { lock (SentPoses) SentPoses.Add(pose); }
         public void SendBodies(LanMessage.Bodies bodies) { }
         public Task SendHoldMessageAsync(LanMessage.HoldMessage message, CancellationToken cancellationToken) => Task.CompletedTask;

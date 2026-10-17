@@ -11,6 +11,9 @@ public sealed record ProtocolNegotiation(string Outcome, int? Version, IReadOnly
     public const string LocalPose = "localpose";
     public const string Interactions = "interactions";
     public const string SharedCallbacks = "sharedcallbacks";
+    public const string Enemies = "enemies";
+    public bool GrantsEnemies => Grants(Enemies);
+
     public const string PlayerPlace = "playerplace";
 
     // An older game answers `protocol` with WARNING:Unknown command.

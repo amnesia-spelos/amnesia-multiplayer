@@ -82,6 +82,8 @@ public static class GameInteractionProtocol
         if (line == PongResponse) return new GameEvent.Ponged();
         if (line.StartsWith(LocalPoseStatePrefix, StringComparison.Ordinal))
             return TryParseLocalPose(line, out var pose) ? new GameEvent.LocalPoseReported(pose) : new GameEvent.Unknown(line);
+        if (line.StartsWith("STATE enemypose ", StringComparison.Ordinal))
+            return TryParseEnemyPose(line) is { } enemy ? new GameEvent.EnemyPoseReported(enemy) : new GameEvent.Unknown(line);
         if (line.StartsWith(ReportedBodiesStatePrefix, StringComparison.Ordinal))
             return TryParseReportedBodies(line) ?? new GameEvent.Unknown(line);
         if (line.StartsWith(Version2EventPrefix, StringComparison.Ordinal))
@@ -108,6 +110,21 @@ public static class GameInteractionProtocol
                 : new GameEvent.Unknown(line);
         }
         return new GameEvent.Unknown(line);
+    }
+
+    private static LanMessage.EnemyPose? TryParseEnemyPose(string line)
+    {
+        if (!ProtocolVersion2Line.TrySplit(line, 12, hasPath: true, out var fields) ||
+            !ProtocolVersion2Line.TryParseIdentifier(fields[2], out var id) ||
+            !ulong.TryParse(fields[3], NumberStyles.None, CultureInfo.InvariantCulture, out var time) ||
+            !uint.TryParse(fields[4], NumberStyles.None, CultureInfo.InvariantCulture, out var teleport) ||
+            !ProtocolVersion2Line.TryParseNumber(fields[5], out var x) ||
+            !ProtocolVersion2Line.TryParseNumber(fields[6], out var y) ||
+            !ProtocolVersion2Line.TryParseNumber(fields[7], out var z) ||
+            !ProtocolVersion2Line.TryParseNumber(fields[8], out var yaw) ||
+            !ProtocolVersion2Line.TryParseNumber(fields[10], out var clipTime) || fields[11] is not ("0" or "1")) return null;
+        var pose = new LanMessage.EnemyPose(fields[12], id, time, teleport, x, y, z, yaw, fields[9], clipTime, fields[11] == "1");
+        return LanProtocol.IsValid(pose) ? pose : null;
     }
 
     // STATE localpose <timeMs> <teleportCounter> <x> <y> <z> <yaw> <pitch> <crouch> <lantern> <map>
@@ -292,7 +309,7 @@ public static class GameInteractionProtocol
     // Shared Callbacks the fourth, and `/tp-to-peer` the fifth.
     public const string Negotiate =
         $"protocol 2 {ProtocolNegotiation.Avatars} {ProtocolNegotiation.LocalPose} {ProtocolNegotiation.Interactions} " +
-        $"{ProtocolNegotiation.SharedCallbacks} {ProtocolNegotiation.PlayerPlace}";
+        $"{ProtocolNegotiation.SharedCallbacks} {ProtocolNegotiation.PlayerPlace} {ProtocolNegotiation.Enemies}";
 
     // Uses the default model, with collision on.
     public static string AvatarCreate(string avatarIdentifier) => $"avatarcreate {avatarIdentifier}";
@@ -322,6 +339,15 @@ public static class GameInteractionProtocol
         ProtocolVersion2Line.FormatNumber(pose.Yaw),
         pose.Crouch ? "1" : "0",
         pose.Map);
+
+    public static string EnemyPose(LanMessage.EnemyPose pose) => string.Join(' ',
+        "enemypose", ProtocolVersion2Line.FormatIdentifier(pose.EntityId),
+        pose.TimeMs.ToString(CultureInfo.InvariantCulture), pose.TeleportCounter.ToString(CultureInfo.InvariantCulture),
+        ProtocolVersion2Line.FormatNumber(pose.X), ProtocolVersion2Line.FormatNumber(pose.Y), ProtocolVersion2Line.FormatNumber(pose.Z),
+        ProtocolVersion2Line.FormatNumber(pose.Yaw), pose.Clip, ProtocolVersion2Line.FormatNumber(pose.ClipTime), pose.Loop ? "1" : "0", pose.Map);
+
+    public static string EnemyDrive(int id, string map) => $"enemydrive {ProtocolVersion2Line.FormatIdentifier(id)} {map}";
+    public static string EnemyRelease(int id, string map) => $"enemyrelease {ProtocolVersion2Line.FormatIdentifier(id)} {map}";
 
     public static string SubscribeLocalPose(int hz) => $"localpose subscribe {hz.ToString(CultureInfo.InvariantCulture)}";
 
@@ -402,6 +428,7 @@ public abstract record GameEvent
     public sealed record UnknownCommandWarned : GameEvent;
     public sealed record Ponged : GameEvent;
     public sealed record ChatEntryResponded(ChatEntryOutcome Outcome) : GameEvent;
+    public sealed record EnemyPoseReported(LanMessage.EnemyPose Pose) : GameEvent;
     public sealed record LocalPoseReported(LocalPose Pose) : GameEvent;
     // The `interactions` Events about the local player's interactions, and the report of the bodies they decide.
     public sealed record InteractionStarted(int EntityId, int BodyId, string Map) : GameEvent;

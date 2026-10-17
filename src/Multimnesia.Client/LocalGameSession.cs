@@ -46,7 +46,8 @@ public sealed record SessionCallbacks(
     Func<LanMessage.Pose, ValueTask> ReceivePose,
     Func<LanMessage.HoldMessage, ValueTask> ReceiveHoldMessage,
     Func<LanMessage.Bodies, ValueTask> ReceiveBodies,
-    Func<LanMessage.WorldMessage, ValueTask> ReceiveWorldMessage);
+    Func<LanMessage.WorldMessage, ValueTask> ReceiveWorldMessage,
+    Func<LanMessage.EnemyPose, ValueTask> ReceiveEnemyPose);
 
 // One Game Interaction Protocol Session with the local game: from its greeting until the connection is lost.
 public sealed class LocalGameSession(
@@ -121,6 +122,7 @@ public sealed class LocalGameSession(
         var localGameCommands = new LocalGameCommands(WriteLineAsync, Task.Delay);
         SharedCustomStoryStart sharedStart = null!;
         SharedPose sharedPose = null!;
+        SharedEnemies sharedEnemies = null!;
         Holds holds = null!;
         SharedCallbacks sharedCallbacks = null!;
         PlayerTeleport playerTeleport = null!;
@@ -146,6 +148,7 @@ public sealed class LocalGameSession(
             pose =>
             {
                 sharedPose.HandleReceivedPose(pose);
+                sharedEnemies.HandleReceivedPose(pose);
                 playerTeleport.HandleReceivedPose(pose);
                 holds.HandleReceivedPose(pose);
                 return ValueTask.CompletedTask;
@@ -167,6 +170,11 @@ public sealed class LocalGameSession(
             {
                 if (holds.HandleReceivedWorldMessage(change)) sharedCallbacks.HandleReceivedWorldMessage(change);
                 return ValueTask.CompletedTask;
+            },
+            pose =>
+            {
+                sharedEnemies.HandleReceivedEnemyPose(pose);
+                return ValueTask.CompletedTask;
             }));
         try
         {
@@ -176,6 +184,7 @@ public sealed class LocalGameSession(
             sharedPose = new SharedPose(
                 sessions, WriteLineAsync, DisplaySystemAsync, (severity, eventName, line) => Log(severity, eventName, line),
                 _negotiation.Task, cancellationToken);
+            sharedEnemies = new SharedEnemies(sessions, WriteLineAsync, _negotiation.Task, cancellationToken);
             holds = new Holds(
                 sessions, WriteLineAsync, (severity, eventName, line) => Log(severity, eventName, line), _negotiation.Task, cancellationToken);
             sharedCallbacks = new SharedCallbacks(
@@ -217,6 +226,7 @@ public sealed class LocalGameSession(
                 _ = RunIgnoringDisconnectAsync(sharedCallbacks.HandleLocalGameEventAsync(gameEvent));
                 // Not awaited, but it records the event before its first await, so events are observed in the order the game sent them.
                 _ = RunIgnoringDisconnectAsync(sharedStart.HandleLocalGameEventAsync(gameEvent, cancellationToken));
+                sharedEnemies.HandleLocalGameEvent(gameEvent);
                 playerTeleport.HandleLocalGameEvent(gameEvent);
                 localGameCommands.Dispatch(gameEvent);
             }

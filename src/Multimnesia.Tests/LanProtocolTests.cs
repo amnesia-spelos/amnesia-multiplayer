@@ -167,9 +167,9 @@ public sealed class LanProtocolTests
     }
 
     [Fact]
-    public void Protocol_version_is_9_for_sticky_attach_Shared_Callbacks()
+    public void Protocol_version_is_10_for_Enemy_Poses()
     {
-        Assert.Equal(9, LanProtocol.CurrentVersion);
+        Assert.Equal(10, LanProtocol.CurrentVersion);
     }
 
     private static MemoryStream Frame(string json)

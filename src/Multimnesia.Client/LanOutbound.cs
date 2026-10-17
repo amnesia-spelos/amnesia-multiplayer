@@ -22,6 +22,8 @@ public sealed class LanOutbound(int capacity)
         SingleReader = true,
         FullMode = BoundedChannelFullMode.DropWrite
     });
+    private readonly Dictionary<(string Map, int EntityId), LanMessage.EnemyPose> _enemyPoses = [];
+    private readonly Queue<(string Map, int EntityId)> _enemyOrder = [];
     private LanMessage.Pose? _pose;
     private LanMessage.Bodies? _bodies;
 
@@ -47,6 +49,29 @@ public sealed class LanOutbound(int capacity)
         _wake.Writer.TryWrite(true);
     }
 
+    // One newest-only slot per enemy. FIFO across slots keeps a busy enemy from starving the rest.
+    public void OfferEnemyPose(LanMessage.EnemyPose pose)
+    {
+        lock (_enemyPoses)
+        {
+            var key = (pose.Map, pose.EntityId);
+            if (!_enemyPoses.ContainsKey(key)) _enemyOrder.Enqueue(key);
+            _enemyPoses[key] = pose;
+        }
+        _wake.Writer.TryWrite(true);
+    }
+
+    private LanMessage.EnemyPose? TakeEnemyPose()
+    {
+        lock (_enemyPoses)
+        {
+            if (!_enemyOrder.TryDequeue(out var key)) return null;
+            var pose = _enemyPoses[key];
+            _enemyPoses.Remove(key);
+            return pose;
+        }
+    }
+
     public void Complete()
     {
         _messages.Writer.TryComplete();
@@ -62,6 +87,7 @@ public sealed class LanOutbound(int capacity)
             if (_messages.Reader.Completion.IsCompleted) yield break;
             if (Interlocked.Exchange(ref _pose, null) is { } pose) { yield return new(pose); continue; }
             if (Interlocked.Exchange(ref _bodies, null) is { } bodies) { yield return new(bodies); continue; }
+            if (TakeEnemyPose() is { } enemy) { yield return new(enemy); continue; }
             if (!await _wake.Reader.WaitToReadAsync(cancellationToken)) yield break;
             _wake.Reader.TryRead(out _);
         }
