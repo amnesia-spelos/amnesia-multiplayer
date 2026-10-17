@@ -1140,6 +1140,7 @@ public sealed class HoldsTests
 
         public void SendEnemyPose(LanMessage.EnemyPose pose) { }
         public Task SendEnemyAttackAsync(LanMessage.EnemyAttack attack, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task SendDeathMessageAsync(LanMessage.DeathMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
         public void SendPose(LanMessage.Pose pose) { }
         public Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<SessionOperationResult> JoinAsync(string destination, CancellationToken cancellationToken) => throw new NotSupportedException();

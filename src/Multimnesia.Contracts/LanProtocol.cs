@@ -30,6 +30,18 @@ public abstract record LanMessage
         string Map, int EntityId, EnemyAttackKind Attack,
         double SizeX, double SizeY, double SizeZ, double OffsetX, double OffsetY, double OffsetZ) : LanMessage;
 
+    // A Shared Death (ADR 0009): what the games agree on when a player dies on a map whose checkpoint has a death callback.
+    // A death message names a checkpoint only by its bounded, script-chosen name; it never names the callback function.
+    public abstract record DeathMessage(string Map) : LanMessage;
+    // A Joining Player's own death, numbered by its game, on a map whose current checkpoint has a death callback.
+    // AfterEpisode is the last Shared Death episode it received before the death, or 0: a death after an episode reached
+    // the Joining Player is a new one, not one that episode already joined.
+    public sealed record PlayerDeath(string Map, int Death, int AfterEpisode) : DeathMessage(Map);
+    // One Shared Death episode as the Session Host's Game Peer decided it, numbered from 1 in that order. Death is the
+    // Joining Player's reported death it answers, or 0 to kill the Joining Player; Count is the Session Host's
+    // pre-increment checkpoint count, which every game passes to its own callback when its own checkpoint is CheckPoint.
+    public sealed record SharedDeath(string Map, int Episode, int Death, int Count, string CheckPoint) : DeathMessage(Map);
+
     // The discrete Hold messages, which ride the ordered session lane (ADR 0004). Each names one map-placed entity by
     // its map path and the integer ID it has in its map file.
     public abstract record HoldMessage(string Map, int PropId) : LanMessage;
@@ -95,7 +107,7 @@ public sealed class LanProtocolException(string message, Exception? innerExcepti
 
 public static class LanProtocol
 {
-    public const int CurrentVersion = 11;
+    public const int CurrentVersion = 12;
     // Fits the largest bodies message: 32 entries of 13 longest-form numbers and a fully escaped map path.
     public const int MaximumFrameBytes = 32 * 1024;
     // Keeps a Pose's numbers within the game's 15-digit, 4-decimal line format; real positions and angles are far smaller.
@@ -128,6 +140,16 @@ public static class LanProtocol
                 size = new[] { value.SizeX, value.SizeY, value.SizeZ }, offset = new[] { value.OffsetX, value.OffsetY, value.OffsetZ }
             },
             LanMessage.EnemyAttack => throw new LanProtocolException("Invalid enemy attack."),
+            LanMessage.PlayerDeath value when IsValid(value) => new
+            {
+                type = "player-death", map = value.Map, death = value.Death, afterEpisode = value.AfterEpisode
+            },
+            LanMessage.SharedDeath value when IsValid(value) => new
+            {
+                type = "shared-death", map = value.Map, episode = value.Episode, death = value.Death, count = value.Count,
+                checkPoint = value.CheckPoint
+            },
+            LanMessage.DeathMessage => throw new LanProtocolException("Invalid death message."),
             LanMessage.JoinRequest value => new { type = "join-request", protocolVersion = value.ProtocolVersion, peerCorrelationId = value.PeerCorrelationId },
             LanMessage.AdmissionAccepted value => new { type = "admission-accepted", protocolVersion = value.ProtocolVersion, sessionCorrelationId = value.SessionCorrelationId },
             LanMessage.AdmissionRejected value => new { type = "admission-rejected", reason = value.Reason },
@@ -269,6 +291,8 @@ public static class LanProtocol
                 "pose" => ReadPose(root),
                 "enemy-pose" => ReadEnemyPose(root),
                 "enemy-attack" => ReadEnemyAttack(root),
+                "player-death" => ReadPlayerDeath(root),
+                "shared-death" => ReadSharedDeath(root),
                 "claim" => new LanMessage.Claim(
                     RequiredMap(root), RequiredInt32(root, "propId"), ParseReason(RequiredString(root, "reason", 32))),
                 "claim-denied" => new LanMessage.ClaimDenied(RequiredMap(root), RequiredInt32(root, "propId")),
@@ -403,6 +427,25 @@ public static class LanProtocol
         var attack = new LanMessage.EnemyAttack(
             RequiredMap(root), RequiredInt32(root, "entityId"), attackKind, size[0], size[1], size[2], offset[0], offset[1], offset[2]);
         return IsValid(attack) ? attack : throw new LanProtocolException("Invalid enemy attack.");
+    }
+
+    public static bool IsValid(LanMessage.PlayerDeath death) => IsValidMap(death.Map) && death.Death > 0 && death.AfterEpisode >= 0;
+
+    public static bool IsValid(LanMessage.SharedDeath death) =>
+        IsValidMap(death.Map) && death.Episode > 0 && death.Death >= 0 && death.Count >= 0 && IsValidItemName(death.CheckPoint);
+
+    private static LanMessage.PlayerDeath ReadPlayerDeath(JsonElement root)
+    {
+        var death = new LanMessage.PlayerDeath(RequiredMap(root), RequiredInt32(root, "death"), RequiredInt32(root, "afterEpisode"));
+        return IsValid(death) ? death : throw new LanProtocolException("Invalid death message.");
+    }
+
+    // A checkpoint name has the bounds of an item name, so it is one field of a game line.
+    private static LanMessage.SharedDeath ReadSharedDeath(JsonElement root)
+    {
+        var death = new LanMessage.SharedDeath(RequiredMap(root), RequiredInt32(root, "episode"), RequiredInt32(root, "death"),
+            RequiredInt32(root, "count"), RequiredItemName(root, "checkPoint"));
+        return IsValid(death) ? death : throw new LanProtocolException("Invalid death message.");
     }
 
     public static bool IsValid(LanMessage.Pose pose) =>

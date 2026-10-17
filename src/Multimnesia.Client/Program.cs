@@ -40,7 +40,8 @@ await LocalGameSession.RunReconnectingAsync(
             receiveBodies: callbacks.ReceiveBodies,
             receiveWorldMessage: callbacks.ReceiveWorldMessage,
             receiveEnemyPose: callbacks.ReceiveEnemyPose,
-            receiveEnemyAttack: callbacks.ReceiveEnemyAttack),
+            receiveEnemyAttack: callbacks.ReceiveEnemyAttack,
+            receiveDeathMessage: callbacks.ReceiveDeathMessage),
         entry =>
         {
             if (entry.Event == LocalGameEventName.Connected)

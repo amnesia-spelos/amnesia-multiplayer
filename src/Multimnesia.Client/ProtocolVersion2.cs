@@ -42,6 +42,10 @@ public sealed record ProtocolNegotiation(string Outcome, int? Version, IReadOnly
 public sealed record LocalPose(
     ulong TimeMs, uint TeleportCounter, double X, double Y, double Z, double Yaw, double Pitch, bool Crouch, bool Lantern, string Map);
 
+// A map's current checkpoint registration as the game reports it. Count is the count its callback receives on the next
+// death, and Callback whether a death runs one; every entered map starts with the automatic `_auto` checkpoint without one.
+public sealed record CheckPoint(int Count, bool Callback, string Name, string Map);
+
 // The Protocol Version 2 line format of the amnesia-tdd-tcp contract: single-space fields, an optional path last, "C"-locale numbers.
 public static class ProtocolVersion2Line
 {

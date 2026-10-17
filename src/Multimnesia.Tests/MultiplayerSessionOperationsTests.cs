@@ -1434,6 +1434,65 @@ public sealed class MultiplayerSessionOperationsTests
     }
 
     [Fact]
+    public async Task A_Joining_Player_reports_its_deaths_and_the_Session_Host_answers_with_episodes_in_order()
+    {
+        var port = FreePort();
+        var atHost = new System.Collections.Concurrent.ConcurrentQueue<LanMessage>();
+        var atJoining = new System.Collections.Concurrent.ConcurrentQueue<LanMessage>();
+        await using var host = new TcpSessionOperations(new SessionNetworkOptions { Port = port },
+            receiveDeathMessage: death => { atHost.Enqueue(death); return ValueTask.CompletedTask; });
+        await using var joining = new TcpSessionOperations(new SessionNetworkOptions { Port = port },
+            receiveDeathMessage: death => { atJoining.Enqueue(death); return ValueTask.CompletedTask; },
+            receiveWorldMessage: world => { atJoining.Enqueue(world); return ValueTask.CompletedTask; });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        Assert.True((await joining.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken)).Success);
+        await WaitUntilAsync(() => host.IsOtherPlayerPresent);
+
+        await joining.SendDeathMessageAsync(SharedDeathsProtocolTests.Report, TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => atHost.Count == 1);
+        Assert.Equal(SharedDeathsProtocolTests.Report, Assert.Single(atHost));
+        var lamp = new LanMessage.LampState("maps/a.map", 7, true);
+        await host.SendDeathMessageAsync(SharedDeathsProtocolTests.Episode, TestContext.Current.CancellationToken);
+        await host.SendWorldMessageAsync(lamp, TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => atJoining.Count == 2);
+        Assert.Equal([SharedDeathsProtocolTests.Episode, lamp], atJoining.ToArray());
+
+        // Each role sends only its own kind, and an invalid one is dropped locally, without ending the Multiplayer Session.
+        await host.SendDeathMessageAsync(SharedDeathsProtocolTests.Report, TestContext.Current.CancellationToken);
+        await joining.SendDeathMessageAsync(SharedDeathsProtocolTests.Episode, TestContext.Current.CancellationToken);
+        await host.SendDeathMessageAsync(SharedDeathsProtocolTests.Episode with { Count = -1 }, TestContext.Current.CancellationToken);
+        await joining.SendChatAsync(new("Joiner", "still joined"), TestContext.Current.CancellationToken);
+        await host.SendChatAsync(new("Host", "still hosting"), TestContext.Current.CancellationToken);
+        Assert.True(host.IsOtherPlayerPresent);
+        Assert.True(joining.IsOtherPlayerPresent);
+        Assert.Single(atHost);
+        Assert.Equal(2, atJoining.Count);
+    }
+
+    [Fact]
+    public async Task A_Joining_Player_cannot_supply_Shared_Death_episodes_to_the_Session_Host()
+    {
+        var port = FreePort();
+        var log = new System.Collections.Concurrent.ConcurrentQueue<RelayLogEntry>();
+        await using var host = new TcpSessionOperations(new SessionNetworkOptions { Port = port }, log: log.Enqueue);
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        using var peer = await AdmitRawPeerAsync(port);
+        await LanProtocol.WriteAsync(peer.GetStream(), SharedDeathsProtocolTests.Episode, TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => log.Any(entry => entry.Failure == RelayFailureCategory.Protocol));
+        await WaitUntilAsync(() => !host.IsOtherPlayerPresent);
+    }
+
+    [Fact]
+    public async Task A_Session_Host_cannot_report_deaths_to_a_Joining_Player()
+    {
+        var port = FreePort();
+        await using var joining = new TcpSessionOperations(new SessionNetworkOptions { Port = port });
+        using var host = await JoinRawHostAsync(joining, port);
+        await LanProtocol.WriteAsync(host.GetStream(), SharedDeathsProtocolTests.Report, TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => !joining.IsOtherPlayerPresent);
+    }
+
+    [Fact]
     public async Task Enemy_Poses_have_their_own_allowance_and_flood_disconnect_category()
     {
         var port = FreePort();

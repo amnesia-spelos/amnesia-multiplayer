@@ -674,6 +674,219 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         Assert.StartsWith("enemyattack 139 ", await game.ReadLineAsync());
     }
 
+    // The Session Host's game on maps/a.map, with the Joining Player's Pose on the same map.
+    private async Task<FakeGame> HostSharingAMapAsync()
+    {
+        _sessions.Joined = false;
+        var (game, _, _) = await ConnectAsync();
+        await game.ReadLineAsync();
+        await game.SendAsync(Negotiate.Replace("protocol", "RESPONSE protocol ok"));
+        _sessions.SetPresent(true);
+        for (var i = 0; i < 4; i++) await game.ReadLineAsync();
+        await game.SendAsync("EVENT mapentered maps/a.map");
+        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, false, "maps/a.map"));
+        var avatar = new[] { await game.ReadLineAsync(), await game.ReadLineAsync() };
+        Assert.Contains("avatarenemysight partner 1", avatar);
+        return game;
+    }
+
+    // The Joining Player's game on maps/a.map, driving the Session Host's Grunt 139.
+    private async Task<FakeGame> JoiningPlayerDrivingAGruntAsync()
+    {
+        var (game, _, _) = await ConnectAsync();
+        await game.ReadLineAsync();
+        await game.SendAsync(Negotiate.Replace("protocol", "RESPONSE protocol ok"));
+        _sessions.SetPresent(true);
+        for (var i = 0; i < 3; i++) await game.ReadLineAsync();
+        await game.SendAsync("EVENT mapentered maps/a.map");
+        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 maps/a.map");
+        await WaitUntilAsync(() => _sessions.SentPoses.Count == 1);
+        await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample);
+        Assert.Equal("enemydrive 139 maps/a.map", await game.ReadLineAsync());
+        Assert.StartsWith("enemypose 139 1000 ", await game.ReadLineAsync());
+        return game;
+    }
+
+    [Fact]
+    public async Task A_Session_Host_callback_death_answers_its_own_game_and_kills_the_Joining_Player_with_its_count()
+    {
+        await using var game = await HostSharingAMapAsync();
+        await game.SendAsync("EVENT playerdeath 1 2 1 cp_test maps/a.map");
+        Assert.Equal("shareddeath 1 1 2 cp_test maps/a.map", await game.ReadLineAsync());
+        await WaitUntilAsync(() => _sessions.SentDeathMessages.Count == 1);
+        Assert.Equal(new LanMessage.SharedDeath("maps/a.map", 1, 0, 2, "cp_test"), Assert.Single(_sessions.SentDeathMessages));
+    }
+
+    [Fact]
+    public async Task A_death_without_a_callback_or_with_the_other_player_elsewhere_coordinates_nothing()
+    {
+        await using var game = await HostSharingAMapAsync();
+        // Only _auto: the game preserves Shared Enemies itself.
+        await game.SendAsync("EVENT playerdeath 1 0 0 _auto maps/a.map");
+        await game.SendAsync("EVENT checkpoint 1 0 _auto maps/a.map");
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+        await _callbacks.ReceivePose(new(2, 0, 0, 0, 0, 0, 0, false, false, "maps/elsewhere.map"));
+        Assert.Contains("avatarenemysight partner 0", new[] { await game.ReadLineAsync(), await game.ReadLineAsync() });
+        await game.SendAsync("EVENT playerdeath 2 0 1 cp_test maps/a.map");
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+        Assert.Empty(_sessions.SentDeathMessages);
+    }
+
+    [Fact]
+    public async Task One_episode_lasts_until_this_game_completes_its_checkpoint()
+    {
+        await using var game = await HostSharingAMapAsync();
+        await game.SendAsync("EVENT playerdeath 1 0 1 cp_test maps/a.map");
+        Assert.Equal("shareddeath 1 1 0 cp_test maps/a.map", await game.ReadLineAsync());
+        await _callbacks.ReceiveDeathMessage(SharedDeathsProtocolTests.Report);
+        await game.SendAsync("EVENT playerdeath 2 0 1 cp_test maps/a.map");
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+        await game.SendAsync("EVENT checkpoint 1 1 cp_test maps/a.map");
+        await game.SendAsync("EVENT playerdeath 3 1 1 cp_test maps/a.map");
+        Assert.Equal("shareddeath 2 3 1 cp_test maps/a.map", await game.ReadLineAsync());
+        Assert.Equal([0, 1], _sessions.SentDeathMessages.Select(death => ((LanMessage.SharedDeath)death).Count));
+    }
+
+    // The game reports its Pose after every earlier line, so this waits until the Game Peer has seen them all.
+    private async Task SyncAsync(FakeGame game)
+    {
+        var sent = _sessions.SentPoses.Count;
+        await game.SendAsync($"STATE localpose {sent + 100} 0 0 0 0 0 0 0 0 maps/a.map");
+        await WaitUntilAsync(() => _sessions.SentPoses.Count > sent);
+    }
+
+    [Theory]
+    [InlineData("EVENT checkpoint 2 1 cp_test maps/a.map", "shareddeath 1 0 2 cp_test maps/a.map", 2, "cp_test")]
+    // A mismatched registration still kills the Session Host, so nobody is stranded; the game keeps its own count.
+    [InlineData("EVENT checkpoint 0 0 _auto maps/a.map", "shareddeath 1 0 0 _auto maps/a.map", 0, "_auto")]
+    public async Task A_Joining_Player_death_kills_the_Session_Host_and_is_answered_with_the_Session_Host_count(
+        string checkPoint, string command, int count, string name)
+    {
+        await using var game = await HostSharingAMapAsync();
+        await game.SendAsync(checkPoint);
+        await SyncAsync(game);
+        await _callbacks.ReceiveDeathMessage(SharedDeathsProtocolTests.Report with { Map = "maps/elsewhere.map" });
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+        await _callbacks.ReceiveDeathMessage(SharedDeathsProtocolTests.Report);
+        Assert.Equal(command, await game.ReadLineAsync());
+        await WaitUntilAsync(() => _sessions.SentDeathMessages.Count == 1);
+        Assert.Equal(new LanMessage.SharedDeath("maps/a.map", 1, 3, count, name), Assert.Single(_sessions.SentDeathMessages));
+        // The Session Host's own death while it dies for the episode belongs to the same episode.
+        await game.SendAsync("EVENT playerdeath 1 2 1 cp_test maps/a.map");
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+        Assert.Single(_sessions.SentDeathMessages);
+    }
+
+    [Fact]
+    public async Task The_Session_Host_relays_no_enemy_reports_from_its_episode_until_its_checkpoint_resets_them()
+    {
+        await using var game = await HostSharingAMapAsync();
+        await game.SendAsync("EVENT playerdeath 1 0 1 cp_test maps/a.map");
+        Assert.StartsWith("shareddeath 1 1 ", await game.ReadLineAsync());
+        await game.SendAsync("STATE enemypose 139 1000 0 -2 0 28.25 90 Walk 0.2 1 maps/a.map");
+        await game.SendAsync("EVENT enemyattack 139 normal 1.2 1.5 1 0 0.75 0.9 maps/a.map");
+        await SyncAsync(game);
+        Assert.Empty(_sessions.SentEnemyPoses);
+        Assert.Empty(_sessions.SentEnemyAttacks);
+        await game.SendAsync("EVENT checkpoint 1 1 cp_test maps/a.map");
+        await game.SendAsync("STATE enemypose 139 1000 0 -2 0 28.25 90 Walk 0.2 1 maps/a.map");
+        await WaitUntilAsync(() => _sessions.SentEnemyPoses.Count == 1);
+    }
+
+    [Fact]
+    public async Task A_Joining_Player_death_after_the_open_episode_reached_it_is_answered_once_this_episode_completes()
+    {
+        await using var game = await HostSharingAMapAsync();
+        await game.SendAsync("EVENT playerdeath 1 0 1 cp_test maps/a.map");
+        Assert.Equal("shareddeath 1 1 0 cp_test maps/a.map", await game.ReadLineAsync());
+        // The Joining Player already respawned from episode 1 and died again, while this game is still dying.
+        await _callbacks.ReceiveDeathMessage(SharedDeathsProtocolTests.Report with { Death = 4, AfterEpisode = 1 });
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+        await game.SendAsync("EVENT checkpoint 1 1 cp_test maps/a.map");
+        Assert.Equal("shareddeath 2 0 1 cp_test maps/a.map", await game.ReadLineAsync());
+        await WaitUntilAsync(() => _sessions.SentDeathMessages.Count == 2);
+        Assert.Equal(new LanMessage.SharedDeath("maps/a.map", 2, 4, 1, "cp_test"), _sessions.SentDeathMessages[1]);
+    }
+
+    [Fact]
+    public async Task An_episode_this_game_refuses_ends_at_once()
+    {
+        await using var game = await HostSharingAMapAsync();
+        await game.SendAsync("EVENT checkpoint 0 1 cp_test maps/a.map");
+        await SyncAsync(game);
+        await _callbacks.ReceiveDeathMessage(SharedDeathsProtocolTests.Report);
+        Assert.Equal("shareddeath 1 0 0 cp_test maps/a.map", await game.ReadLineAsync());
+        // In a flashback, say: the player was not killed, and no checkpoint follows.
+        await game.SendAsync("RESPONSE shareddeath unavailable");
+        await SyncAsync(game);
+        await _callbacks.ReceiveDeathMessage(SharedDeathsProtocolTests.Report with { Death = 4 });
+        Assert.Equal("shareddeath 2 0 0 cp_test maps/a.map", await game.ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task A_Joining_Player_reports_only_its_own_deaths_that_run_a_callback()
+    {
+        await using var game = await JoiningPlayerDrivingAGruntAsync();
+        await game.SendAsync("EVENT playerdeath 1 0 0 _auto maps/a.map");
+        await game.SendAsync("EVENT checkpoint 1 0 _auto maps/a.map");
+        await game.SendAsync("EVENT playerdeath 2 4 1 cp_test maps/a.map");
+        await WaitUntilAsync(() => _sessions.SentDeathMessages.Count == 1);
+        Assert.Equal(new LanMessage.PlayerDeath("maps/a.map", 2, 0), Assert.Single(_sessions.SentDeathMessages));
+        // It is answered by the Session Host's episode, never by this game's own.
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+    }
+
+    [Fact]
+    public async Task A_Joining_Player_death_report_names_the_last_episode_it_received()
+    {
+        await using var game = await JoiningPlayerDrivingAGruntAsync();
+        await _callbacks.ReceiveDeathMessage(SharedDeathsProtocolTests.Episode with { Episode = 5, Death = 0 });
+        Assert.StartsWith("shareddeath 1 0 ", await game.ReadLineAsync());
+        await game.SendAsync("EVENT checkpoint 3 1 cp_test maps/a.map");
+        Assert.Equal("enemyrelease 139 maps/a.map", await game.ReadLineAsync());
+        await game.SendAsync("EVENT playerdeath 1 3 1 cp_test maps/a.map");
+        await WaitUntilAsync(() => _sessions.SentDeathMessages.Count == 1);
+        Assert.Equal(new LanMessage.PlayerDeath("maps/a.map", 1, 5), Assert.Single(_sessions.SentDeathMessages));
+    }
+
+    [Fact]
+    public async Task A_Joining_Player_applies_an_episode_on_its_current_map_only()
+    {
+        await using var game = await JoiningPlayerDrivingAGruntAsync();
+        await _callbacks.ReceiveDeathMessage(SharedDeathsProtocolTests.Episode with { Map = "maps/elsewhere.map" });
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+        await _callbacks.ReceiveDeathMessage(SharedDeathsProtocolTests.Episode);
+        Assert.Equal("shareddeath 1 3 2 cp_test maps/a.map", await game.ReadLineAsync());
+        Assert.Empty(_sessions.SentDeathMessages);
+    }
+
+    [Fact]
+    public async Task After_a_Shared_Death_the_Joining_Player_drives_a_fresh_copy_once_its_checkpoint_reset_the_old_one()
+    {
+        await using var game = await JoiningPlayerDrivingAGruntAsync();
+        await _callbacks.ReceiveDeathMessage(SharedDeathsProtocolTests.Episode with { Death = 0 });
+        Assert.Equal("shareddeath 1 0 2 cp_test maps/a.map", await game.ReadLineAsync());
+        // Samples the Session Host sent before its own reset would drive a copy this game's checkpoint is about to reset.
+        await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample with { TimeMs = 2000 });
+        await _callbacks.ReceiveEnemyAttack(EnemyAttacksProtocolTests.Sample);
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+        // The checkpoint deactivated the copy; releasing it keeps it inactive until the next sample drives it again.
+        await game.SendAsync("EVENT checkpoint 3 1 cp_test maps/a.map");
+        Assert.Equal("enemyrelease 139 maps/a.map", await game.ReadLineAsync());
+        await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample with { TimeMs = 9000 });
+        Assert.Equal("enemydrive 139 maps/a.map", await game.ReadLineAsync());
+        Assert.StartsWith("enemypose 139 9000 ", await game.ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task A_Joining_Player_death_before_any_checkpoint_report_is_left_to_its_own_game()
+    {
+        await using var game = await HostSharingAMapAsync();
+        await _callbacks.ReceiveDeathMessage(SharedDeathsProtocolTests.Report);
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+        Assert.Empty(_sessions.SentDeathMessages);
+    }
+
     [Fact]
     public async Task A_new_Map_Visit_drives_a_fresh_copy_and_the_Host_leaving_releases_it()
     {
@@ -817,6 +1030,14 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         public Task SendEnemyAttackAsync(LanMessage.EnemyAttack attack, CancellationToken cancellationToken)
         {
             lock (_sentEnemyAttacks) _sentEnemyAttacks.Add(attack);
+            return Task.CompletedTask;
+        }
+        private readonly List<LanMessage.DeathMessage> _sentDeathMessages = [];
+        public List<LanMessage.DeathMessage> SentDeathMessages { get { lock (_sentDeathMessages) return [.. _sentDeathMessages]; } }
+
+        public Task SendDeathMessageAsync(LanMessage.DeathMessage message, CancellationToken cancellationToken)
+        {
+            lock (_sentDeathMessages) _sentDeathMessages.Add(message);
             return Task.CompletedTask;
         }
         public List<(string, SharedCustomStoryStartOutcome)> SentOutcomes { get; } = [];

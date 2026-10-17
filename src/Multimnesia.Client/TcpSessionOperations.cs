@@ -52,6 +52,7 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     private readonly Func<string, SharedCustomStoryStartOutcome, ValueTask> _receiveCustomStoryStartOutcome;
     private readonly Func<LanMessage.EnemyPose, ValueTask> _receiveEnemyPose;
     private readonly Func<LanMessage.EnemyAttack, ValueTask> _receiveEnemyAttack;
+    private readonly Func<LanMessage.DeathMessage, ValueTask> _receiveDeathMessage;
     private readonly Func<LanMessage.Pose, ValueTask> _receivePose;
     private readonly Func<LanMessage.HoldMessage, ValueTask> _receiveHoldMessage;
     private readonly Func<LanMessage.Bodies, ValueTask> _receiveBodies;
@@ -81,7 +82,8 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         Func<LanMessage.Bodies, ValueTask>? receiveBodies = null,
         Func<LanMessage.WorldMessage, ValueTask>? receiveWorldMessage = null,
         Func<LanMessage.EnemyPose, ValueTask>? receiveEnemyPose = null,
-        Func<LanMessage.EnemyAttack, ValueTask>? receiveEnemyAttack = null)
+        Func<LanMessage.EnemyAttack, ValueTask>? receiveEnemyAttack = null,
+        Func<LanMessage.DeathMessage, ValueTask>? receiveDeathMessage = null)
     {
         _options = options;
         _notice = notice ?? (_ => ValueTask.CompletedTask);
@@ -92,6 +94,7 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         _receiveCustomStoryStartOutcome = receiveCustomStoryStartOutcome ?? ((_, _) => ValueTask.CompletedTask);
         _receiveEnemyPose = receiveEnemyPose ?? (_ => ValueTask.CompletedTask);
         _receiveEnemyAttack = receiveEnemyAttack ?? (_ => ValueTask.CompletedTask);
+        _receiveDeathMessage = receiveDeathMessage ?? (_ => ValueTask.CompletedTask);
         _receivePose = receivePose ?? (_ => ValueTask.CompletedTask);
         _receiveHoldMessage = receiveHoldMessage ?? (_ => ValueTask.CompletedTask);
         _receiveBodies = receiveBodies ?? (_ => ValueTask.CompletedTask);
@@ -266,6 +269,14 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         return LanProtocol.IsValid(attack) ? SendOrderedAsync(attack, hostOnly: true) : Task.CompletedTask;
     }
 
+    // Ordered like an enemy attack: a Joining Player sends only its own deaths, and the Session Host only the episodes.
+    public Task SendDeathMessageAsync(LanMessage.DeathMessage message, CancellationToken cancellationToken) => message switch
+    {
+        LanMessage.PlayerDeath death when LanProtocol.IsValid(death) => SendOrderedAsync(death, joiningOnly: true),
+        LanMessage.SharedDeath death when LanProtocol.IsValid(death) => SendOrderedAsync(death, hostOnly: true),
+        _ => Task.CompletedTask
+    };
+
     // Latest-wins like the Pose, and validated here for the same reason.
     public void SendBodies(LanMessage.Bodies bodies)
     {
@@ -283,14 +294,14 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     public Task SendWorldMessageAsync(LanMessage.WorldMessage message, CancellationToken cancellationToken) =>
         SendOrderedAsync(message);
 
-    private async Task SendOrderedAsync(LanMessage message, bool hostOnly = false)
+    private async Task SendOrderedAsync(LanMessage message, bool hostOnly = false, bool joiningOnly = false)
     {
         LanOutbound? outbound;
         TcpClient? connection;
         lock (_gate)
         {
-            outbound = hostOnly ? _admittedOutbound : _joinedOutbound ?? _admittedOutbound;
-            connection = hostOnly ? _admittedConnection : _joinedConnection ?? _admittedConnection;
+            outbound = hostOnly ? _admittedOutbound : joiningOnly ? _joinedOutbound : _joinedOutbound ?? _admittedOutbound;
+            connection = hostOnly ? _admittedConnection : joiningOnly ? _joinedConnection : _joinedConnection ?? _admittedConnection;
         }
         if (outbound is null || connection is null) return;
         if (outbound.TryWrite(new(message))) return;
@@ -573,6 +584,12 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
                         break;
                     case LanMessage.EnemyAttack attack when !isHost:
                         await _receiveEnemyAttack(attack);
+                        break;
+                    case LanMessage.PlayerDeath death when isHost:
+                        await _receiveDeathMessage(death);
+                        break;
+                    case LanMessage.SharedDeath death when !isHost:
+                        await _receiveDeathMessage(death);
                         break;
                     case LanMessage.Pose pose:
                         await _receivePose(pose);

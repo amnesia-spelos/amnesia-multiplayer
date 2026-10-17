@@ -48,7 +48,8 @@ public sealed record SessionCallbacks(
     Func<LanMessage.Bodies, ValueTask> ReceiveBodies,
     Func<LanMessage.WorldMessage, ValueTask> ReceiveWorldMessage,
     Func<LanMessage.EnemyPose, ValueTask> ReceiveEnemyPose,
-    Func<LanMessage.EnemyAttack, ValueTask> ReceiveEnemyAttack);
+    Func<LanMessage.EnemyAttack, ValueTask> ReceiveEnemyAttack,
+    Func<LanMessage.DeathMessage, ValueTask> ReceiveDeathMessage);
 
 // One Game Interaction Protocol Session with the local game: from its greeting until the connection is lost.
 public sealed class LocalGameSession(
@@ -180,6 +181,12 @@ public sealed class LocalGameSession(
             attack =>
             {
                 sharedEnemies.HandleReceivedEnemyAttack(attack);
+                return ValueTask.CompletedTask;
+            },
+            // Not awaited: an episode the Session Host decides is sent to the Joining Player without stalling the read loop.
+            death =>
+            {
+                _ = RunIgnoringDisconnectAsync(sharedEnemies.HandleReceivedDeathMessageAsync(death));
                 return ValueTask.CompletedTask;
             }));
         try

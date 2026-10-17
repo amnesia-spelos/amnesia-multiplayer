@@ -167,9 +167,9 @@ public sealed class LanProtocolTests
     }
 
     [Fact]
-    public void Protocol_version_is_11_for_enemy_attacks()
+    public void Protocol_version_is_12_for_Shared_Deaths()
     {
-        Assert.Equal(11, LanProtocol.CurrentVersion);
+        Assert.Equal(12, LanProtocol.CurrentVersion);
     }
 
     private static MemoryStream Frame(string json)

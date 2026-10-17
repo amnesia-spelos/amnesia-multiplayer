@@ -18,6 +18,16 @@ public sealed class SharedEnemies
     private readonly Dictionary<int, LanMessage.EnemyPose> _pending = [];
     private readonly HashSet<int> _driven = [];
     private readonly Queue<string> _commands = [];
+    // This game's shareddeath Commands, numbered for this game Session. The Session Host's episodes share the numbers.
+    private int _episodes;
+    // The last episode the Session Host sent, for a Joining Player's death reports.
+    private int _receivedEpisode;
+    // A Joining Player's death after the open episode reached it, answered once that episode completes.
+    private LanMessage.PlayerDeath? _laterDeath;
+    // From an episode until this game's checkpoint completes it.
+    private bool _dying;
+    // This game's checkpoint registration on the current Map Visit, once the game reported it.
+    private CheckPoint? _checkPoint;
     private readonly Channel<bool> _wake = Channel.CreateBounded<bool>(new BoundedChannelOptions(1)
     {
         SingleReader = true, FullMode = BoundedChannelFullMode.DropWrite
@@ -65,6 +75,7 @@ public sealed class SharedEnemies
     public Task HandleLocalGameEventAsync(GameEvent gameEvent)
     {
         LanMessage.EnemyAttack? attack = null;
+        LanMessage.DeathMessage? death = null;
         lock (_gate)
         {
             if (GameInteractionProtocol.LocalMapOf(gameEvent) is { } map)
@@ -75,15 +86,92 @@ public sealed class SharedEnemies
                     _pending.Clear();
                     _driven.Clear();
                     _commands.Clear();
+                    _checkPoint = null;
+                    _dying = false;
+                    _laterDeath = null;
                 }
                 _localMap = map;
             }
-            if (gameEvent is GameEvent.EnemyPoseReported reported && SharesLocked(reported.Pose.Map))
-                _sessions.SendEnemyPose(reported.Pose);
-            if (gameEvent is GameEvent.EnemyAttackReported attacked && SharesLocked(attacked.Attack.Map))
+            // A Shared Death resets the enemies the Session Host simulates, so their samples until then would only
+            // reactivate copies that the Joining Player's own checkpoint resets.
+            if (gameEvent is GameEvent.EnemyPoseReported enemy && !_dying && SharesLocked(enemy.Pose.Map))
+                _sessions.SendEnemyPose(enemy.Pose);
+            if (gameEvent is GameEvent.EnemyAttackReported attacked && !_dying && SharesLocked(attacked.Attack.Map))
                 attack = attacked.Attack;
+            // Not killed, or already past its checkpoint: no checkpoint completes the episode.
+            if (gameEvent is GameEvent.Responded { Keyword: "shareddeath", Outcome: not "ok" }) death = EndEpisodeLocked();
+            // The game reports its checkpoint again once a death completed it. A coordinated death deactivated each copy, and
+            // only driving it again reactivates one, so a released copy stays inactive until the next Enemy Pose drives it.
+            if (gameEvent is GameEvent.CheckPointReported reported)
+            {
+                _checkPoint = reported.CheckPoint;
+                if (_dying) ReleaseLocked();
+                death = EndEpisodeLocked();
+            }
+            if (gameEvent is GameEvent.PlayerDied { CheckPoint.Callback: true } died) death = HandleOwnDeathLocked(died);
         }
+        _wake.Writer.TryWrite(true);
+        if (death is not null) return _sessions.SendDeathMessageAsync(death, _token);
         return attack is null ? Task.CompletedTask : _sessions.SendEnemyAttackAsync(attack, _token);
+    }
+
+    // A death runs a callback that may change maps or puzzles, so it kills every player on the map, and each game passes the
+    // Session Host's count to its own callback. A Joining Player's game waits for the episode the Session Host decides.
+    private LanMessage.DeathMessage? HandleOwnDeathLocked(GameEvent.PlayerDied died)
+    {
+        var checkPoint = died.CheckPoint;
+        if (_sessions.IsJoined)
+            return DrivesLocked(checkPoint.Map) ? new LanMessage.PlayerDeath(checkPoint.Map, died.Death, _receivedEpisode) : null;
+        if (!SharesLocked(checkPoint.Map) || _dying) return null;
+        var episode = BeginEpisodeLocked(checkPoint);
+        _commands.Enqueue(GameInteractionProtocol.SharedDeath(_episodes, episode with { Death = died.Death }));
+        return episode;
+    }
+
+    // The Session Host's next episode, killing the Joining Player unless it is told which reported death it answers.
+    private LanMessage.SharedDeath BeginEpisodeLocked(CheckPoint checkPoint)
+    {
+        _dying = true;
+        return new LanMessage.SharedDeath(checkPoint.Map, ++_episodes, 0, checkPoint.Count, checkPoint.Name);
+    }
+
+    private LanMessage.SharedDeath? EndEpisodeLocked()
+    {
+        _dying = false;
+        var later = _laterDeath;
+        _laterDeath = null;
+        return later is null ? null : HandleJoiningPlayerDeathLocked(later);
+    }
+
+    public Task HandleReceivedDeathMessageAsync(LanMessage.DeathMessage message)
+    {
+        LanMessage.SharedDeath? answer = null;
+        lock (_gate)
+        {
+            if (message is LanMessage.PlayerDeath death) answer = HandleJoiningPlayerDeathLocked(death);
+            // The game rejects a duplicate, stale, or other-map episode itself, and never kills a player not in play.
+            if (message is LanMessage.SharedDeath received) _receivedEpisode = received.Episode;
+            if (message is LanMessage.SharedDeath episode && DrivesLocked(episode.Map))
+            {
+                _dying = true;
+                _pending.Clear();
+                _commands.Enqueue(GameInteractionProtocol.SharedDeath(++_episodes, episode));
+            }
+        }
+        _wake.Writer.TryWrite(true);
+        return answer is null ? Task.CompletedTask : _sessions.SendDeathMessageAsync(answer, _token);
+    }
+
+    // The Joining Player's game reports only a death that runs a callback. Its episode kills the Session Host even when the
+    // Session Host's own checkpoint differs, so nobody is stranded; each game then keeps its own count for a mismatch.
+    // A report sent before the open episode reached the Joining Player is a death that episode joined.
+    private LanMessage.SharedDeath? HandleJoiningPlayerDeathLocked(LanMessage.PlayerDeath death)
+    {
+        if (_dying && death.AfterEpisode == _episodes) _laterDeath = death;
+        if (!SharesLocked(death.Map) || _dying || _checkPoint is not { } checkPoint || checkPoint.Map != death.Map) return null;
+        var episode = BeginEpisodeLocked(checkPoint);
+        _commands.Enqueue(GameInteractionProtocol.SharedDeath(_episodes, episode));
+        return episode with { Death = death.Death };
     }
 
     // The Session Host simulates this map's enemies for the other players on it.
@@ -94,7 +182,7 @@ public sealed class SharedEnemies
     {
         lock (_gate)
         {
-            if (!DrivesLocked(pose.Map)) return;
+            if (_dying || !DrivesLocked(pose.Map)) return;
             _pending[pose.EntityId] = pose;
         }
         _wake.Writer.TryWrite(true);
@@ -105,7 +193,7 @@ public sealed class SharedEnemies
     {
         lock (_gate)
         {
-            if (!DrivesLocked(attack.Map)) return;
+            if (_dying || !DrivesLocked(attack.Map)) return;
             // The attack is tested against the copy as posed by every sample received before it.
             if (_pending.Remove(attack.EntityId, out var pose)) EnqueuePoseLocked(pose);
             _commands.Enqueue(GameInteractionProtocol.EnemyAttack(attack));

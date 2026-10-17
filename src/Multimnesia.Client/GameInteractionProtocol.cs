@@ -92,6 +92,14 @@ public static class GameInteractionProtocol
                 "mapentered" => ProtocolVersion2Line.TrySplit(line, fixedFieldCount: 2, hasPath: true, out var fields)
                     ? new GameEvent.MapEntered(fields[2])
                     : new GameEvent.Unknown(line),
+                "checkpoint" => ProtocolVersion2Line.TrySplit(line, fixedFieldCount: 5, hasPath: true, out var fields) &&
+                    TryParseCheckPoint(fields.AsSpan(2)) is { } checkPoint
+                    ? new GameEvent.CheckPointReported(checkPoint)
+                    : new GameEvent.Unknown(line),
+                "playerdeath" => ProtocolVersion2Line.TrySplit(line, fixedFieldCount: 6, hasPath: true, out var fields) &&
+                    TryParseCount(fields[2], out var death) && death > 0 && TryParseCheckPoint(fields.AsSpan(3)) is { } deathCheckPoint
+                    ? new GameEvent.PlayerDied(death, deathCheckPoint)
+                    : new GameEvent.Unknown(line),
                 "enemyattack" => TryParseEnemyAttack(line) is { } attack
                     ? new GameEvent.EnemyAttackReported(attack)
                     : new GameEvent.Unknown(line),
@@ -129,6 +137,15 @@ public static class GameInteractionProtocol
         var pose = new LanMessage.EnemyPose(fields[12], id, time, teleport, x, y, z, yaw, fields[9], clipTime, fields[11] == "1");
         return LanProtocol.IsValid(pose) ? pose : null;
     }
+
+    // <count> <callback> <checkPoint> <map>, the checkpoint fields shared by `checkpoint` and `playerdeath` Events
+    private static CheckPoint? TryParseCheckPoint(ReadOnlySpan<string> fields) =>
+        TryParseCount(fields[0], out var count) && fields[1] is "0" or "1" && LanProtocol.IsValidItemName(fields[2])
+            ? new CheckPoint(count, fields[1] == "1", fields[2], fields[3])
+            : null;
+
+    private static bool TryParseCount(string text, out int value) =>
+        int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out value);
 
     // EVENT enemyattack <entityId> <normal|breakdoor> <sizeX> <sizeY> <sizeZ> <offsetX> <offsetY> <offsetZ> <map>
     private static LanMessage.EnemyAttack? TryParseEnemyAttack(string line)
@@ -324,6 +341,8 @@ public static class GameInteractionProtocol
         GameEvent.ReportedBodies reported => reported.Map,
         GameEvent.EntityReleased released => released.Map,
         GameEvent.WorldChanged changed => changed.Change.Map,
+        GameEvent.CheckPointReported reported => reported.CheckPoint.Map,
+        GameEvent.PlayerDied died => died.CheckPoint.Map,
         _ => null
     };
 
@@ -386,6 +405,11 @@ public static class GameInteractionProtocol
         ProtocolVersion2Line.FormatNumber(attack.SizeX), ProtocolVersion2Line.FormatNumber(attack.SizeY),
         ProtocolVersion2Line.FormatNumber(attack.SizeZ), ProtocolVersion2Line.FormatNumber(attack.OffsetX),
         ProtocolVersion2Line.FormatNumber(attack.OffsetY), ProtocolVersion2Line.FormatNumber(attack.OffsetZ), attack.Map);
+
+    // shareddeath <episode> <death> <count> <checkPoint> <map>, numbered by this Game Peer for its own game.
+    public static string SharedDeath(int episode, LanMessage.SharedDeath death) => string.Join(' ',
+        "shareddeath", episode.ToString(CultureInfo.InvariantCulture), death.Death.ToString(CultureInfo.InvariantCulture),
+        death.Count.ToString(CultureInfo.InvariantCulture), death.CheckPoint, death.Map);
 
     public static string EnemyDrive(int id, string map) => $"enemydrive {ProtocolVersion2Line.FormatIdentifier(id)} {map}";
     public static string EnemyRelease(int id, string map) => $"enemyrelease {ProtocolVersion2Line.FormatIdentifier(id)} {map}";
@@ -471,6 +495,9 @@ public abstract record GameEvent
     public sealed record ChatEntryResponded(ChatEntryOutcome Outcome) : GameEvent;
     public sealed record EnemyPoseReported(LanMessage.EnemyPose Pose) : GameEvent;
     public sealed record EnemyAttackReported(LanMessage.EnemyAttack Attack) : GameEvent;
+    // The `enemies` Events about the current map's checkpoint registration, and the local player's own deaths on it.
+    public sealed record CheckPointReported(CheckPoint CheckPoint) : GameEvent;
+    public sealed record PlayerDied(int Death, CheckPoint CheckPoint) : GameEvent;
     public sealed record LocalPoseReported(LocalPose Pose) : GameEvent;
     // The `interactions` Events about the local player's interactions, and the report of the bodies they decide.
     public sealed record InteractionStarted(int EntityId, int BodyId, string Map) : GameEvent;

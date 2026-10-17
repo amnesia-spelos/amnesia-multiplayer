@@ -77,6 +77,8 @@ public interface ISessionOperations
     void SendEnemyPose(LanMessage.EnemyPose pose);
     // Ordered and exactly once, on the same lane as Hold messages; only the Session Host sends one.
     Task SendEnemyAttackAsync(LanMessage.EnemyAttack attack, CancellationToken cancellationToken);
+    // Ordered and exactly once, on the same lane: a Joining Player sends only a PlayerDeath, the Session Host only a SharedDeath.
+    Task SendDeathMessageAsync(LanMessage.DeathMessage message, CancellationToken cancellationToken);
     // Latest-wins, beside the Pose: replaces any bodies not yet sent to the other player.
     void SendBodies(LanMessage.Bodies bodies);
     // Ordered and exactly once; never waits behind Poses or bodies.
