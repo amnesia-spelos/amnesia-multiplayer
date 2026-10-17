@@ -316,6 +316,9 @@ public static class GameInteractionProtocol
 
     public static string AvatarRemove(string avatarIdentifier) => $"avatarremove {avatarIdentifier}";
 
+    public static string AvatarEnemySight(string avatarIdentifier, bool enabled) =>
+        $"avatarenemysight {avatarIdentifier} {(enabled ? "1" : "0")}";
+
     // avatarpose <id> <timeMs> <teleportCounter> <x> <y> <z> <yaw> <pitch> <crouch> <lantern> <map>
     public static string AvatarPose(string avatarIdentifier, LanMessage.Pose pose) => string.Join(' ',
         "avatarpose", avatarIdentifier,

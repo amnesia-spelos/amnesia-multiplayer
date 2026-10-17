@@ -473,6 +473,86 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task The_Session_Host_enables_Avatar_sight_only_while_players_share_a_map()
+    {
+        _sessions.Joined = false;
+        var (game, _, _) = await ConnectAsync();
+        await using var _ = game;
+        await game.ReadLineAsync();
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks playerplace enemies");
+        _sessions.SetPresent(true);
+        var startup = new List<string?>();
+        for (var i = 0; i < 4; i++) startup.Add(await game.ReadLineAsync());
+        Assert.Contains("avatarcreate partner", startup);
+        Assert.DoesNotContain(startup, line => line!.StartsWith("avatarenemysight "));
+
+        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 maps/a.map");
+        await WaitUntilAsync(() => _sessions.SentPoses.Count == 1);
+        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, true, "maps/a.map"));
+        var shared = new[] { await game.ReadLineAsync(), await game.ReadLineAsync() };
+        Assert.Contains("avatarenemysight partner 1", shared);
+        Assert.Contains(shared, line => line!.StartsWith("avatarpose partner "));
+
+        await game.SendAsync("EVENT mapentered maps/b.map");
+        Assert.Equal("avatarenemysight partner 0", await game.ReadLineAsync());
+        await game.SendAsync("EVENT mapentered maps/a.map");
+        Assert.Equal("avatarenemysight partner 1", await game.ReadLineAsync());
+
+        await _callbacks.ReceivePose(new(2, 0, 0, 0, 0, 0, 0, false, true, "maps/b.map"));
+        var separated = new[] { await game.ReadLineAsync(), await game.ReadLineAsync() };
+        Assert.Contains("avatarenemysight partner 0", separated);
+        Assert.Contains(separated, line => line!.StartsWith("avatarpose partner "));
+
+        await _callbacks.ReceivePose(new(3, 0, 0, 0, 0, 0, 0, false, true, "maps/a.map"));
+        var returned = new[] { await game.ReadLineAsync(), await game.ReadLineAsync() };
+        Assert.Contains("avatarenemysight partner 1", returned);
+        await game.SendAsync("EVENT mapentered maps/a.map");
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+
+        _sessions.SetPresent(false);
+        var departure = new List<string?>();
+        for (var i = 0; i < 4; i++) departure.Add(await game.ReadLineAsync());
+        Assert.Contains("avatarremove partner", departure);
+        _sessions.SetPresent(true);
+        for (var i = 0; i < 4; i++) await game.ReadLineAsync();
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+        await _callbacks.ReceivePose(new(4, 0, 0, 0, 0, 0, 0, false, true, "maps/a.map"));
+        var rejoined = new[] { await game.ReadLineAsync(), await game.ReadLineAsync() };
+        Assert.Contains("avatarenemysight partner 1", rejoined);
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task Joining_Players_and_games_without_enemies_never_enable_Avatar_sight(bool joined, bool enemies)
+    {
+        _sessions.Joined = joined;
+        var (game, _, _) = await ConnectAsync();
+        await using var _ = game;
+        await game.ReadLineAsync();
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks" + (enemies ? " enemies" : ""));
+        _sessions.SetPresent(true);
+        for (var i = 0; i < 3; i++) await game.ReadLineAsync();
+        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 maps/a.map");
+        await WaitUntilAsync(() => _sessions.SentPoses.Count == 1);
+        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, true, "maps/a.map"));
+        Assert.StartsWith("avatarpose partner ", await game.ReadLineAsync());
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+    }
+
+    [Fact]
+    public async Task Avatar_sight_failures_are_logged_without_chat_feedback()
+    {
+        await using var game = await ConnectWithSharedPoseAsync();
+        await game.SendAsync("RESPONSE avatarenemysight invalid");
+        await WaitUntilAsync(() => { lock (_log) return _log.Any(entry => entry.Event == LocalGameEventName.SharedPoseCommandFailed); });
+        var failure = Assert.Single(_log, entry => entry.Event == LocalGameEventName.SharedPoseCommandFailed);
+        Assert.Equal("RESPONSE avatarenemysight invalid", failure.Line);
+        Assert.Equal(ConnectionLogSeverity.Warning, failure.Severity);
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+    }
+
+    [Fact]
     public async Task Enemy_reports_are_sent_only_by_the_Session_Host_while_players_share_a_map()
     {
         _sessions.Joined = false;

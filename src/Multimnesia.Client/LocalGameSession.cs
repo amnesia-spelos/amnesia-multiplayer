@@ -227,6 +227,7 @@ public sealed class LocalGameSession(
                 // Not awaited, but it records the event before its first await, so events are observed in the order the game sent them.
                 _ = RunIgnoringDisconnectAsync(sharedStart.HandleLocalGameEventAsync(gameEvent, cancellationToken));
                 sharedEnemies.HandleLocalGameEvent(gameEvent);
+                sharedPose.HandleLocalGameEvent(gameEvent);
                 playerTeleport.HandleLocalGameEvent(gameEvent);
                 localGameCommands.Dispatch(gameEvent);
             }
