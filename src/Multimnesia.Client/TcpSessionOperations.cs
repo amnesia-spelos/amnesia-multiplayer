@@ -51,6 +51,7 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     private readonly Func<string, ValueTask> _receiveCustomStoryStarted;
     private readonly Func<string, SharedCustomStoryStartOutcome, ValueTask> _receiveCustomStoryStartOutcome;
     private readonly Func<LanMessage.EnemyPose, ValueTask> _receiveEnemyPose;
+    private readonly Func<LanMessage.EnemyAttack, ValueTask> _receiveEnemyAttack;
     private readonly Func<LanMessage.Pose, ValueTask> _receivePose;
     private readonly Func<LanMessage.HoldMessage, ValueTask> _receiveHoldMessage;
     private readonly Func<LanMessage.Bodies, ValueTask> _receiveBodies;
@@ -79,7 +80,8 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         Func<LanMessage.HoldMessage, ValueTask>? receiveHoldMessage = null,
         Func<LanMessage.Bodies, ValueTask>? receiveBodies = null,
         Func<LanMessage.WorldMessage, ValueTask>? receiveWorldMessage = null,
-        Func<LanMessage.EnemyPose, ValueTask>? receiveEnemyPose = null)
+        Func<LanMessage.EnemyPose, ValueTask>? receiveEnemyPose = null,
+        Func<LanMessage.EnemyAttack, ValueTask>? receiveEnemyAttack = null)
     {
         _options = options;
         _notice = notice ?? (_ => ValueTask.CompletedTask);
@@ -89,6 +91,7 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         _receiveCustomStoryStarted = receiveCustomStoryStarted ?? (_ => ValueTask.CompletedTask);
         _receiveCustomStoryStartOutcome = receiveCustomStoryStartOutcome ?? ((_, _) => ValueTask.CompletedTask);
         _receiveEnemyPose = receiveEnemyPose ?? (_ => ValueTask.CompletedTask);
+        _receiveEnemyAttack = receiveEnemyAttack ?? (_ => ValueTask.CompletedTask);
         _receivePose = receivePose ?? (_ => ValueTask.CompletedTask);
         _receiveHoldMessage = receiveHoldMessage ?? (_ => ValueTask.CompletedTask);
         _receiveBodies = receiveBodies ?? (_ => ValueTask.CompletedTask);
@@ -257,6 +260,12 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         lock (_gate) _admittedOutbound?.OfferEnemyPose(pose);
     }
 
+    // Ordered like a Hold message, and validated here like an Enemy Pose. Only the Session Host sends one.
+    public Task SendEnemyAttackAsync(LanMessage.EnemyAttack attack, CancellationToken cancellationToken)
+    {
+        return LanProtocol.IsValid(attack) ? SendOrderedAsync(attack, hostOnly: true) : Task.CompletedTask;
+    }
+
     // Latest-wins like the Pose, and validated here for the same reason.
     public void SendBodies(LanMessage.Bodies bodies)
     {
@@ -274,14 +283,14 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     public Task SendWorldMessageAsync(LanMessage.WorldMessage message, CancellationToken cancellationToken) =>
         SendOrderedAsync(message);
 
-    private async Task SendOrderedAsync(LanMessage message)
+    private async Task SendOrderedAsync(LanMessage message, bool hostOnly = false)
     {
         LanOutbound? outbound;
         TcpClient? connection;
         lock (_gate)
         {
-            outbound = _joinedOutbound ?? _admittedOutbound;
-            connection = _joinedConnection ?? _admittedConnection;
+            outbound = hostOnly ? _admittedOutbound : _joinedOutbound ?? _admittedOutbound;
+            connection = hostOnly ? _admittedConnection : _joinedConnection ?? _admittedConnection;
         }
         if (outbound is null || connection is null) return;
         if (outbound.TryWrite(new(message))) return;
@@ -561,6 +570,9 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
                         break;
                     case LanMessage.EnemyPose enemy when !isHost:
                         await _receiveEnemyPose(enemy);
+                        break;
+                    case LanMessage.EnemyAttack attack when !isHost:
+                        await _receiveEnemyAttack(attack);
                         break;
                     case LanMessage.Pose pose:
                         await _receivePose(pose);

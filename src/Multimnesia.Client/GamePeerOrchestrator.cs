@@ -75,6 +75,8 @@ public interface ISessionOperations
     // Latest-wins: replaces any Pose not yet sent to the other player.
     void SendPose(LanMessage.Pose pose);
     void SendEnemyPose(LanMessage.EnemyPose pose);
+    // Ordered and exactly once, on the same lane as Hold messages; only the Session Host sends one.
+    Task SendEnemyAttackAsync(LanMessage.EnemyAttack attack, CancellationToken cancellationToken);
     // Latest-wins, beside the Pose: replaces any bodies not yet sent to the other player.
     void SendBodies(LanMessage.Bodies bodies);
     // Ordered and exactly once; never waits behind Poses or bodies.

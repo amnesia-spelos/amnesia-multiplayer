@@ -62,8 +62,9 @@ public sealed class SharedEnemies
         _wake.Writer.TryWrite(true);
     }
 
-    public void HandleLocalGameEvent(GameEvent gameEvent)
+    public Task HandleLocalGameEventAsync(GameEvent gameEvent)
     {
+        LanMessage.EnemyAttack? attack = null;
         lock (_gate)
         {
             if (GameInteractionProtocol.LocalMapOf(gameEvent) is { } map)
@@ -77,22 +78,44 @@ public sealed class SharedEnemies
                 }
                 _localMap = map;
             }
-            if (gameEvent is GameEvent.EnemyPoseReported reported && Granted && !_sessions.IsJoined && _arrival != 0 &&
-                reported.Pose.Map == _localMap && _otherMaps.Contains(_localMap))
+            if (gameEvent is GameEvent.EnemyPoseReported reported && SharesLocked(reported.Pose.Map))
                 _sessions.SendEnemyPose(reported.Pose);
+            if (gameEvent is GameEvent.EnemyAttackReported attacked && SharesLocked(attacked.Attack.Map))
+                attack = attacked.Attack;
         }
+        return attack is null ? Task.CompletedTask : _sessions.SendEnemyAttackAsync(attack, _token);
     }
+
+    // The Session Host simulates this map's enemies for the other players on it.
+    private bool SharesLocked(string map) =>
+        Granted && !_sessions.IsJoined && _arrival != 0 && map == _localMap && _otherMaps.Contains(map);
 
     public void HandleReceivedEnemyPose(LanMessage.EnemyPose pose)
     {
         lock (_gate)
         {
-            if (!Granted || !_sessions.IsJoined || _arrival == 0 || pose.Map != _localMap ||
-                _otherMaps.Count != 0 && !_otherMaps.Contains(pose.Map)) return;
+            if (!DrivesLocked(pose.Map)) return;
             _pending[pose.EntityId] = pose;
         }
         _wake.Writer.TryWrite(true);
     }
+
+    // The game tests the attack against its own player from the driven copy; it answers not-found for an enemy it does not drive.
+    public void HandleReceivedEnemyAttack(LanMessage.EnemyAttack attack)
+    {
+        lock (_gate)
+        {
+            if (!DrivesLocked(attack.Map)) return;
+            // The attack is tested against the copy as posed by every sample received before it.
+            if (_pending.Remove(attack.EntityId, out var pose)) EnqueuePoseLocked(pose);
+            _commands.Enqueue(GameInteractionProtocol.EnemyAttack(attack));
+        }
+        _wake.Writer.TryWrite(true);
+    }
+
+    // A Joining Player drives the Session Host's enemies on the map both are on.
+    private bool DrivesLocked(string map) =>
+        Granted && _sessions.IsJoined && _arrival != 0 && map == _localMap && (_otherMaps.Count == 0 || _otherMaps.Contains(map));
 
     private void ReleaseLocked()
     {
@@ -110,13 +133,15 @@ public sealed class SharedEnemies
             if (_pending.Count == 0) return null;
             var (id, pose) = _pending.First();
             _pending.Remove(id);
-            if (_driven.Add(id))
-            {
-                _commands.Enqueue(GameInteractionProtocol.EnemyPose(pose));
-                return GameInteractionProtocol.EnemyDrive(id, pose.Map);
-            }
-            return GameInteractionProtocol.EnemyPose(pose);
+            EnqueuePoseLocked(pose);
+            return _commands.Dequeue();
         }
+    }
+
+    private void EnqueuePoseLocked(LanMessage.EnemyPose pose)
+    {
+        if (_driven.Add(pose.EntityId)) _commands.Enqueue(GameInteractionProtocol.EnemyDrive(pose.EntityId, pose.Map));
+        _commands.Enqueue(GameInteractionProtocol.EnemyPose(pose));
     }
 
     private async Task WorkAsync()

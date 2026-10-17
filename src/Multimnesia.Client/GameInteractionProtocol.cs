@@ -92,6 +92,9 @@ public static class GameInteractionProtocol
                 "mapentered" => ProtocolVersion2Line.TrySplit(line, fixedFieldCount: 2, hasPath: true, out var fields)
                     ? new GameEvent.MapEntered(fields[2])
                     : new GameEvent.Unknown(line),
+                "enemyattack" => TryParseEnemyAttack(line) is { } attack
+                    ? new GameEvent.EnemyAttackReported(attack)
+                    : new GameEvent.Unknown(line),
                 "sharedcallback" or "buttonstate" or "lampstate" => TryParseWorldMessage(line) is { } change
                     ? new GameEvent.WorldChanged(change)
                     : new GameEvent.Unknown(line),
@@ -126,6 +129,34 @@ public static class GameInteractionProtocol
         var pose = new LanMessage.EnemyPose(fields[12], id, time, teleport, x, y, z, yaw, fields[9], clipTime, fields[11] == "1");
         return LanProtocol.IsValid(pose) ? pose : null;
     }
+
+    // EVENT enemyattack <entityId> <normal|breakdoor> <sizeX> <sizeY> <sizeZ> <offsetX> <offsetY> <offsetZ> <map>
+    private static LanMessage.EnemyAttack? TryParseEnemyAttack(string line)
+    {
+        var numbers = new double[6];
+        if (!ProtocolVersion2Line.TrySplit(line, fixedFieldCount: 10, hasPath: true, out var fields) ||
+            !ProtocolVersion2Line.TryParseIdentifier(fields[2], out var id) ||
+            ParseEnemyAttackKind(fields[3]) is not { } kind) return null;
+        for (var i = 0; i < numbers.Length; i++)
+            if (!ProtocolVersion2Line.TryParseNumber(fields[4 + i], out numbers[i])) return null;
+        var attack = new LanMessage.EnemyAttack(
+            fields[10], id, kind, numbers[0], numbers[1], numbers[2], numbers[3], numbers[4], numbers[5]);
+        return LanProtocol.IsValid(attack) ? attack : null;
+    }
+
+    private static EnemyAttackKind? ParseEnemyAttackKind(string token) => token switch
+    {
+        "normal" => EnemyAttackKind.Normal,
+        "breakdoor" => EnemyAttackKind.BreakDoor,
+        _ => null
+    };
+
+    private static string EnemyAttackKindToken(EnemyAttackKind attack) => attack switch
+    {
+        EnemyAttackKind.Normal => "normal",
+        EnemyAttackKind.BreakDoor => "breakdoor",
+        _ => throw new ArgumentOutOfRangeException(nameof(attack))
+    };
 
     // STATE localpose <timeMs> <teleportCounter> <x> <y> <z> <yaw> <pitch> <crouch> <lantern> <map>
     private static bool TryParseLocalPose(string line, out LocalPose pose)
@@ -349,6 +380,13 @@ public static class GameInteractionProtocol
         ProtocolVersion2Line.FormatNumber(pose.X), ProtocolVersion2Line.FormatNumber(pose.Y), ProtocolVersion2Line.FormatNumber(pose.Z),
         ProtocolVersion2Line.FormatNumber(pose.Yaw), pose.Clip, ProtocolVersion2Line.FormatNumber(pose.ClipTime), pose.Loop ? "1" : "0", pose.Map);
 
+    public static string EnemyAttack(LanMessage.EnemyAttack attack) => string.Join(' ',
+        "enemyattack", ProtocolVersion2Line.FormatIdentifier(attack.EntityId),
+        EnemyAttackKindToken(attack.Attack),
+        ProtocolVersion2Line.FormatNumber(attack.SizeX), ProtocolVersion2Line.FormatNumber(attack.SizeY),
+        ProtocolVersion2Line.FormatNumber(attack.SizeZ), ProtocolVersion2Line.FormatNumber(attack.OffsetX),
+        ProtocolVersion2Line.FormatNumber(attack.OffsetY), ProtocolVersion2Line.FormatNumber(attack.OffsetZ), attack.Map);
+
     public static string EnemyDrive(int id, string map) => $"enemydrive {ProtocolVersion2Line.FormatIdentifier(id)} {map}";
     public static string EnemyRelease(int id, string map) => $"enemyrelease {ProtocolVersion2Line.FormatIdentifier(id)} {map}";
 
@@ -432,6 +470,7 @@ public abstract record GameEvent
     public sealed record Ponged : GameEvent;
     public sealed record ChatEntryResponded(ChatEntryOutcome Outcome) : GameEvent;
     public sealed record EnemyPoseReported(LanMessage.EnemyPose Pose) : GameEvent;
+    public sealed record EnemyAttackReported(LanMessage.EnemyAttack Attack) : GameEvent;
     public sealed record LocalPoseReported(LocalPose Pose) : GameEvent;
     // The `interactions` Events about the local player's interactions, and the report of the bodies they decide.
     public sealed record InteractionStarted(int EntityId, int BodyId, string Map) : GameEvent;

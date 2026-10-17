@@ -1333,6 +1333,7 @@ public sealed class MultiplayerSessionOperationsTests
         { HostBodies, OtherPlayers * TcpSessionOperations.MaxInboundBodiesBurst * 2 },
         { new LanMessage.Settled("maps/a.map", 1), OtherPlayers * TcpSessionOperations.MaxInboundHoldBurst * 2 },
         { new LanMessage.Heartbeat(), OtherPlayers * TcpSessionOperations.MaxInboundMessagesPerWindow + 5 },
+        { EnemyAttacksProtocolTests.Sample, OtherPlayers * TcpSessionOperations.MaxInboundMessagesPerWindow + 5 },
     };
 
     [Theory]
@@ -1390,6 +1391,44 @@ public sealed class MultiplayerSessionOperationsTests
         await host.HostAsync(TestContext.Current.CancellationToken);
         using var peer = await AdmitRawPeerAsync(port);
         await LanProtocol.WriteAsync(peer.GetStream(), EnemyPosesProtocolTests.Sample, TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => log.Any(entry => entry.Failure == RelayFailureCategory.Protocol));
+        await WaitUntilAsync(() => !host.IsOtherPlayerPresent);
+    }
+
+    [Fact]
+    public async Task Only_the_Session_Host_sends_enemy_attacks_in_order_with_the_other_messages()
+    {
+        var port = FreePort();
+        var received = new System.Collections.Concurrent.ConcurrentQueue<LanMessage>();
+        await using var host = new TcpSessionOperations(new SessionNetworkOptions { Port = port });
+        await using var joining = new TcpSessionOperations(new SessionNetworkOptions { Port = port },
+            receiveEnemyAttack: attack => { received.Enqueue(attack); return ValueTask.CompletedTask; },
+            receiveWorldMessage: world => { received.Enqueue(world); return ValueTask.CompletedTask; });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        Assert.True((await joining.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken)).Success);
+        await WaitUntilAsync(() => host.IsOtherPlayerPresent);
+        var lamp = new LanMessage.LampState("maps/a.map", 7, true);
+        await host.SendEnemyAttackAsync(EnemyAttacksProtocolTests.Sample, TestContext.Current.CancellationToken);
+        await host.SendWorldMessageAsync(lamp, TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => received.Count == 2);
+        Assert.Equal([EnemyAttacksProtocolTests.Sample, lamp], received.ToArray());
+        // An invalid game report is dropped locally, and a Joining Player never sends one, without ending the Multiplayer Session.
+        await host.SendEnemyAttackAsync(EnemyAttacksProtocolTests.Sample with { SizeX = 0 }, TestContext.Current.CancellationToken);
+        await joining.SendEnemyAttackAsync(EnemyAttacksProtocolTests.Sample, TestContext.Current.CancellationToken);
+        await joining.SendChatAsync(new("Joiner", "still joined"), TestContext.Current.CancellationToken);
+        Assert.True(host.IsOtherPlayerPresent);
+        Assert.True(joining.IsOtherPlayerPresent);
+    }
+
+    [Fact]
+    public async Task A_Joining_Player_cannot_supply_enemy_attacks_to_the_Session_Host()
+    {
+        var port = FreePort();
+        var log = new System.Collections.Concurrent.ConcurrentQueue<RelayLogEntry>();
+        await using var host = new TcpSessionOperations(new SessionNetworkOptions { Port = port }, log: log.Enqueue);
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        using var peer = await AdmitRawPeerAsync(port);
+        await LanProtocol.WriteAsync(peer.GetStream(), EnemyAttacksProtocolTests.Sample, TestContext.Current.CancellationToken);
         await WaitUntilAsync(() => log.Any(entry => entry.Failure == RelayFailureCategory.Protocol));
         await WaitUntilAsync(() => !host.IsOtherPlayerPresent);
     }

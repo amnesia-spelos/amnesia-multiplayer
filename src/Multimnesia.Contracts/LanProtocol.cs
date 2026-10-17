@@ -24,6 +24,12 @@ public abstract record LanMessage
         string Map, int EntityId, ulong TimeMs, uint TeleportCounter,
         double X, double Y, double Z, double Yaw, string Clip, double ClipTime, bool Loop) : LanMessage;
 
+    // One Shared Enemy attack at its hit-test moment, with the box it tests: its size, and its center offset along the
+    // enemy body's right, up, and forward axes. It never carries damage; the victim's game rolls its own (ADR 0009).
+    public sealed record EnemyAttack(
+        string Map, int EntityId, EnemyAttackKind Attack,
+        double SizeX, double SizeY, double SizeZ, double OffsetX, double OffsetY, double OffsetZ) : LanMessage;
+
     // The discrete Hold messages, which ride the ordered session lane (ADR 0004). Each names one map-placed entity by
     // its map path and the integer ID it has in its map file.
     public abstract record HoldMessage(string Map, int PropId) : LanMessage;
@@ -71,6 +77,9 @@ public abstract record LanMessage
 
 public enum ClaimReason { Interact, Contact }
 
+// Selects the damage range the victim's game rolls from, as the game's own attack kinds do.
+public enum EnemyAttackKind { Normal, BreakDoor }
+
 // A body state as the Game Interaction Protocol carries it: world translation, world rotation as a unit quaternion,
 // linear velocity in world units per second, and angular velocity in degrees per second, along the world axes.
 public sealed record BodyState(
@@ -86,7 +95,7 @@ public sealed class LanProtocolException(string message, Exception? innerExcepti
 
 public static class LanProtocol
 {
-    public const int CurrentVersion = 10;
+    public const int CurrentVersion = 11;
     // Fits the largest bodies message: 32 entries of 13 longest-form numbers and a fully escaped map path.
     public const int MaximumFrameBytes = 32 * 1024;
     // Keeps a Pose's numbers within the game's 15-digit, 4-decimal line format; real positions and angles are far smaller.
@@ -113,6 +122,12 @@ public static class LanProtocol
                 clip = value.Clip, clipTime = value.ClipTime, loop = value.Loop
             },
             LanMessage.EnemyPose => throw new LanProtocolException("Invalid Enemy Pose."),
+            LanMessage.EnemyAttack value when IsValid(value) => new
+            {
+                type = "enemy-attack", map = value.Map, entityId = value.EntityId, attack = AttackWireName(value.Attack),
+                size = new[] { value.SizeX, value.SizeY, value.SizeZ }, offset = new[] { value.OffsetX, value.OffsetY, value.OffsetZ }
+            },
+            LanMessage.EnemyAttack => throw new LanProtocolException("Invalid enemy attack."),
             LanMessage.JoinRequest value => new { type = "join-request", protocolVersion = value.ProtocolVersion, peerCorrelationId = value.PeerCorrelationId },
             LanMessage.AdmissionAccepted value => new { type = "admission-accepted", protocolVersion = value.ProtocolVersion, sessionCorrelationId = value.SessionCorrelationId },
             LanMessage.AdmissionRejected value => new { type = "admission-rejected", reason = value.Reason },
@@ -253,6 +268,7 @@ public static class LanProtocol
                     RequiredIdentifier(root), ParseOutcome(RequiredString(root, "outcome", 32))),
                 "pose" => ReadPose(root),
                 "enemy-pose" => ReadEnemyPose(root),
+                "enemy-attack" => ReadEnemyAttack(root),
                 "claim" => new LanMessage.Claim(
                     RequiredMap(root), RequiredInt32(root, "propId"), ParseReason(RequiredString(root, "reason", 32))),
                 "claim-denied" => new LanMessage.ClaimDenied(RequiredMap(root), RequiredInt32(root, "propId")),
@@ -358,6 +374,35 @@ public static class LanProtocol
             root.GetProperty("y").GetDouble(), root.GetProperty("z").GetDouble(), root.GetProperty("yaw").GetDouble(),
             RequiredString(root, "clip", 128), root.GetProperty("clipTime").GetDouble(), root.GetProperty("loop").GetBoolean());
         return IsValid(pose) ? pose : throw new LanProtocolException("Invalid Enemy Pose.");
+    }
+
+    public static bool IsValid(LanMessage.EnemyAttack attack) =>
+        IsValidMap(attack.Map) && Enum.IsDefined(attack.Attack) &&
+        new[] { attack.SizeX, attack.SizeY, attack.SizeZ, attack.OffsetX, attack.OffsetY, attack.OffsetZ }.All(IsPoseNumber) &&
+        attack.SizeX > 0 && attack.SizeY > 0 && attack.SizeZ > 0;
+
+    private static string AttackWireName(EnemyAttackKind attack) => attack switch
+    {
+        EnemyAttackKind.Normal => "normal",
+        EnemyAttackKind.BreakDoor => "break-door",
+        _ => throw new LanProtocolException("Unknown enemy attack.")
+    };
+
+    private static EnemyAttackKind ParseAttack(string wireName) => wireName switch
+    {
+        "normal" => EnemyAttackKind.Normal,
+        "break-door" => EnemyAttackKind.BreakDoor,
+        _ => throw new LanProtocolException("Unknown enemy attack.")
+    };
+
+    private static LanMessage.EnemyAttack ReadEnemyAttack(JsonElement root)
+    {
+        var attackKind = ParseAttack(RequiredString(root, "attack", 32));
+        var size = RequiredVector(root, "size", 3);
+        var offset = RequiredVector(root, "offset", 3);
+        var attack = new LanMessage.EnemyAttack(
+            RequiredMap(root), RequiredInt32(root, "entityId"), attackKind, size[0], size[1], size[2], offset[0], offset[1], offset[2]);
+        return IsValid(attack) ? attack : throw new LanProtocolException("Invalid enemy attack.");
     }
 
     public static bool IsValid(LanMessage.Pose pose) =>

@@ -47,7 +47,8 @@ public sealed record SessionCallbacks(
     Func<LanMessage.HoldMessage, ValueTask> ReceiveHoldMessage,
     Func<LanMessage.Bodies, ValueTask> ReceiveBodies,
     Func<LanMessage.WorldMessage, ValueTask> ReceiveWorldMessage,
-    Func<LanMessage.EnemyPose, ValueTask> ReceiveEnemyPose);
+    Func<LanMessage.EnemyPose, ValueTask> ReceiveEnemyPose,
+    Func<LanMessage.EnemyAttack, ValueTask> ReceiveEnemyAttack);
 
 // One Game Interaction Protocol Session with the local game: from its greeting until the connection is lost.
 public sealed class LocalGameSession(
@@ -175,6 +176,11 @@ public sealed class LocalGameSession(
             {
                 sharedEnemies.HandleReceivedEnemyPose(pose);
                 return ValueTask.CompletedTask;
+            },
+            attack =>
+            {
+                sharedEnemies.HandleReceivedEnemyAttack(attack);
+                return ValueTask.CompletedTask;
             }));
         try
         {
@@ -226,7 +232,8 @@ public sealed class LocalGameSession(
                 _ = RunIgnoringDisconnectAsync(sharedCallbacks.HandleLocalGameEventAsync(gameEvent));
                 // Not awaited, but it records the event before its first await, so events are observed in the order the game sent them.
                 _ = RunIgnoringDisconnectAsync(sharedStart.HandleLocalGameEventAsync(gameEvent, cancellationToken));
-                sharedEnemies.HandleLocalGameEvent(gameEvent);
+                // Not awaited, but it queues an attack before its first await, so attacks keep the game's order.
+                _ = RunIgnoringDisconnectAsync(sharedEnemies.HandleLocalGameEventAsync(gameEvent));
                 sharedPose.HandleLocalGameEvent(gameEvent);
                 playerTeleport.HandleLocalGameEvent(gameEvent);
                 localGameCommands.Dispatch(gameEvent);

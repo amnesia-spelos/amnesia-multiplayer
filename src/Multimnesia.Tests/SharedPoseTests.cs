@@ -470,6 +470,7 @@ public sealed class SharedPoseTests
         }
 
         public void SendEnemyPose(LanMessage.EnemyPose pose) { }
+        public Task SendEnemyAttackAsync(LanMessage.EnemyAttack attack, CancellationToken cancellationToken) => Task.CompletedTask;
         public void SendPose(LanMessage.Pose pose) { lock (SentPoses) SentPoses.Add(pose); }
         public void SendBodies(LanMessage.Bodies bodies) { }
         public Task SendHoldMessageAsync(LanMessage.HoldMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
