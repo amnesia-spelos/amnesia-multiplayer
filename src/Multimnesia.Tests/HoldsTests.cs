@@ -1039,6 +1039,20 @@ public sealed class HoldsTests
         Assert.Equal(string.Join(' ', ["RESPONSE", keyword, outcome, .. fields]), logged.Line);
     }
 
+    // An enemy door break in the local game already broke the door and ended the Hold before the Holder's break arrived.
+    [Fact]
+    public void A_break_of_an_entity_already_broken_here_is_not_a_failure()
+    {
+        var holds = CreateHolds();
+
+        holds.HandleResponse(new GameEvent.Responded("entitybreak", "not-found", ["141"]));
+
+        var logged = Assert.Single(_game.Logged);
+        Assert.Equal(ConnectionLogSeverity.Information, logged.Severity);
+        Assert.Equal(LocalGameEventName.HoldEnded, logged.Event);
+        Assert.StartsWith("RESPONSE entitybreak not-found 141", logged.Line);
+    }
+
     [Theory]
     [InlineData("entitydrive", "ok", new[] { "12" })]
     [InlineData("reportedbodies", "ok", new[] { "subscribe", "30" })]
@@ -1139,7 +1153,7 @@ public sealed class HoldsTests
         public Task SendWorldMessageAsync(LanMessage.WorldMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
 
         public void SendEnemyPose(LanMessage.EnemyPose pose) { }
-        public Task SendEnemyAttackAsync(LanMessage.EnemyAttack attack, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task SendEnemyEventAsync(LanMessage.EnemyEvent message, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task SendDeathMessageAsync(LanMessage.DeathMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
         public void SendPose(LanMessage.Pose pose) { }
         public Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken) => throw new NotSupportedException();

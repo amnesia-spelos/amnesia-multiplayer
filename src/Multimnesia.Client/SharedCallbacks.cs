@@ -80,6 +80,8 @@ public sealed class SharedCallbacks
                     break;
                 case GameEvent.WorldChanged changed:
                     ObserveLocalMapLocked(changed.Change.Map, newVisit: false);
+                    // Only the Session Host's game simulates Shared Enemies; a Joining Player's own enemy stays local (ADR 0009).
+                    if (changed.Change is LanMessage.AutoDisabled && _sessions.IsJoined) break;
                     sent = _sessions.SendWorldMessageAsync(changed.Change, _cancellationToken);
                     break;
                 default:

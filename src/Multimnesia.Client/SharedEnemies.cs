@@ -74,7 +74,7 @@ public sealed class SharedEnemies
 
     public Task HandleLocalGameEventAsync(GameEvent gameEvent)
     {
-        LanMessage.EnemyAttack? attack = null;
+        LanMessage.EnemyEvent? enemyEvent = null;
         LanMessage.DeathMessage? death = null;
         lock (_gate)
         {
@@ -97,7 +97,10 @@ public sealed class SharedEnemies
             if (gameEvent is GameEvent.EnemyPoseReported enemy && !_dying && SharesLocked(enemy.Pose.Map))
                 _sessions.SendEnemyPose(enemy.Pose);
             if (gameEvent is GameEvent.EnemyAttackReported attacked && !_dying && SharesLocked(attacked.Attack.Map))
-                attack = attacked.Attack;
+                enemyEvent = attacked.Attack;
+            // A broken door stays broken through a checkpoint, so every game breaks its own copy, even during an episode.
+            if (gameEvent is GameEvent.EnemyDoorBroke broke && SharesLocked(broke.DoorBreak.Map))
+                enemyEvent = broke.DoorBreak;
             // Not killed, or already past its checkpoint: no checkpoint completes the episode.
             if (gameEvent is GameEvent.Responded { Keyword: "shareddeath", Outcome: not "ok" }) death = EndEpisodeLocked();
             // The game reports its checkpoint again once a death completed it. A coordinated death deactivated each copy, and
@@ -112,7 +115,7 @@ public sealed class SharedEnemies
         }
         _wake.Writer.TryWrite(true);
         if (death is not null) return _sessions.SendDeathMessageAsync(death, _token);
-        return attack is null ? Task.CompletedTask : _sessions.SendEnemyAttackAsync(attack, _token);
+        return enemyEvent is null ? Task.CompletedTask : _sessions.SendEnemyEventAsync(enemyEvent, _token);
     }
 
     // A death runs a callback that may change maps or puzzles, so it kills every player on the map, and each game passes the
@@ -197,6 +200,18 @@ public sealed class SharedEnemies
             // The attack is tested against the copy as posed by every sample received before it.
             if (_pending.Remove(attack.EntityId, out var pose)) EnqueuePoseLocked(pose);
             _commands.Enqueue(GameInteractionProtocol.EnemyAttack(attack));
+        }
+        _wake.Writer.TryWrite(true);
+    }
+
+    // The game breaks its own copy of the door, which ends any Hold on it in every game. A checkpoint does not mend it, so
+    // the break applies during an episode too.
+    public void HandleReceivedEnemyDoorBreak(LanMessage.EnemyDoorBreak doorBreak)
+    {
+        lock (_gate)
+        {
+            if (!DrivesLocked(doorBreak.Map)) return;
+            _commands.Enqueue(GameInteractionProtocol.EnemyDoorBreak(doorBreak));
         }
         _wake.Writer.TryWrite(true);
     }

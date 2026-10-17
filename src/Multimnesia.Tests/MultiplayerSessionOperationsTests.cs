@@ -1334,6 +1334,7 @@ public sealed class MultiplayerSessionOperationsTests
         { new LanMessage.Settled("maps/a.map", 1), OtherPlayers * TcpSessionOperations.MaxInboundHoldBurst * 2 },
         { new LanMessage.Heartbeat(), OtherPlayers * TcpSessionOperations.MaxInboundMessagesPerWindow + 5 },
         { EnemyAttacksProtocolTests.Sample, OtherPlayers * TcpSessionOperations.MaxInboundMessagesPerWindow + 5 },
+        { EnemyDoorBreaksProtocolTests.Sample, OtherPlayers * TcpSessionOperations.MaxInboundMessagesPerWindow + 5 },
     };
 
     [Theory]
@@ -1396,39 +1397,45 @@ public sealed class MultiplayerSessionOperationsTests
     }
 
     [Fact]
-    public async Task Only_the_Session_Host_sends_enemy_attacks_in_order_with_the_other_messages()
+    public async Task Only_the_Session_Host_sends_enemy_attacks_and_door_breaks_in_order_with_the_other_messages()
     {
         var port = FreePort();
         var received = new System.Collections.Concurrent.ConcurrentQueue<LanMessage>();
         await using var host = new TcpSessionOperations(new SessionNetworkOptions { Port = port });
         await using var joining = new TcpSessionOperations(new SessionNetworkOptions { Port = port },
-            receiveEnemyAttack: attack => { received.Enqueue(attack); return ValueTask.CompletedTask; },
+            receiveEnemyEvent: enemyEvent => { received.Enqueue(enemyEvent); return ValueTask.CompletedTask; },
             receiveWorldMessage: world => { received.Enqueue(world); return ValueTask.CompletedTask; });
         await host.HostAsync(TestContext.Current.CancellationToken);
         Assert.True((await joining.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken)).Success);
         await WaitUntilAsync(() => host.IsOtherPlayerPresent);
         var lamp = new LanMessage.LampState("maps/a.map", 7, true);
-        await host.SendEnemyAttackAsync(EnemyAttacksProtocolTests.Sample, TestContext.Current.CancellationToken);
+        await host.SendEnemyEventAsync(EnemyAttacksProtocolTests.Sample, TestContext.Current.CancellationToken);
         await host.SendWorldMessageAsync(lamp, TestContext.Current.CancellationToken);
-        await WaitUntilAsync(() => received.Count == 2);
-        Assert.Equal([EnemyAttacksProtocolTests.Sample, lamp], received.ToArray());
+        await host.SendEnemyEventAsync(EnemyDoorBreaksProtocolTests.Sample, TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => received.Count == 3);
+        Assert.Equal([EnemyAttacksProtocolTests.Sample, lamp, EnemyDoorBreaksProtocolTests.Sample], received.ToArray());
         // An invalid game report is dropped locally, and a Joining Player never sends one, without ending the Multiplayer Session.
-        await host.SendEnemyAttackAsync(EnemyAttacksProtocolTests.Sample with { SizeX = 0 }, TestContext.Current.CancellationToken);
-        await joining.SendEnemyAttackAsync(EnemyAttacksProtocolTests.Sample, TestContext.Current.CancellationToken);
+        await host.SendEnemyEventAsync(EnemyAttacksProtocolTests.Sample with { SizeX = 0 }, TestContext.Current.CancellationToken);
+        await host.SendEnemyEventAsync(EnemyDoorBreaksProtocolTests.Sample with { Map = "" }, TestContext.Current.CancellationToken);
+        await joining.SendEnemyEventAsync(EnemyAttacksProtocolTests.Sample, TestContext.Current.CancellationToken);
+        await joining.SendEnemyEventAsync(EnemyDoorBreaksProtocolTests.Sample, TestContext.Current.CancellationToken);
         await joining.SendChatAsync(new("Joiner", "still joined"), TestContext.Current.CancellationToken);
         Assert.True(host.IsOtherPlayerPresent);
         Assert.True(joining.IsOtherPlayerPresent);
     }
 
-    [Fact]
-    public async Task A_Joining_Player_cannot_supply_enemy_attacks_to_the_Session_Host()
+    public static TheoryData<LanMessage> EnemyEvents => new() { EnemyAttacksProtocolTests.Sample, EnemyDoorBreaksProtocolTests.Sample };
+
+    [Theory]
+    [MemberData(nameof(EnemyEvents))]
+    public async Task A_Joining_Player_cannot_supply_enemy_events_to_the_Session_Host(LanMessage enemyEvent)
     {
         var port = FreePort();
         var log = new System.Collections.Concurrent.ConcurrentQueue<RelayLogEntry>();
         await using var host = new TcpSessionOperations(new SessionNetworkOptions { Port = port }, log: log.Enqueue);
         await host.HostAsync(TestContext.Current.CancellationToken);
         using var peer = await AdmitRawPeerAsync(port);
-        await LanProtocol.WriteAsync(peer.GetStream(), EnemyAttacksProtocolTests.Sample, TestContext.Current.CancellationToken);
+        await LanProtocol.WriteAsync(peer.GetStream(), enemyEvent, TestContext.Current.CancellationToken);
         await WaitUntilAsync(() => log.Any(entry => entry.Failure == RelayFailureCategory.Protocol));
         await WaitUntilAsync(() => !host.IsOtherPlayerPresent);
     }

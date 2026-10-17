@@ -339,10 +339,14 @@ public sealed class Holds
     // Failures are logged, never shown in chat. The game reports an entitybodies failure once per streak.
     public void HandleResponse(GameEvent.Responded response)
     {
-        if (response is { Keyword: "entitydrive" or "entitybodies" or "entityinteracting" or "entityrelease" or "entitybreak" or "reportedbodies" }
-            && response.Outcome != "ok")
-            _log(ConnectionLogSeverity.Warning, LocalGameEventName.HoldCommandFailed,
-                string.Join(' ', ["RESPONSE", response.Keyword, response.Outcome, .. response.Fields]));
+        if (response is not { Keyword: "entitydrive" or "entitybodies" or "entityinteracting" or "entityrelease" or "entitybreak" or "reportedbodies" }
+            || response.Outcome == "ok") return;
+        var line = string.Join(' ', ["RESPONSE", response.Keyword, response.Outcome, .. response.Fields]);
+        // An enemy door break here already broke the door and released it, before the Holder's break arrived.
+        if (response is { Keyword: "entitybreak", Outcome: "not-found" })
+            _log(ConnectionLogSeverity.Information, LocalGameEventName.HoldEnded, $"{line}: it already broke in the local game.");
+        else
+            _log(ConnectionLogSeverity.Warning, LocalGameEventName.HoldCommandFailed, line);
     }
 
     // The compare-and-set every Claim goes through. False when the other Holder already has the entity.

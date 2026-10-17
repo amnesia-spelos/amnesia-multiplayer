@@ -197,7 +197,7 @@ public sealed class CommandOrchestratorTests
         public event Action? OtherPlayerPresenceChanged { add { } remove { } }
         public int OtherPlayerArrival => 0;
         public void SendEnemyPose(LanMessage.EnemyPose pose) { }
-        public Task SendEnemyAttackAsync(LanMessage.EnemyAttack attack, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task SendEnemyEventAsync(LanMessage.EnemyEvent message, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task SendDeathMessageAsync(LanMessage.DeathMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
         public void SendPose(LanMessage.Pose pose) { }
         public void SendBodies(LanMessage.Bodies bodies) { }

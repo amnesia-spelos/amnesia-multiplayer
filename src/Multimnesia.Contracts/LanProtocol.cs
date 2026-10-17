@@ -24,11 +24,16 @@ public abstract record LanMessage
         string Map, int EntityId, ulong TimeMs, uint TeleportCounter,
         double X, double Y, double Z, double Yaw, string Clip, double ClipTime, bool Loop) : LanMessage;
 
+    // What a Shared Enemy did in the Session Host's game, which simulates it, for every other game on the map (ADR 0009).
+    // These ride the ordered session lane, and only the Session Host sends them.
+    public abstract record EnemyEvent(string Map) : LanMessage;
     // One Shared Enemy attack at its hit-test moment, with the box it tests: its size, and its center offset along the
     // enemy body's right, up, and forward axes. It never carries damage; the victim's game rolls its own (ADR 0009).
     public sealed record EnemyAttack(
         string Map, int EntityId, EnemyAttackKind Attack,
-        double SizeX, double SizeY, double SizeZ, double OffsetX, double OffsetY, double OffsetZ) : LanMessage;
+        double SizeX, double SizeY, double SizeZ, double OffsetX, double OffsetY, double OffsetZ) : EnemyEvent(Map);
+    // A Shared Enemy broke the map-placed door DoorId. Every other game breaks its own copy, and the debris stays local.
+    public sealed record EnemyDoorBreak(string Map, int DoorId) : EnemyEvent(Map);
 
     // A Shared Death (ADR 0009): what the games agree on when a player dies on a map whose checkpoint has a death callback.
     // A death message names a checkpoint only by its bounded, script-chosen name; it never names the callback function.
@@ -67,11 +72,11 @@ public abstract record LanMessage
     // plus bounded item names.
     public abstract record WorldMessage(string Map) : LanMessage;
     // A Shared Callback: the receiving game runs the callback its own Map Script registered for the same entities, or makes
-    // the same pickup, combine, flashback, or sticky attach with its own entities and inventory.
+    // the same pickup, combine, flashback, sticky attach, or enemy auto-disable with its own entities and inventory.
     public abstract record SharedCallback(string Map) : WorldMessage(Map);
     // A collide callback whose parent is "Player", with EntityId as its child; Entered is false when they stopped colliding.
     public sealed record PlayerCollide(string Map, int EntityId, bool Entered) : SharedCallback(Map);
-    // A collide callback between two entities, one of which the sender Holds.
+    // A collide callback between two entities, one of which the sender Holds or is a Shared Enemy its game simulates.
     public sealed record EntityCollide(string Map, int ParentId, int EntityId, bool Entered) : SharedCallback(Map);
     public sealed record Interact(string Map, int EntityId) : SharedCallback(Map);
     public sealed record UseItem(string Map, int EntityId, string Item) : SharedCallback(Map);
@@ -83,6 +88,9 @@ public abstract record LanMessage
     public sealed record Combine(string Map, string ItemA, string ItemB) : SharedCallback(Map);
     // The sticky area AreaId attached the body BodyId of EntityId, which the sender Held.
     public sealed record StickyAttach(string Map, int AreaId, int EntityId, int BodyId) : SharedCallback(Map);
+    // The Shared Enemy EntityId, which the sender's game simulates, reached the end of its patrol unseen and disabled itself;
+    // the receiving game disables its own copy and runs its OnAutoDisabled callback.
+    public sealed record AutoDisabled(string Map, int EntityId) : SharedCallback(Map);
     public sealed record ButtonState(string Map, int EntityId, bool SwitchedOn) : WorldMessage(Map);
     public sealed record LampState(string Map, int EntityId, bool Lit) : WorldMessage(Map);
 }
@@ -107,7 +115,7 @@ public sealed class LanProtocolException(string message, Exception? innerExcepti
 
 public static class LanProtocol
 {
-    public const int CurrentVersion = 12;
+    public const int CurrentVersion = 13;
     // Fits the largest bodies message: 32 entries of 13 longest-form numbers and a fully escaped map path.
     public const int MaximumFrameBytes = 32 * 1024;
     // Keeps a Pose's numbers within the game's 15-digit, 4-decimal line format; real positions and angles are far smaller.
@@ -140,6 +148,8 @@ public static class LanProtocol
                 size = new[] { value.SizeX, value.SizeY, value.SizeZ }, offset = new[] { value.OffsetX, value.OffsetY, value.OffsetZ }
             },
             LanMessage.EnemyAttack => throw new LanProtocolException("Invalid enemy attack."),
+            LanMessage.EnemyDoorBreak value when IsValid(value) => new { type = "enemy-door-break", map = value.Map, doorId = value.DoorId },
+            LanMessage.EnemyDoorBreak => throw new LanProtocolException("Invalid enemy door break."),
             LanMessage.PlayerDeath value when IsValid(value) => new
             {
                 type = "player-death", map = value.Map, death = value.Death, afterEpisode = value.AfterEpisode
@@ -247,6 +257,7 @@ public static class LanProtocol
                 type = "shared-callback", map = value.Map, kind = "sticky-attach", areaId = value.AreaId, entityId = value.EntityId,
                 bodyId = value.BodyId
             },
+            LanMessage.AutoDisabled value => new { type = "shared-callback", map = value.Map, kind = "auto-disabled", entityId = value.EntityId },
             LanMessage.ButtonState value => new { type = "button-state", map = value.Map, entityId = value.EntityId, switchedOn = value.SwitchedOn },
             LanMessage.LampState value => new { type = "lamp-state", map = value.Map, entityId = value.EntityId, lit = value.Lit },
             _ => throw new LanProtocolException("Unsupported LAN message type.")
@@ -291,6 +302,7 @@ public static class LanProtocol
                 "pose" => ReadPose(root),
                 "enemy-pose" => ReadEnemyPose(root),
                 "enemy-attack" => ReadEnemyAttack(root),
+                "enemy-door-break" => new LanMessage.EnemyDoorBreak(RequiredMap(root), RequiredInt32(root, "doorId")),
                 "player-death" => ReadPlayerDeath(root),
                 "shared-death" => ReadSharedDeath(root),
                 "claim" => new LanMessage.Claim(
@@ -419,6 +431,8 @@ public static class LanProtocol
         _ => throw new LanProtocolException("Unknown enemy attack.")
     };
 
+    public static bool IsValid(LanMessage.EnemyDoorBreak doorBreak) => IsValidMap(doorBreak.Map);
+
     private static LanMessage.EnemyAttack ReadEnemyAttack(JsonElement root)
     {
         var attackKind = ParseAttack(RequiredString(root, "attack", 32));
@@ -538,6 +552,7 @@ public static class LanProtocol
             "combine" => new LanMessage.Combine(map, RequiredItemName(root, "itemA"), RequiredItemName(root, "itemB")),
             "sticky-attach" => new LanMessage.StickyAttach(
                 map, RequiredInt32(root, "areaId"), RequiredInt32(root, "entityId"), RequiredInt32(root, "bodyId")),
+            "auto-disabled" => new LanMessage.AutoDisabled(map, RequiredInt32(root, "entityId")),
             _ => throw new LanProtocolException("Unknown Shared Callback kind.")
         };
     }

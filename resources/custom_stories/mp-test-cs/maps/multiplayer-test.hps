@@ -29,6 +29,30 @@ void OnStart()
         false, 0, "TestButtonConnected");
 
     AddEntityCollideCallback("Player", "SpawnGruntArea", "SpawnGrunt", true, 1);
+
+    // Enemy-triggered callbacks (#77). The Session Host's game simulates the Grunt and shares them, so each one
+    // runs once in each game: the Grunt breaking mansion_1 on its patrol, walking into SpawnGruntArea, and
+    // disabling itself at the end of its patrol, unseen.
+    SetEntityCallbackFunc("mansion_1", "MansionDoorCallback");
+    AddEntityCollideCallback("grunt", "SpawnGruntArea", "GruntEnteredSpawnArea", false, 1);
+    SetEntityCallbackFunc("grunt", "GruntCallback");
+}
+
+void MansionDoorCallback(string &in asEntity, string &in asType)
+{
+    if(asType != "Break") return;
+    Print("TEST77: mansion_1 broke\n");
+    StartScreenShake(0.03f, 0.5f, 0.1f, 0.3f);
+}
+
+void GruntEnteredSpawnArea(string &in asParent, string &in asChild, int alState)
+{
+    Print("TEST77: grunt entered SpawnGruntArea\n");
+}
+
+void GruntCallback(string &in asEntity, string &in asType)
+{
+    if(asType == "OnAutoDisabled") Print("TEST77: grunt auto-disabled\n");
 }
 
 void SpawnGrunt(string &in asParent, string &in asChild, int alState)

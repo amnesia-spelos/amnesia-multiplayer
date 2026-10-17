@@ -48,7 +48,7 @@ public sealed record SessionCallbacks(
     Func<LanMessage.Bodies, ValueTask> ReceiveBodies,
     Func<LanMessage.WorldMessage, ValueTask> ReceiveWorldMessage,
     Func<LanMessage.EnemyPose, ValueTask> ReceiveEnemyPose,
-    Func<LanMessage.EnemyAttack, ValueTask> ReceiveEnemyAttack,
+    Func<LanMessage.EnemyEvent, ValueTask> ReceiveEnemyEvent,
     Func<LanMessage.DeathMessage, ValueTask> ReceiveDeathMessage);
 
 // One Game Interaction Protocol Session with the local game: from its greeting until the connection is lost.
@@ -178,9 +178,10 @@ public sealed class LocalGameSession(
                 sharedEnemies.HandleReceivedEnemyPose(pose);
                 return ValueTask.CompletedTask;
             },
-            attack =>
+            enemyEvent =>
             {
-                sharedEnemies.HandleReceivedEnemyAttack(attack);
+                if (enemyEvent is LanMessage.EnemyAttack attack) sharedEnemies.HandleReceivedEnemyAttack(attack);
+                if (enemyEvent is LanMessage.EnemyDoorBreak doorBreak) sharedEnemies.HandleReceivedEnemyDoorBreak(doorBreak);
                 return ValueTask.CompletedTask;
             },
             // Not awaited: an episode the Session Host decides is sent to the Joining Player without stalling the read loop.

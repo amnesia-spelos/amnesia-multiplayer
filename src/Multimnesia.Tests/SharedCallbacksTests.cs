@@ -34,6 +34,21 @@ public sealed class SharedCallbacksTests
         Assert.Empty(_game.Lines);
     }
 
+    // Only the Session Host's game simulates Shared Enemies; a Joining Player's own enemy disabling itself stays local.
+    [Fact]
+    public async Task Only_the_Session_Host_sends_an_enemy_disabling_itself()
+    {
+        var disabled = new LanMessage.AutoDisabled(Cellar, 139);
+        _sessions.IsJoined = true;
+        var sharedCallbacks = CreateSharedCallbacks();
+        await sharedCallbacks.HandleLocalGameEventAsync(new GameEvent.WorldChanged(disabled));
+        Assert.Empty(_sessions.SentWorldMessages);
+
+        _sessions.IsJoined = false;
+        await sharedCallbacks.HandleLocalGameEventAsync(new GameEvent.WorldChanged(disabled));
+        Assert.Equal([disabled], _sessions.SentWorldMessages);
+    }
+
     [Fact]
     public async Task A_change_received_for_the_local_games_map_is_applied_with_one_Command()
     {
@@ -374,7 +389,7 @@ public sealed class SharedCallbacksTests
         public Task SendHoldMessageAsync(LanMessage.HoldMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
         public void SendBodies(LanMessage.Bodies bodies) { }
         public void SendEnemyPose(LanMessage.EnemyPose pose) { }
-        public Task SendEnemyAttackAsync(LanMessage.EnemyAttack attack, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task SendEnemyEventAsync(LanMessage.EnemyEvent message, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task SendDeathMessageAsync(LanMessage.DeathMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
         public void SendPose(LanMessage.Pose pose) { }
         public Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken) => throw new NotSupportedException();

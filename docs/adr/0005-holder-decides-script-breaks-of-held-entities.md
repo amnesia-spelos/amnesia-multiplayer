@@ -4,6 +4,8 @@
 
 Accepted. Amends ADR 0004: "Breaking is the Holder's decision" now covers breaks a map script causes, and the consequence that each machine's map script reproduces the effects of a Held entity's motion "once per machine" is qualified below.
 
+Amended by #77 for Shared Enemies (ADR 0009): a door a Shared Enemy breaks breaks in every game, whoever Holds it. The Session Host's game simulates the enemy, so its attack breaks the door there even while the Joining Player Holds it, and `enemydoorbreak` breaks every other game's copy, Peer-Driven or not. The break ends the Hold in every game. The Holder's later `broke` then finds the door already broken, and its `entitybreak` answers `not-found`, which is expected.
+
 ## Context
 
 Issue #44 reported a prop that a script broke in one player's game while the other player's copy stayed whole. The case was `CollideJarLeaveArea` in `maps/main/ch01/03_archives.hps`: carrying `vase02_ghost_1` out of `AreaJar` runs `SetPropHealth` to 0, plays a sound, and gives 10 sanity damage. The vase breaks in the Holder's hands, which the game reports as `interactionend ... destroyed`, with no `reportbroke` and no final state (issue #42).
@@ -25,7 +27,7 @@ Alternatives considered:
 
 ## Decision
 
-- **Only the Holder's game breaks a Held entity, whatever causes the break.** The game refuses script changes to the health of a Peer-Driven Entity (`SetPropHealth`, `AddPropHealth`, `BreakEntity`, and the like), as it already refuses breaks from its contacts. The other game's copy breaks only by `entitybreak`.
+- **Only the Holder's game breaks a Held entity, whatever causes the break.** The game refuses script changes to the health of a Peer-Driven Entity (`SetPropHealth`, `AddPropHealth`, `BreakEntity`, and the like), as it already refuses breaks from its contacts. The other game's copy breaks only by `entitybreak`, or, for a door a Shared Enemy breaks, by `enemydoorbreak` (amended by #77).
 - **A break while held carries its exact final state.** The game sends `reportbroke` with the break body's final state right after `interactionend ... destroyed`, so `Holds` relays every break of a Held entity on the same path.
 - **Other script changes to a Peer-Driven Entity are not refused yet.** A change to its motion is overwritten by the next streamed sample. Whether a script may deactivate it, or move it outright, belongs to #43, which decides whose script is authoritative.
 - **Until #43, each game still runs its own callbacks**, including ones its Peer-Driven Entities trigger. With the refusal above, a break no longer depends on sample timing; the callback's other effects still may.

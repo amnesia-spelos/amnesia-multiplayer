@@ -103,6 +103,9 @@ public static class GameInteractionProtocol
                 "enemyattack" => TryParseEnemyAttack(line) is { } attack
                     ? new GameEvent.EnemyAttackReported(attack)
                     : new GameEvent.Unknown(line),
+                "enemydoorbreak" => TryParseEnemyDoorBreak(line) is { } doorBreak
+                    ? new GameEvent.EnemyDoorBroke(doorBreak)
+                    : new GameEvent.Unknown(line),
                 "sharedcallback" or "buttonstate" or "lampstate" => TryParseWorldMessage(line) is { } change
                     ? new GameEvent.WorldChanged(change)
                     : new GameEvent.Unknown(line),
@@ -161,6 +164,15 @@ public static class GameInteractionProtocol
         return LanProtocol.IsValid(attack) ? attack : null;
     }
 
+    // EVENT enemydoorbreak <doorId> <map>
+    private static LanMessage.EnemyDoorBreak? TryParseEnemyDoorBreak(string line)
+    {
+        if (!ProtocolVersion2Line.TrySplit(line, fixedFieldCount: 3, hasPath: true, out var fields) ||
+            !ProtocolVersion2Line.TryParseIdentifier(fields[2], out var doorId)) return null;
+        var doorBreak = new LanMessage.EnemyDoorBreak(fields[3], doorId);
+        return LanProtocol.IsValid(doorBreak) ? doorBreak : null;
+    }
+
     private static EnemyAttackKind? ParseEnemyAttackKind(string token) => token switch
     {
         "normal" => EnemyAttackKind.Normal,
@@ -197,7 +209,8 @@ public static class GameInteractionProtocol
     // EVENT sharedcallback playercollide <entityId> <state> <map>, EVENT sharedcallback entitycollide <parentId> <entityId>
     // <state> <map>, EVENT sharedcallback interact <entityId> <map>, EVENT sharedcallback useitem <entityId> <item> <map>,
     // EVENT sharedcallback pickup|flashback <entityId> <map>, EVENT sharedcallback combine <item> <otherItem> <map>,
-    // EVENT sharedcallback stickyattach <areaId> <entityId> <bodyId> <map>, EVENT buttonstate|lampstate <entityId> <0|1> <map>
+    // EVENT sharedcallback stickyattach <areaId> <entityId> <bodyId> <map>, EVENT sharedcallback autodisabled <entityId> <map>,
+    // EVENT buttonstate|lampstate <entityId> <0|1> <map>
     private static LanMessage.WorldMessage? TryParseWorldMessage(string line)
     {
         var parts = line.Split(' ', 4);
@@ -206,7 +219,7 @@ public static class GameInteractionProtocol
         {
             ("sharedcallback", "playercollide" or "useitem" or "combine") => 5,
             ("sharedcallback", "entitycollide" or "stickyattach") => 6,
-            ("sharedcallback", "interact" or "pickup" or "flashback") => 4,
+            ("sharedcallback", "interact" or "pickup" or "flashback" or "autodisabled") => 4,
             ("buttonstate" or "lampstate", _) => 4,
             _ => 0
         };
@@ -236,6 +249,8 @@ public static class GameInteractionProtocol
             case ("sharedcallback", "stickyattach") when ProtocolVersion2Line.TryParseIdentifier(fields[4], out var attachedId) &&
                 ProtocolVersion2Line.TryParseIdentifier(fields[5], out var bodyId):
                 return new LanMessage.StickyAttach(map, entityId, attachedId, bodyId);
+            case ("sharedcallback", "autodisabled"):
+                return new LanMessage.AutoDisabled(map, entityId);
             case ("buttonstate", _) when fields[3] is "0" or "1":
                 return new LanMessage.ButtonState(map, entityId, fields[3] == "1");
             case ("lampstate", _) when fields[3] is "0" or "1":
@@ -411,6 +426,9 @@ public static class GameInteractionProtocol
         "shareddeath", episode.ToString(CultureInfo.InvariantCulture), death.Death.ToString(CultureInfo.InvariantCulture),
         death.Count.ToString(CultureInfo.InvariantCulture), death.CheckPoint, death.Map);
 
+    public static string EnemyDoorBreak(LanMessage.EnemyDoorBreak doorBreak) =>
+        $"enemydoorbreak {ProtocolVersion2Line.FormatIdentifier(doorBreak.DoorId)} {doorBreak.Map}";
+
     public static string EnemyDrive(int id, string map) => $"enemydrive {ProtocolVersion2Line.FormatIdentifier(id)} {map}";
     public static string EnemyRelease(int id, string map) => $"enemyrelease {ProtocolVersion2Line.FormatIdentifier(id)} {map}";
 
@@ -467,6 +485,8 @@ public static class GameInteractionProtocol
             $"sharedcallback combine {combine.ItemA} {combine.ItemB} {combine.Map}",
         LanMessage.StickyAttach sticky => $"sharedcallback stickyattach {ProtocolVersion2Line.FormatIdentifier(sticky.AreaId)} " +
             $"{ProtocolVersion2Line.FormatIdentifier(sticky.EntityId)} {ProtocolVersion2Line.FormatIdentifier(sticky.BodyId)} {sticky.Map}",
+        LanMessage.AutoDisabled disabled =>
+            $"sharedcallback autodisabled {ProtocolVersion2Line.FormatIdentifier(disabled.EntityId)} {disabled.Map}",
         LanMessage.ButtonState button =>
             $"buttonstate {ProtocolVersion2Line.FormatIdentifier(button.EntityId)} {(button.SwitchedOn ? "1" : "0")} {button.Map}",
         LanMessage.LampState lamp => $"lampstate {ProtocolVersion2Line.FormatIdentifier(lamp.EntityId)} {(lamp.Lit ? "1" : "0")} {lamp.Map}",
@@ -495,6 +515,7 @@ public abstract record GameEvent
     public sealed record ChatEntryResponded(ChatEntryOutcome Outcome) : GameEvent;
     public sealed record EnemyPoseReported(LanMessage.EnemyPose Pose) : GameEvent;
     public sealed record EnemyAttackReported(LanMessage.EnemyAttack Attack) : GameEvent;
+    public sealed record EnemyDoorBroke(LanMessage.EnemyDoorBreak DoorBreak) : GameEvent;
     // The `enemies` Events about the current map's checkpoint registration, and the local player's own deaths on it.
     public sealed record CheckPointReported(CheckPoint CheckPoint) : GameEvent;
     public sealed record PlayerDied(int Death, CheckPoint CheckPoint) : GameEvent;

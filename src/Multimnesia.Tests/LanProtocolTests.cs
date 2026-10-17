@@ -167,9 +167,9 @@ public sealed class LanProtocolTests
     }
 
     [Fact]
-    public void Protocol_version_is_12_for_Shared_Deaths()
+    public void Protocol_version_is_13_for_enemy_door_breaks_and_auto_disables()
     {
-        Assert.Equal(12, LanProtocol.CurrentVersion);
+        Assert.Equal(13, LanProtocol.CurrentVersion);
     }
 
     private static MemoryStream Frame(string json)
@@ -627,6 +627,10 @@ public sealed class LanProtocolTests
             new LanMessage.StickyAttach("maps/a.map", 21, 30, -7),
             "{\"type\":\"shared-callback\",\"map\":\"maps/a.map\",\"kind\":\"sticky-attach\",\"areaId\":21,\"entityId\":30,\"bodyId\":-7}"
         },
+        {
+            new LanMessage.AutoDisabled("maps/a.map", 139),
+            "{\"type\":\"shared-callback\",\"map\":\"maps/a.map\",\"kind\":\"auto-disabled\",\"entityId\":139}"
+        },
         { new LanMessage.ButtonState("maps/a.map", 12, SwitchedOn: true), "{\"type\":\"button-state\",\"map\":\"maps/a.map\",\"entityId\":12,\"switchedOn\":true}" },
         { new LanMessage.LampState("maps/a.map", 13, Lit: false), "{\"type\":\"lamp-state\",\"map\":\"maps/a.map\",\"entityId\":13,\"lit\":false}" },
     };
@@ -722,6 +726,8 @@ public sealed class LanProtocolTests
         SharedCallbackOn + "\"kind\":\"sticky-attach\",\"areaId\":21,\"entityId\":30}",
         SharedCallbackOn + "\"kind\":\"sticky-attach\",\"areaId\":\"21\",\"entityId\":30,\"bodyId\":7}",
         SharedCallbackOn + "\"kind\":\"sticky-attach\",\"areaId\":21,\"entityId\":30,\"bodyId\":2147483648}",
+        SharedCallbackOn + "\"kind\":\"auto-disabled\"}",
+        SharedCallbackOn + "\"kind\":\"auto-disabled\",\"entityId\":\"139\"}",
         "{\"type\":\"button-state\",\"map\":\"maps/a.map\",\"entityId\":12}",
         "{\"type\":\"button-state\",\"map\":\"maps/a.map\",\"entityId\":12,\"switchedOn\":1}",
         "{\"type\":\"button-state\",\"map\":\"maps/a.map\",\"switchedOn\":true}",

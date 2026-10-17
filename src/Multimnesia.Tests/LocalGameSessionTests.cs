@@ -620,12 +620,12 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         await game.SendAsync("EVENT enemyattack 139 normal 1.2 1.5 1 0 0.75 0.9 maps/a.map");
         await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 maps/a.map");
         await WaitUntilAsync(() => _sessions.SentPoses.Count == 1);
-        Assert.Empty(_sessions.SentEnemyAttacks);
+        Assert.Empty(_sessions.SentEnemyEvents);
         await _callbacks.ReceivePose(new(2, 0, 0, 0, 0, 0, 0, false, false, "maps/a.map"));
         await game.SendAsync("EVENT enemyattack 139 normal 1.2 1.5 1 0 0.75 0.9 maps/a.map");
         await game.SendAsync("STATE localpose 2 0 0 0 0 0 0 0 0 maps/a.map");
         await WaitUntilAsync(() => _sessions.SentPoses.Count == 2);
-        Assert.Equal(EnemyAttacksProtocolTests.Sample, Assert.Single(_sessions.SentEnemyAttacks));
+        Assert.Equal(EnemyAttacksProtocolTests.Sample, Assert.Single(_sessions.SentEnemyEvents));
     }
 
     [Fact]
@@ -643,12 +643,47 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample);
         Assert.Equal("enemydrive 139 maps/a.map", await game.ReadLineAsync());
         Assert.StartsWith("enemypose 139 ", await game.ReadLineAsync());
-        await _callbacks.ReceiveEnemyAttack(EnemyAttacksProtocolTests.Sample with { Map = "maps/elsewhere.map" });
+        await _callbacks.ReceiveEnemyEvent(EnemyAttacksProtocolTests.Sample with { Map = "maps/elsewhere.map" });
         Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
-        await _callbacks.ReceiveEnemyAttack(EnemyAttacksProtocolTests.Sample);
+        await _callbacks.ReceiveEnemyEvent(EnemyAttacksProtocolTests.Sample);
         Assert.Equal("enemyattack 139 normal 1.2000 1.5000 1.0000 0.0000 0.7500 0.9000 maps/a.map", await game.ReadLineAsync());
         Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
-        Assert.Empty(_sessions.SentEnemyAttacks);
+        Assert.Empty(_sessions.SentEnemyEvents);
+    }
+
+    [Fact]
+    public async Task Each_enemy_door_break_is_sent_by_the_Session_Host_while_players_share_a_map()
+    {
+        _sessions.Joined = false;
+        var (game, _, _) = await ConnectAsync();
+        await using var _ = game;
+        await game.ReadLineAsync();
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks playerplace enemies");
+        _sessions.SetPresent(true);
+        for (var i = 0; i < 4; i++) await game.ReadLineAsync();
+        await game.SendAsync("EVENT mapentered maps/a.map");
+        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, false, "maps/elsewhere.map"));
+        await game.SendAsync("EVENT enemydoorbreak 141 maps/a.map");
+        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 maps/a.map");
+        await WaitUntilAsync(() => _sessions.SentPoses.Count == 1);
+        Assert.Empty(_sessions.SentEnemyEvents);
+        await _callbacks.ReceivePose(new(2, 0, 0, 0, 0, 0, 0, false, false, "maps/a.map"));
+        await game.SendAsync("EVENT enemydoorbreak 141 maps/a.map");
+        await game.SendAsync("STATE localpose 2 0 0 0 0 0 0 0 0 maps/a.map");
+        await WaitUntilAsync(() => _sessions.SentPoses.Count == 2);
+        Assert.Equal(EnemyDoorBreaksProtocolTests.Sample, Assert.Single(_sessions.SentEnemyEvents));
+    }
+
+    [Fact]
+    public async Task A_received_enemy_door_break_breaks_the_door_only_on_the_current_map()
+    {
+        await using var game = await JoiningPlayerDrivingAGruntAsync();
+        await _callbacks.ReceiveEnemyEvent(EnemyDoorBreaksProtocolTests.Sample with { Map = "maps/elsewhere.map" });
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+        await _callbacks.ReceiveEnemyEvent(EnemyDoorBreaksProtocolTests.Sample);
+        Assert.Equal("enemydoorbreak 141 maps/a.map", await game.ReadLineAsync());
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+        Assert.Empty(_sessions.SentEnemyEvents);
     }
 
     [Fact]
@@ -664,12 +699,12 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 maps/a.map");
         await WaitUntilAsync(() => _sessions.SentPoses.Count == 1);
         await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample);
-        await _callbacks.ReceiveEnemyAttack(EnemyAttacksProtocolTests.Sample);
+        await _callbacks.ReceiveEnemyEvent(EnemyAttacksProtocolTests.Sample);
         Assert.Equal("enemydrive 139 maps/a.map", await game.ReadLineAsync());
         Assert.StartsWith("enemypose 139 1000 ", await game.ReadLineAsync());
         Assert.StartsWith("enemyattack 139 ", await game.ReadLineAsync());
         await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample with { TimeMs = 2000 });
-        await _callbacks.ReceiveEnemyAttack(EnemyAttacksProtocolTests.Sample);
+        await _callbacks.ReceiveEnemyEvent(EnemyAttacksProtocolTests.Sample);
         Assert.StartsWith("enemypose 139 2000 ", await game.ReadLineAsync());
         Assert.StartsWith("enemyattack 139 ", await game.ReadLineAsync());
     }
@@ -787,10 +822,31 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         await game.SendAsync("EVENT enemyattack 139 normal 1.2 1.5 1 0 0.75 0.9 maps/a.map");
         await SyncAsync(game);
         Assert.Empty(_sessions.SentEnemyPoses);
-        Assert.Empty(_sessions.SentEnemyAttacks);
+        Assert.Empty(_sessions.SentEnemyEvents);
         await game.SendAsync("EVENT checkpoint 1 1 cp_test maps/a.map");
         await game.SendAsync("STATE enemypose 139 1000 0 -2 0 28.25 90 Walk 0.2 1 maps/a.map");
         await WaitUntilAsync(() => _sessions.SentEnemyPoses.Count == 1);
+    }
+
+    [Fact]
+    public async Task A_door_an_enemy_breaks_during_an_episode_is_broken_in_every_game()
+    {
+        await using var game = await HostSharingAMapAsync();
+        await game.SendAsync("EVENT playerdeath 1 0 1 cp_test maps/a.map");
+        Assert.StartsWith("shareddeath 1 1 ", await game.ReadLineAsync());
+        await game.SendAsync("EVENT enemydoorbreak 141 maps/a.map");
+        await WaitUntilAsync(() => _sessions.SentEnemyEvents.Count == 1);
+        Assert.Equal(EnemyDoorBreaksProtocolTests.Sample, Assert.Single(_sessions.SentEnemyEvents));
+    }
+
+    [Fact]
+    public async Task A_Joining_Player_applies_a_received_door_break_during_an_episode()
+    {
+        await using var game = await JoiningPlayerDrivingAGruntAsync();
+        await _callbacks.ReceiveDeathMessage(SharedDeathsProtocolTests.Episode with { Death = 0 });
+        Assert.StartsWith("shareddeath 1 0 ", await game.ReadLineAsync());
+        await _callbacks.ReceiveEnemyEvent(EnemyDoorBreaksProtocolTests.Sample);
+        Assert.Equal("enemydoorbreak 141 maps/a.map", await game.ReadLineAsync());
     }
 
     [Fact]
@@ -868,7 +924,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         Assert.Equal("shareddeath 1 0 2 cp_test maps/a.map", await game.ReadLineAsync());
         // Samples the Session Host sent before its own reset would drive a copy this game's checkpoint is about to reset.
         await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample with { TimeMs = 2000 });
-        await _callbacks.ReceiveEnemyAttack(EnemyAttacksProtocolTests.Sample);
+        await _callbacks.ReceiveEnemyEvent(EnemyAttacksProtocolTests.Sample);
         Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
         // The checkpoint deactivated the copy; releasing it keeps it inactive until the next sample drives it again.
         await game.SendAsync("EVENT checkpoint 3 1 cp_test maps/a.map");
@@ -1101,12 +1157,12 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         private readonly List<LanMessage.EnemyPose> _sentEnemyPoses = [];
         public List<LanMessage.EnemyPose> SentEnemyPoses { get { lock (_sentEnemyPoses) return [.. _sentEnemyPoses]; } }
         public void SendEnemyPose(LanMessage.EnemyPose pose) { lock (_sentEnemyPoses) _sentEnemyPoses.Add(pose); }
-        private readonly List<LanMessage.EnemyAttack> _sentEnemyAttacks = [];
-        public List<LanMessage.EnemyAttack> SentEnemyAttacks { get { lock (_sentEnemyAttacks) return [.. _sentEnemyAttacks]; } }
+        private readonly List<LanMessage.EnemyEvent> _sentEnemyEvents = [];
+        public List<LanMessage.EnemyEvent> SentEnemyEvents { get { lock (_sentEnemyEvents) return [.. _sentEnemyEvents]; } }
 
-        public Task SendEnemyAttackAsync(LanMessage.EnemyAttack attack, CancellationToken cancellationToken)
+        public Task SendEnemyEventAsync(LanMessage.EnemyEvent message, CancellationToken cancellationToken)
         {
-            lock (_sentEnemyAttacks) _sentEnemyAttacks.Add(attack);
+            lock (_sentEnemyEvents) _sentEnemyEvents.Add(message);
             return Task.CompletedTask;
         }
         private readonly List<LanMessage.DeathMessage> _sentDeathMessages = [];
