@@ -5,7 +5,7 @@
             <Viewport CameraPosition="0 0 0" CameraTarget="0 0 0" CameraZoom="5.5" GridHeight="0" GridPlane="0" Preset="0" RenderMode="1" ShowAxes="false" ShowGrid="false" UsingLTCam="false" />
             <Viewport CameraPosition="180 0 0" CameraTarget="0 0 0" CameraZoom="0" GridHeight="0" GridPlane="0" Preset="1" RenderMode="1" ShowAxes="true" ShowGrid="true" UsingLTCam="true" />
             <Viewport CameraPosition="0.404947 180 0.0614555" CameraTarget="0.404947 0 0.0614555" CameraZoom="0" GridHeight="0" GridPlane="1" Preset="2" RenderMode="1" ShowAxes="true" ShowGrid="true" UsingLTCam="true" />
-            <Viewport CameraPosition="2.09972 2.14602 4.24538" CameraTarget="4.2587 1.74176 3.7464" CameraZoom="3.1" GridHeight="0" GridPlane="1" Preset="3" RenderMode="0" ShowAxes="true" ShowGrid="true" UsingLTCam="false" />
+            <Viewport CameraPosition="-10.9856 13.0356 19.5931" CameraTarget="-2.81957 -1.23679 17.0195" CameraZoom="1.1" GridHeight="0" GridPlane="1" Preset="3" RenderMode="0" ShowAxes="true" ShowGrid="true" UsingLTCam="false" />
         </ViewportConfig>
         <Groups>
             <Group ID="0" Name="None" Visible="false" />
@@ -13,7 +13,7 @@
     </EditorSession>
     <MapData FogActive="false" FogColor="1 1 1 1" FogCulling="true" FogEnd="20" FogFalloffExp="1" FogStart="0" GlobalDecalMaxTris="300" Name="" SkyBoxActive="false" SkyBoxColor="1 1 1 1" SkyBoxTexture="../../../../../../">
         <MapContents>
-            <FileIndex_StaticObjects NumOfFiles="9">
+            <FileIndex_StaticObjects NumOfFiles="13">
                 <File Id="0" Path="static_objects/dungeonbase/wall/default.dae" />
                 <File Id="1" Path="static_objects/dungeonbase/wall/corner_concave_round_short_extension.dae" />
                 <File Id="2" Path="static_objects/dungeonbase/wall/door_way.dae" />
@@ -23,8 +23,12 @@
                 <File Id="6" Path="static_objects/dungeonbase/wall/corner_concave_round_short.dae" />
                 <File Id="7" Path="static_objects/dungeonbase/wall/welder_wood_top.dae" />
                 <File Id="8" Path="static_objects/dungeonbase/wall/welder_stone.dae" />
+                <File Id="9" Path="static_objects/mansionbase/wall/door_way02.dae" />
+                <File Id="10" Path="static_objects/mansionbase/wall/default02.dae" />
+                <File Id="11" Path="static_objects/mansionbase/wall/door_frame.dae" />
+                <File Id="12" Path="static_objects/mansionbase/wall/welder02_convex.dae" />
             </FileIndex_StaticObjects>
-            <FileIndex_Entities NumOfFiles="17">
+            <FileIndex_Entities NumOfFiles="23">
                 <File Id="0" Path="entities/item/lantern/lantern.ent" />
                 <File Id="1" Path="entities/door/level_cellar/level_celler.ent" />
                 <File Id="2" Path="entities/lamp/candlestick_tri/candlestick_tri.ent" />
@@ -42,6 +46,12 @@
                 <File Id="14" Path="entities/special/key_jar/key_jar.ent" />
                 <File Id="15" Path="entities/gameplay/elevator_lever/elevator_lever.ent" />
                 <File Id="16" Path="entities/special/water_wheel_cog_panel/water_wheel_cog_panel.ent" />
+                <File Id="17" Path="entities/item/tinderbox/tinderbox.ent" />
+                <File Id="18" Path="custom_stories/mp-test-cs/entities/test_button.ent" />
+                <File Id="19" Path="entities/door/mansion/mansion.ent" />
+                <File Id="20" Path="entities/furniture/cabinet_nice/cabinet_nice.ent" />
+                <File Id="21" Path="entities/furniture/cabinet_simple/cabinet_simple.ent" />
+                <File Id="22" Path="entities/enemy/servant_grunt/servant_grunt.ent" />
             </FileIndex_Entities>
             <FileIndex_Decals NumOfFiles="0" />
             <StaticObjects>
@@ -82,10 +92,47 @@
                 <StaticObject CastShadows="true" Collides="true" FileIndex="8" Group="0" ID="60" Name="wall_welder_stone_5" Rotation="3.14159 -2.38498e-08 3.14159" Scale="1 1 1" Tag="" WorldPos="0 0 3.5" />
                 <StaticObject CastShadows="true" Collides="true" FileIndex="8" Group="0" ID="61" Name="wall_welder_stone_6" Rotation="3.14159 -2.38498e-08 3.14159" Scale="1 1.5 1" Tag="" WorldPos="0 4 3.5" />
                 <StaticObject CastShadows="true" Collides="true" FileIndex="8" Group="0" ID="86" Name="wall_welder_stone_7" Rotation="3.14159 -2.38498e-08 3.14159" Scale="1 1 1" Tag="" WorldPos="1.58748 0 -0.5" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="9" Group="0" ID="98" Name="wall_door_way02_1" Rotation="0 0 0" Scale="1 1 1" Tag="" WorldPos="2 0 6" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="99" Name="wall_default02_1" Rotation="0 0 0" Scale="1 1 1" Tag="" WorldPos="-2 0 6" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="100" Name="wall_default02_2" Rotation="3.14159 -1.5708 3.14159" Scale="1 1 1" Tag="" WorldPos="4 0 8" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="101" Name="wall_default02_3" Rotation="3.14159 -1.5708 3.14159" Scale="1 1 1" Tag="" WorldPos="4 0 12" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="102" Name="wall_default02_4" Rotation="3.14159 1.5708 3.14159" Scale="1 1 1" Tag="" WorldPos="-4 0 8" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="103" Name="wall_default02_5" Rotation="3.14159 1.5708 3.14159" Scale="1 1 1" Tag="" WorldPos="-4 0 12" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="104" Name="wall_default02_6" Rotation="3.14159 8.74228e-08 3.14159" Scale="1 1 1" Tag="" WorldPos="2 0 14" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="9" Group="0" ID="105" Name="wall_door_way02_2" Rotation="3.14159 8.74228e-08 3.14159" Scale="1 1 1" Tag="" WorldPos="-2 0 14" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="11" Group="0" ID="106" Name="wall_door_frame_1" Rotation="3.14159 8.74228e-08 3.14159" Scale="1 1 1" Tag="" WorldPos="-2 0 14" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="9" Group="0" ID="107" Name="wall_door_way02_3" Rotation="0 -4.52995e-06 0" Scale="1 1 1" Tag="" WorldPos="-2 0 14" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="108" Name="wall_default02_7" Rotation="3.14159 -1.5708 3.14159" Scale="1 1 1" Tag="" WorldPos="0 0 16" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="109" Name="wall_default02_8" Rotation="0 1.5708 0" Scale="1 1 1" Tag="" WorldPos="-4 0 16" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="110" Name="wall_default02_9" Rotation="0 -1.74846e-07 0" Scale="1 1 1" Tag="" WorldPos="2 0 18" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="12" Group="0" ID="112" Name="wall_welder02_convex_1" Rotation="3.14159 -1.5708 3.14159" Scale="1 1 1" Tag="" WorldPos="0 0 18" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="113" Name="wall_default02_10" Rotation="0 1.5708 0" Scale="1 1 1" Tag="" WorldPos="-4 0 20" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="114" Name="wall_default02_11" Rotation="0 1.5708 0" Scale="1 1 1" Tag="" WorldPos="-4 0 24" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="115" Name="wall_default02_12" Rotation="0 -1.74846e-07 0" Scale="1 1 1" Tag="" WorldPos="6 0 18" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="116" Name="wall_default02_13" Rotation="3.14159 -1.5708 3.14159" Scale="1 1 1" Tag="" WorldPos="8 0 20" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="117" Name="wall_default02_14" Rotation="3.14159 -1.5708 3.14159" Scale="1 1 1" Tag="" WorldPos="8 0 24" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="118" Name="wall_default02_15" Rotation="3.14159 -1.5708 3.14159" Scale="1 1 1" Tag="" WorldPos="8 0 28" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="119" Name="wall_default02_16" Rotation="3.14159 2.38498e-08 3.14159" Scale="1 1 1" Tag="" WorldPos="6 0 30" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="120" Name="wall_default02_17" Rotation="3.14159 2.38498e-08 3.14159" Scale="1 1 1" Tag="" WorldPos="2 0 30" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="121" Name="wall_default02_18" Rotation="3.14159 2.38498e-08 3.14159" Scale="1 1 1" Tag="" WorldPos="-2 0 30" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="122" Name="wall_default02_19" Rotation="0 1.5708 0" Scale="1 1 1" Tag="" WorldPos="-4 0 28" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="123" Name="wall_default02_20" Rotation="0 -3.49691e-07 0" Scale="1 1 1" Tag="" WorldPos="2 0 26" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="124" Name="wall_default02_21" Rotation="3.14159 -1.5708 3.14159" Scale="1 1 1" Tag="" WorldPos="0 0 24" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="125" Name="wall_default02_22" Rotation="3.14159 6.75532e-07 3.14159" Scale="1 1 1" Tag="" WorldPos="2 0 22" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="10" Group="0" ID="126" Name="wall_default02_23" Rotation="0 1.5708 0" Scale="1 1 1" Tag="" WorldPos="4 0 24" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="12" Group="0" ID="127" Name="wall_welder02_convex_2" Rotation="3.14159 1.32722e-06 3.14159" Scale="1 1 1" Tag="" WorldPos="0 0 22" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="12" Group="0" ID="128" Name="wall_welder02_convex_3" Rotation="3.14159 -1.5708 3.14159" Scale="1 1 1" Tag="" WorldPos="0 0 26" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="12" Group="0" ID="129" Name="wall_welder02_convex_4" Rotation="0 -4.76995e-08 0" Scale="1 1 1" Tag="" WorldPos="4 0 26" />
+                <StaticObject CastShadows="true" Collides="true" FileIndex="12" Group="0" ID="130" Name="wall_welder02_convex_5" Rotation="0 1.5708 0" Scale="1 1 1" Tag="" WorldPos="4 0 22" />
             </StaticObjects>
             <Primitives>
                 <Plane Active="true" AlignToWorldCoords="false" CastShadows="false" Collides="true" Corner1UV="1.00292 3.74296" Corner2UV="0 0" Corner3UV="3.74296 -1.00292" Corner4UV="4.74589 2.74004" EndCorner="7.75 0 7.75" Group="0" ID="2" Material="static_objects/cellarbase/floor/cellarbase_floor_rough.mat" Name="Plane" Rotation="0 0 0" Scale="1 1 1" StartCorner="0 0 0" Tag="" TextureAngle="0.261799" TileAmount="0.5 1 0.5" TileOffset="0 0 0" WorldPos="-1.75 0 -2.25" />
                 <Plane Active="true" AlignToWorldCoords="false" CastShadows="false" Collides="true" Corner1UV="1.00292 3.74296" Corner2UV="0 0" Corner3UV="3.74296 -1.00292" Corner4UV="4.74589 2.74004" EndCorner="7.75 0 7.75" Group="0" ID="59" Material="static_objects/technical/plane_black/plane_black.mat" Name="Plane_1" Rotation="0 0 -3.14159" Scale="1 1 1" StartCorner="0 0 0" Tag="" TextureAngle="0.261799" TileAmount="0.5 1 0.5" TileOffset="0 0 0" WorldPos="6 10 -2.25" />
+                <Plane Active="true" AlignToWorldCoords="true" CastShadows="false" Collides="true" Corner1UV="-0.120121 7.27912" Corner2UV="-1.1554 3.41542" Corner3UV="2.70831 2.38014" Corner4UV="3.74358 6.24384" EndCorner="8 0 8" Group="0" ID="131" Material="C:/Program Files (x86)/Steam/steamapps/common/Amnesia The Dark Descent/static_objects/mansionbase/floor/mansionbase_floor_boards.mat" Name="Plane_2" Rotation="0 0 0" Scale="1 1 1" StartCorner="0 0 0" Tag="" TextureAngle="0.261799" TileAmount="0.5 1 0.5" TileOffset="0 0 0" WorldPos="-4 0 6" />
+                <Plane Active="true" AlignToWorldCoords="true" CastShadows="false" Collides="true" Corner1UV="1.95043 15.0065" Corner2UV="-0.120121 7.27912" Corner3UV="1.81173 6.76148" Corner4UV="3.88228 14.4889" EndCorner="4 0 16" Group="0" ID="132" Material="C:/Program Files (x86)/Steam/steamapps/common/Amnesia The Dark Descent/static_objects/mansionbase/floor/mansionbase_floor_boards.mat" Name="Plane_3" Rotation="0 0 0" Scale="1 1 1" StartCorner="0 0 0" Tag="" TextureAngle="0.261799" TileAmount="0.5 1 0.5" TileOffset="0 0 0" WorldPos="-4 0 14" />
+                <Plane Active="true" AlignToWorldCoords="true" CastShadows="false" Collides="true" Corner1UV="2.84701 10.6252" Corner2UV="2.32937 8.69333" Corner3UV="6.19307 7.65806" Corner4UV="6.71071 9.58991" EndCorner="8 0 4" Group="0" ID="133" Material="C:/Program Files (x86)/Steam/steamapps/common/Amnesia The Dark Descent/static_objects/mansionbase/floor/mansionbase_floor_boards.mat" Name="Plane_4" Rotation="0 0 0" Scale="1 1 1" StartCorner="0 0 0" Tag="" TextureAngle="0.261799" TileAmount="0.5 1 0.5" TileOffset="0 0 0" WorldPos="0 0 18" />
+                <Plane Active="true" AlignToWorldCoords="true" CastShadows="false" Collides="true" Corner1UV="3.88228 14.4889" Corner2UV="3.36464 12.557" Corner3UV="7.22835 11.5218" Corner4UV="7.74598 13.4536" EndCorner="8 0 4" Group="0" ID="134" Material="C:/Program Files (x86)/Steam/steamapps/common/Amnesia The Dark Descent/static_objects/mansionbase/floor/mansionbase_floor_boards.mat" Name="Plane_5" Rotation="0 0 0" Scale="1 1 1" StartCorner="0 0 0" Tag="" TextureAngle="0.261799" TileAmount="0.5 1 0.5" TileOffset="0 0 0" WorldPos="0 0 26" />
+                <Plane Active="true" AlignToWorldCoords="true" CastShadows="false" Collides="true" Corner1UV="5.29649 12.0394" Corner2UV="4.77886 10.1075" Corner3UV="6.71071 9.58991" Corner4UV="7.22835 11.5218" EndCorner="4 0 4" Group="0" ID="135" Material="C:/Program Files (x86)/Steam/steamapps/common/Amnesia The Dark Descent/static_objects/mansionbase/floor/mansionbase_floor_boards.mat" Name="Plane_6" Rotation="0 0 0" Scale="1 1 1" StartCorner="0 0 0" Tag="" TextureAngle="0.261799" TileAmount="0.5 1 0.5" TileOffset="0 0 0" WorldPos="4 0 22" />
             </Primitives>
             <Decals />
             <Entities>
@@ -525,6 +572,237 @@
                         <Var Name="ChangeStateCallback" Value="" />
                     </UserVariables>
                 </Entity>
+                <Entity Active="true" FileIndex="17" Group="0" ID="91" Name="tinderbox_1" Rotation="0 0 0" Scale="1 1 1" Tag="" WorldPos="5.33311 0 3.65193">
+                    <UserVariables>
+                        <Var Name="CastShadows" Value="true" />
+                        <Var Name="StaticPhysics" Value="false" />
+                        <Var Name="IsAffectedByDecal" Value="false" />
+                        <Var Name="CallbackFunc" Value="" />
+                        <Var Name="ConnectedProps" Value="" />
+                        <Var Name="ConnectionStateChangeCallback" Value="" />
+                        <Var Name="FullGameSave" Value="false" />
+                        <Var Name="PlayerLookAtCallback" Value="" />
+                        <Var Name="PlayerLookAtCallbackAutoRemove" Value="false" />
+                        <Var Name="PlayerInteractCallback" Value="" />
+                        <Var Name="PlayerInteractCallbackAutoRemove" Value="false" />
+                        <Var Name="CustomSubItemTypeName" Value="" />
+                    </UserVariables>
+                </Entity>
+                <Entity Active="true" FileIndex="17" Group="0" ID="92" Name="tinderbox_2" Rotation="0 0 0" Scale="1 1 1" Tag="" WorldPos="5.17576 0 3.92019">
+                    <UserVariables>
+                        <Var Name="CastShadows" Value="true" />
+                        <Var Name="StaticPhysics" Value="false" />
+                        <Var Name="IsAffectedByDecal" Value="false" />
+                        <Var Name="CallbackFunc" Value="" />
+                        <Var Name="ConnectedProps" Value="" />
+                        <Var Name="ConnectionStateChangeCallback" Value="" />
+                        <Var Name="FullGameSave" Value="false" />
+                        <Var Name="PlayerLookAtCallback" Value="" />
+                        <Var Name="PlayerLookAtCallbackAutoRemove" Value="false" />
+                        <Var Name="PlayerInteractCallback" Value="" />
+                        <Var Name="PlayerInteractCallbackAutoRemove" Value="false" />
+                        <Var Name="CustomSubItemTypeName" Value="" />
+                    </UserVariables>
+                </Entity>
+                <Entity Active="true" FileIndex="17" Group="0" ID="93" Name="tinderbox_3" Rotation="0 0 0" Scale="1 1 1" Tag="" WorldPos="4.94855 0 3.82167">
+                    <UserVariables>
+                        <Var Name="CastShadows" Value="true" />
+                        <Var Name="StaticPhysics" Value="false" />
+                        <Var Name="IsAffectedByDecal" Value="false" />
+                        <Var Name="CallbackFunc" Value="" />
+                        <Var Name="ConnectedProps" Value="" />
+                        <Var Name="ConnectionStateChangeCallback" Value="" />
+                        <Var Name="FullGameSave" Value="false" />
+                        <Var Name="PlayerLookAtCallback" Value="" />
+                        <Var Name="PlayerLookAtCallbackAutoRemove" Value="false" />
+                        <Var Name="PlayerInteractCallback" Value="" />
+                        <Var Name="PlayerInteractCallbackAutoRemove" Value="false" />
+                        <Var Name="CustomSubItemTypeName" Value="" />
+                    </UserVariables>
+                </Entity>
+                <Entity Active="true" FileIndex="17" Group="0" ID="94" Name="tinderbox_4" Rotation="0 0 0" Scale="1 1 1" Tag="" WorldPos="4.95521 0 3.64924">
+                    <UserVariables>
+                        <Var Name="CastShadows" Value="true" />
+                        <Var Name="StaticPhysics" Value="false" />
+                        <Var Name="IsAffectedByDecal" Value="false" />
+                        <Var Name="CallbackFunc" Value="" />
+                        <Var Name="ConnectedProps" Value="" />
+                        <Var Name="ConnectionStateChangeCallback" Value="" />
+                        <Var Name="FullGameSave" Value="false" />
+                        <Var Name="PlayerLookAtCallback" Value="" />
+                        <Var Name="PlayerLookAtCallbackAutoRemove" Value="false" />
+                        <Var Name="PlayerInteractCallback" Value="" />
+                        <Var Name="PlayerInteractCallbackAutoRemove" Value="false" />
+                        <Var Name="CustomSubItemTypeName" Value="" />
+                    </UserVariables>
+                </Entity>
+                <Entity Active="true" FileIndex="17" Group="0" ID="95" Name="tinderbox_5" Rotation="0 0 0" Scale="1 1 1" Tag="" WorldPos="5.07645 0 4.20475">
+                    <UserVariables>
+                        <Var Name="CastShadows" Value="true" />
+                        <Var Name="StaticPhysics" Value="false" />
+                        <Var Name="IsAffectedByDecal" Value="false" />
+                        <Var Name="CallbackFunc" Value="" />
+                        <Var Name="ConnectedProps" Value="" />
+                        <Var Name="ConnectionStateChangeCallback" Value="" />
+                        <Var Name="FullGameSave" Value="false" />
+                        <Var Name="PlayerLookAtCallback" Value="" />
+                        <Var Name="PlayerLookAtCallbackAutoRemove" Value="false" />
+                        <Var Name="PlayerInteractCallback" Value="" />
+                        <Var Name="PlayerInteractCallbackAutoRemove" Value="false" />
+                        <Var Name="CustomSubItemTypeName" Value="" />
+                    </UserVariables>
+                </Entity>
+                <Entity Active="true" FileIndex="17" Group="0" ID="96" Name="tinderbox_6" Rotation="0 0 0" Scale="1 1 1" Tag="" WorldPos="4.51236 0 4.39687">
+                    <UserVariables>
+                        <Var Name="CastShadows" Value="true" />
+                        <Var Name="StaticPhysics" Value="false" />
+                        <Var Name="IsAffectedByDecal" Value="false" />
+                        <Var Name="CallbackFunc" Value="" />
+                        <Var Name="ConnectedProps" Value="" />
+                        <Var Name="ConnectionStateChangeCallback" Value="" />
+                        <Var Name="FullGameSave" Value="false" />
+                        <Var Name="PlayerLookAtCallback" Value="" />
+                        <Var Name="PlayerLookAtCallbackAutoRemove" Value="false" />
+                        <Var Name="PlayerInteractCallback" Value="" />
+                        <Var Name="PlayerInteractCallbackAutoRemove" Value="false" />
+                        <Var Name="CustomSubItemTypeName" Value="" />
+                    </UserVariables>
+                </Entity>
+                <Entity Active="true" FileIndex="18" Group="0" ID="97" Name="test_button" Rotation="0 1.5708 0" Scale="1 1 1" Tag="" WorldPos="0.25 1 -0.5">
+                    <UserVariables>
+                        <Var Name="CastShadows" Value="true" />
+                        <Var Name="StaticPhysics" Value="false" />
+                        <Var Name="IsAffectedByDecal" Value="false" />
+                        <Var Name="CallbackFunc" Value="" />
+                        <Var Name="ConnectedProps" Value="" />
+                        <Var Name="ConnectionStateChangeCallback" Value="" />
+                        <Var Name="FullGameSave" Value="false" />
+                        <Var Name="PlayerLookAtCallback" Value="" />
+                        <Var Name="PlayerLookAtCallbackAutoRemove" Value="false" />
+                        <Var Name="PlayerInteractCallback" Value="" />
+                        <Var Name="PlayerInteractCallbackAutoRemove" Value="false" />
+                        <Var Name="SwitchedOn" Value="false" />
+                        <Var Name="CanBeSwitchedOn" Value="true" />
+                        <Var Name="CanBeSwitchedOff" Value="true" />
+                    </UserVariables>
+                </Entity>
+                <Entity Active="true" FileIndex="19" Group="0" ID="136" Name="mansion_1" Rotation="0 0 0" Scale="1 1 1" Tag="" WorldPos="-2 0 14">
+                    <UserVariables>
+                        <Var Name="CastShadows" Value="true" />
+                        <Var Name="StaticPhysics" Value="false" />
+                        <Var Name="IsAffectedByDecal" Value="false" />
+                        <Var Name="CallbackFunc" Value="" />
+                        <Var Name="ConnectedProps" Value="" />
+                        <Var Name="ConnectionStateChangeCallback" Value="" />
+                        <Var Name="FullGameSave" Value="false" />
+                        <Var Name="PlayerLookAtCallback" Value="" />
+                        <Var Name="PlayerLookAtCallbackAutoRemove" Value="false" />
+                        <Var Name="PlayerInteractCallback" Value="" />
+                        <Var Name="PlayerInteractCallbackAutoRemove" Value="false" />
+                        <Var Name="Locked" Value="false" />
+                        <Var Name="OpenAmount" Value="0" />
+                        <Var Name="DisableBreakable" Value="false" />
+                    </UserVariables>
+                </Entity>
+                <Entity Active="true" FileIndex="20" Group="0" ID="137" Name="cabinet_nice_1" Rotation="0 4.71239 0" Scale="1 1 1" Tag="" WorldPos="3.25 0 12">
+                    <UserVariables>
+                        <Var Name="CastShadows" Value="true" />
+                        <Var Name="StaticPhysics" Value="false" />
+                        <Var Name="IsAffectedByDecal" Value="false" />
+                        <Var Name="CallbackFunc" Value="" />
+                        <Var Name="ConnectedProps" Value="" />
+                        <Var Name="ConnectionStateChangeCallback" Value="" />
+                        <Var Name="FullGameSave" Value="false" />
+                        <Var Name="PlayerLookAtCallback" Value="" />
+                        <Var Name="PlayerLookAtCallbackAutoRemove" Value="false" />
+                        <Var Name="PlayerInteractCallback" Value="" />
+                        <Var Name="PlayerInteractCallbackAutoRemove" Value="false" />
+                        <Var Name="Locked" Value="false" />
+                        <Var Name="OpenAmount" Value="0" />
+                        <Var Name="DisableBreakable" Value="false" />
+                    </UserVariables>
+                </Entity>
+                <Entity Active="true" FileIndex="21" Group="0" ID="138" Name="cabinet_simple_1" Rotation="0 4.71239 0" Scale="1 1 1" Tag="" WorldPos="3.25 0 9.75">
+                    <UserVariables>
+                        <Var Name="CastShadows" Value="true" />
+                        <Var Name="StaticPhysics" Value="false" />
+                        <Var Name="IsAffectedByDecal" Value="false" />
+                        <Var Name="CallbackFunc" Value="" />
+                        <Var Name="ConnectedProps" Value="" />
+                        <Var Name="ConnectionStateChangeCallback" Value="" />
+                        <Var Name="FullGameSave" Value="false" />
+                        <Var Name="PlayerLookAtCallback" Value="" />
+                        <Var Name="PlayerLookAtCallbackAutoRemove" Value="false" />
+                        <Var Name="PlayerInteractCallback" Value="" />
+                        <Var Name="PlayerInteractCallbackAutoRemove" Value="false" />
+                        <Var Name="Locked" Value="false" />
+                        <Var Name="OpenAmount" Value="0" />
+                        <Var Name="DisableBreakable" Value="false" />
+                    </UserVariables>
+                </Entity>
+                <Entity Active="false" FileIndex="22" Group="0" ID="139" Name="grunt" Rotation="0 3.92699 0" Scale="1 1 1" Tag="" WorldPos="6.25 0 28">
+                    <UserVariables>
+                        <Var Name="CallbackFunc" Value="" />
+                        <Var Name="DisableTriggers" Value="false" />
+                        <Var Name="Hallucination" Value="false" />
+                        <Var Name="HallucinationEndDist" Value="3" />
+                    </UserVariables>
+                </Entity>
+                <Area Active="true" AreaType="PathNode" Group="0" ID="140" Mesh="" Name="PathNodeArea_1" Rotation="0 0 0" Scale="0.5 0.5 0.5" Tag="" WorldPos="6 0 24.25">
+                    <UserVariables />
+                </Area>
+                <Area Active="true" AreaType="PathNode" Group="0" ID="141" Mesh="" Name="PathNodeArea_2" Rotation="0 0 0" Scale="0.5 0.5 0.5" Tag="" WorldPos="5.75 0 20.25">
+                    <UserVariables />
+                </Area>
+                <Area Active="true" AreaType="PathNode" Group="0" ID="142" Mesh="" Name="PathNodeArea_3" Rotation="0 0 0" Scale="0.5 0.5 0.5" Tag="" WorldPos="2 0 20.25">
+                    <UserVariables />
+                </Area>
+                <Area Active="true" AreaType="PathNode" Group="0" ID="143" Mesh="" Name="PathNodeArea_4" Rotation="0 0 0" Scale="0.5 0.5 0.5" Tag="" WorldPos="-2.5 0 19.75">
+                    <UserVariables />
+                </Area>
+                <Area Active="true" AreaType="PathNode" Group="0" ID="144" Mesh="" Name="PathNodeArea_5" Rotation="0 0 0" Scale="0.5 0.5 0.5" Tag="" WorldPos="-2.25 0 24">
+                    <UserVariables />
+                </Area>
+                <Area Active="true" AreaType="PathNode" Group="0" ID="145" Mesh="" Name="PathNodeArea_6" Rotation="0 0 0" Scale="0.5 0.5 0.5" Tag="" WorldPos="-2 0 28.25">
+                    <UserVariables />
+                </Area>
+                <Area Active="true" AreaType="PathNode" Group="0" ID="146" Mesh="" Name="PathNodeArea_7" Rotation="0 0 0" Scale="0.5 0.5 0.5" Tag="" WorldPos="2.25 0 28.25">
+                    <UserVariables />
+                </Area>
+                <Area Active="true" AreaType="PathNode" Group="0" ID="147" Mesh="" Name="PathNodeArea_8" Rotation="0 0 0" Scale="0.5 0.5 0.5" Tag="" WorldPos="6.25 0 28">
+                    <UserVariables />
+                </Area>
+                <Area Active="true" AreaType="PathNode" Group="0" ID="148" Mesh="" Name="PathNodeArea_9" Rotation="0 0 0" Scale="0.5 0.5 0.5" Tag="" WorldPos="-1.75 0 16">
+                    <UserVariables />
+                </Area>
+                <Area Active="true" AreaType="PathNode" Group="0" ID="149" Mesh="" Name="PathNodeArea_10" Rotation="0 0 0" Scale="0.5 0.5 0.5" Tag="" WorldPos="-1.75 0 14.5">
+                    <UserVariables />
+                </Area>
+                <Area Active="true" AreaType="PathNode" Group="0" ID="150" Mesh="" Name="PathNodeArea_11" Rotation="0 0 0" Scale="0.5 0.5 0.5" Tag="" WorldPos="-1.75 0 13.5">
+                    <UserVariables />
+                </Area>
+                <Area Active="true" AreaType="PathNode" Group="0" ID="151" Mesh="" Name="PathNodeArea_12" Rotation="0 0 0" Scale="0.5 0.5 0.5" Tag="" WorldPos="1 0 11.5">
+                    <UserVariables />
+                </Area>
+                <Area Active="true" AreaType="PathNode" Group="0" ID="152" Mesh="" Name="PathNodeArea_13" Rotation="0 0 0" Scale="0.5 0.5 0.5" Tag="" WorldPos="-1.75 0 9.5">
+                    <UserVariables />
+                </Area>
+                <Area Active="true" AreaType="PathNode" Group="0" ID="153" Mesh="" Name="PathNodeArea_14" Rotation="0 0 0" Scale="0.5 0.5 0.5" Tag="" WorldPos="1.75 0 7">
+                    <UserVariables />
+                </Area>
+                <Area Active="true" AreaType="Script" Group="0" ID="154" Mesh="" Name="SpawnGruntArea" Rotation="0 0 0" Scale="4 3.75 1.75" Tag="" WorldPos="-2 1.875 18.875">
+                    <UserVariables>
+                        <Var Name="PlayerLookAtCallback" Value="" />
+                        <Var Name="PlayerLookAtCallbackAutoRemove" Value="true" />
+                        <Var Name="PlayerInteractCallback" Value="" />
+                        <Var Name="PlayerInteractCallbackAutoRemove" Value="false" />
+                        <Var Name="ItemInteraction" Value="false" />
+                        <Var Name="MaxFocusDistance" Value="-1" />
+                    </UserVariables>
+                </Area>
+                <BoxLight Active="true" BlendFunc="0" CastShadows="false" DiffuseColor="0.00300001 0.003 0.003 1" FalloffMap="" FlickerActive="false" FlickerFade="false" FlickerOffColor="0 0 0 1" FlickerOffFadeMaxLength="0" FlickerOffFadeMinLength="0" FlickerOffMaxLength="0" FlickerOffMinLength="0" FlickerOffPS="" FlickerOffRadius="0" FlickerOffSound="" FlickerOnFadeMaxLength="0" FlickerOnFadeMinLength="0" FlickerOnMaxLength="0" FlickerOnMinLength="0" FlickerOnPS="" FlickerOnSound="" Gobo="" GoboAnimFrameTime="0" GoboAnimMode="None" Group="0" ID="155" Name="BoxLight_3" Radius="1" Rotation="0 0 0" Scale="15.75 5.75 24.75" ShadowResolution="High" ShadowsAffectDynamic="true" ShadowsAffectStatic="true" Size="15.75 5.75 24.75" Tag="" WorldPos="3.5 2.5 18.25" />
+                <PointLight Active="true" CastShadows="false" DiffuseColor="1 1 1 1" FalloffMap="" FlickerActive="false" FlickerFade="false" FlickerOffColor="0 0 0 1" FlickerOffFadeMaxLength="0" FlickerOffFadeMinLength="0" FlickerOffMaxLength="0" FlickerOffMinLength="0" FlickerOffPS="" FlickerOffRadius="0" FlickerOffSound="" FlickerOnFadeMaxLength="0" FlickerOnFadeMinLength="0" FlickerOnMaxLength="0" FlickerOnMinLength="0" FlickerOnPS="" FlickerOnSound="" Gobo="" GoboAnimFrameTime="0" GoboAnimMode="None" Group="0" ID="156" Name="PointLight_2" Radius="6.37377" Rotation="0 0 0" Scale="1 1 1" ShadowResolution="High" ShadowsAffectDynamic="true" ShadowsAffectStatic="true" Tag="" WorldPos="-2 2.5 28.25" />
+                <PointLight Active="true" CastShadows="false" DiffuseColor="1 1 1 1" FalloffMap="" FlickerActive="false" FlickerFade="false" FlickerOffColor="0 0 0 1" FlickerOffFadeMaxLength="0" FlickerOffFadeMinLength="0" FlickerOffMaxLength="0" FlickerOffMinLength="0" FlickerOffPS="" FlickerOffRadius="0" FlickerOffSound="" FlickerOnFadeMaxLength="0" FlickerOnFadeMinLength="0" FlickerOnMaxLength="0" FlickerOnMinLength="0" FlickerOnPS="" FlickerOnSound="" Gobo="" GoboAnimFrameTime="0" GoboAnimMode="None" Group="0" ID="157" Name="PointLight_3" Radius="6.37377" Rotation="0 0 0" Scale="1 1 1" ShadowResolution="High" ShadowsAffectDynamic="true" ShadowsAffectStatic="true" Tag="" WorldPos="-0.5 2.5 9.75" />
             </Entities>
             <Misc />
             <StaticObjectCombos />

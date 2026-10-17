@@ -1,0 +1,21 @@
+void OnStart()
+{
+    AddEntityCollideCallback("Player", "AreaCaveIn", "CaveIn", true, 1);
+}
+
+void OnTestCollide(string &in parent, string &in child, int state)
+{
+    SetEntityActive("TestTarget", state < 0);
+}
+
+void CaveIn(string &in asParent, string &in asChild, int alState)
+{
+    int debrisIndex = 1;
+
+    while (GetEntityExists("debris_" + debrisIndex))
+    {
+        SetEntityActive("debris_" + debrisIndex, true);
+
+        debrisIndex++;
+    }
+}
