@@ -912,6 +912,83 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
     }
 
+    [Fact]
+    public async Task A_Joining_Player_arriving_on_the_Session_Hosts_map_drives_its_enemies_until_leaving()
+    {
+        var (game, _, _) = await ConnectAsync();
+        await using var _ = game;
+        await game.ReadLineAsync();
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks playerplace enemies");
+        _sessions.SetPresent(true);
+        for (var i = 0; i < 3; i++) await game.ReadLineAsync();
+        await game.SendAsync("EVENT mapentered maps/elsewhere.map");
+        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 maps/elsewhere.map");
+        await WaitUntilAsync(() => _sessions.SentPoses.Count == 1);
+        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, false, "maps/a.map"));
+        Assert.StartsWith("avatarpose ", await game.ReadLineAsync());
+        // The Session Host's chase on a map this game is not on leaves this game's enemies vanilla.
+        await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample);
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+        await game.SendAsync("EVENT mapentered maps/a.map");
+        await game.SendAsync("STATE localpose 2 0 0 0 0 0 0 0 0 maps/a.map");
+        await WaitUntilAsync(() => _sessions.SentPoses.Count == 2);
+        await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample with { TimeMs = 2000 });
+        Assert.Equal("enemydrive 139 maps/a.map", await game.ReadLineAsync());
+        Assert.StartsWith("enemypose 139 2000 ", await game.ReadLineAsync());
+        // Leaving the map ends the Map Visit, at which the game releases every copy itself.
+        await game.SendAsync("EVENT mapentered maps/elsewhere.map");
+        await game.SendAsync("STATE localpose 3 0 0 0 0 0 0 0 0 maps/elsewhere.map");
+        await WaitUntilAsync(() => _sessions.SentPoses.Count == 3);
+        await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample with { TimeMs = 3000 });
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+    }
+
+    [Fact]
+    public async Task The_Session_Host_arriving_on_the_Joining_Players_map_takes_over_its_enemies()
+    {
+        var (game, _, _) = await ConnectAsync();
+        await using var _ = game;
+        await game.ReadLineAsync();
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks playerplace enemies");
+        _sessions.SetPresent(true);
+        for (var i = 0; i < 3; i++) await game.ReadLineAsync();
+        await game.SendAsync("EVENT mapentered maps/a.map");
+        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 maps/a.map");
+        await WaitUntilAsync(() => _sessions.SentPoses.Count == 1);
+        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, false, "maps/elsewhere.map"));
+        Assert.StartsWith("avatarpose ", await game.ReadLineAsync());
+        // An Enemy Pose ahead of the Session Host's own Pose on this map does not yet take over this game's enemy.
+        await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample);
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+        await _callbacks.ReceivePose(new(2, 0, 0, 0, 0, 0, 0, false, false, "maps/a.map"));
+        Assert.StartsWith("avatarpose ", await game.ReadLineAsync());
+        await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample with { TimeMs = 2000 });
+        Assert.Equal("enemydrive 139 maps/a.map", await game.ReadLineAsync());
+        Assert.StartsWith("enemypose 139 2000 ", await game.ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task The_Session_Host_sends_Enemy_Poses_only_while_the_Joining_Player_is_on_its_map()
+    {
+        _sessions.Joined = false;
+        var (game, _, _) = await ConnectAsync();
+        await using var _ = game;
+        await game.ReadLineAsync();
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks playerplace enemies");
+        _sessions.SetPresent(true);
+        for (var i = 0; i < 4; i++) await game.ReadLineAsync();
+        await game.SendAsync("EVENT mapentered maps/a.map");
+        // The Joining Player arrives, leaves, and arrives again while the Session Host's game keeps reporting its enemy.
+        foreach (var (map, time) in new[] { ("maps/a.map", 1000UL), ("maps/elsewhere.map", 2000UL), ("maps/a.map", 3000UL) })
+        {
+            await _callbacks.ReceivePose(new(time, 0, 0, 0, 0, 0, 0, false, false, map));
+            await game.SendAsync($"STATE enemypose 139 {time} 0 -2 0 28.25 90 Walk 0.2 1 maps/a.map");
+            await game.SendAsync($"STATE localpose {time} 0 0 0 0 0 0 0 0 maps/a.map");
+            await WaitUntilAsync(() => _sessions.SentPoses.Any(pose => pose.TimeMs == time));
+        }
+        Assert.Equal([1000UL, 3000UL], _sessions.SentEnemyPoses.Select(pose => pose.TimeMs));
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
