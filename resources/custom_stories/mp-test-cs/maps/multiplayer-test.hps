@@ -1,5 +1,8 @@
 void OnStart()
 {
+    SetSanityDrainDisabled(true);
+    SetInDarknessEffectsActive(false);
+
     InteractConnectPropWithMoveObject(
         "ValveGate",
         "valve_iron_rusty_1",
@@ -54,9 +57,17 @@ void RoomLightLeverChanged(string &in asEntity, int alState)
 {
     // Keep the current light setting while the lever moves between its limits.
     if(alState == 1)
+    {
+        // We hook into the existing lever, if the light is on, players heal.
+        EnableHealing(true);
         SetLightVisible("RoomLight", true);
+    }
     else if(alState == -1)
+    {
+        // if the light is off, players no longer heal in case we need to test death.
+        EnableHealing(false);
         SetLightVisible("RoomLight", false);
+    }
 }
 
 void TestButtonChanged(string &in asEntity, int alState)
@@ -74,4 +85,24 @@ void TestButtonConnected(
     int alState)
 {
     Print("TEST79: button connection callback\n");
+}
+
+// A helper system while testing shared enemy behavior
+// in order to prevent players from dying to the enemy
+// we set their health to 100% every second, that way
+// we can test enemy damaging the player over and over.
+void EnableHealing(bool shouldBeHealing)
+{
+    SetLocalVarInt("PreventDeath", shouldBeHealing ? 1 : 0);
+    // Flipping the lever again within a second must not start a second loop.
+    RemoveTimer("HealTimer");
+    if (shouldBeHealing) HealTimer("HealTimer");
+}
+
+void HealTimer(string &in asTimer)
+{
+    if (GetLocalVarInt("PreventDeath") != 1) { return; }
+
+    SetPlayerHealth(100.0f);
+    AddTimer("HealTimer", 1.0f, "HealTimer");
 }
