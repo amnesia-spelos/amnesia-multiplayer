@@ -7,7 +7,7 @@ namespace Multimnesia.Tests;
 
 public sealed class LocalGameSessionTests : IAsyncDisposable
 {
-    private const string Negotiate = "protocol 2 avatars localpose interactions sharedcallbacks";
+    private const string Negotiate = "protocol 2 avatars localpose interactions sharedcallbacks playerplace";
     private const string AvatarsUnsupportedNotice = "chatentry - - SYSTEM:Your game does not support Avatars; movement will not be shared.";
     private const string InteractionsUnsupportedNotice = "chatentry - - SYSTEM:Your game does not support interactions; moving props will not be shared.";
     private const string SharedCallbacksUnsupportedNotice =
@@ -228,6 +228,30 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         Assert.Equal(
             [new LanMessage.Pose(1000, 1, 1.25, 2.5, -3.75, 90, -45, false, true, "custom_stories/mp-test-cs/maps/start.map")],
             _sessions.SentPoses);
+    }
+
+    [Fact]
+    public async Task Teleporting_to_the_other_player_places_the_local_player_at_their_Pose_and_is_never_relayed_as_chat()
+    {
+        var (game, _, _) = await ConnectAsync();
+        await using var _ = game;
+        Assert.Equal(Negotiate, await game.ReadLineAsync());
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose playerplace");
+        Assert.Equal(InteractionsUnsupportedNotice, await game.ReadLineAsync());
+        Assert.Equal(SharedCallbacksUnsupportedNotice, await game.ReadLineAsync());
+        await game.SendAsync("EVENT:CHAT:Alice:/host");
+        _sessions.SetPresent(true);
+        Assert.Equal("avatarcreate partner", await game.ReadLineAsync());
+        Assert.Equal("localpose subscribe 30", await game.ReadLineAsync());
+        await _callbacks.ReceivePose(ReceivedPose);
+        Assert.StartsWith("avatarpose partner ", await game.ReadLineAsync());
+
+        await game.SendAsync("EVENT:CHAT:Alice:/tp-to-peer");
+
+        Assert.Equal("playerplace 1.2500 -2.5000 3.7500 90.0000 1 custom_stories/My Story: Part 2/maps/cellar one.map", await game.ReadLineAsync());
+        await game.SendAsync("RESPONSE playerplace ok");
+        Assert.Equal("chatentry - - SYSTEM:Teleported to the other player.", await game.ReadLineAsync());
+        Assert.Empty(_sessions.SentChat);
     }
 
     [Fact]
@@ -557,10 +581,17 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         }
         public bool IsJoined => true;
         public List<(string, SharedCustomStoryStartOutcome)> SentOutcomes { get; } = [];
-        public Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken) => Task.FromResult(SessionOperationResult.Succeeded);
         public Task<SessionOperationResult> JoinAsync(string destination, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task LeaveAsync(GamePeerState state, CancellationToken cancellationToken) => throw new NotSupportedException();
-        public Task SendChatAsync(ChatEntry entry, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public List<ChatEntry> SentChat { get { lock (_sentChat) return [.. _sentChat]; } }
+        private readonly List<ChatEntry> _sentChat = [];
+
+        public Task SendChatAsync(ChatEntry entry, CancellationToken cancellationToken)
+        {
+            lock (_sentChat) _sentChat.Add(entry);
+            return Task.CompletedTask;
+        }
         public Task<bool> SendCustomStoryStartedAsync(string identifier, CancellationToken cancellationToken) => throw new NotSupportedException();
 
         public Task SendCustomStoryStartOutcomeAsync(

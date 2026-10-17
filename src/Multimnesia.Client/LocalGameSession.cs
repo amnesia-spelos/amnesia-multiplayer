@@ -123,6 +123,7 @@ public sealed class LocalGameSession(
         SharedPose sharedPose = null!;
         Holds holds = null!;
         SharedCallbacks sharedCallbacks = null!;
+        PlayerTeleport playerTeleport = null!;
 
         var sessions = createSessions(new SessionCallbacks(
             DisplaySystemAsync,
@@ -145,6 +146,7 @@ public sealed class LocalGameSession(
             pose =>
             {
                 sharedPose.HandleReceivedPose(pose);
+                playerTeleport.HandleReceivedPose(pose);
                 holds.HandleReceivedPose(pose);
                 return ValueTask.CompletedTask;
             },
@@ -168,7 +170,8 @@ public sealed class LocalGameSession(
             }));
         try
         {
-            var orchestrator = new GamePeerOrchestrator(sessions);
+            playerTeleport = new PlayerTeleport(sessions, WriteLineAsync, _negotiation.Task, Task.Delay);
+            var orchestrator = new GamePeerOrchestrator(sessions, teleportToPeer: playerTeleport.TeleportAsync);
             sharedStart = new SharedCustomStoryStart(sessions, localGameCommands.StartCustomStoryAsync, DisplaySystemAsync);
             sharedPose = new SharedPose(
                 sessions, WriteLineAsync, DisplaySystemAsync, (severity, eventName, line) => Log(severity, eventName, line),
@@ -214,6 +217,7 @@ public sealed class LocalGameSession(
                 _ = RunIgnoringDisconnectAsync(sharedCallbacks.HandleLocalGameEventAsync(gameEvent));
                 // Not awaited, but it records the event before its first await, so events are observed in the order the game sent them.
                 _ = RunIgnoringDisconnectAsync(sharedStart.HandleLocalGameEventAsync(gameEvent, cancellationToken));
+                playerTeleport.HandleLocalGameEvent(gameEvent);
                 localGameCommands.Dispatch(gameEvent);
             }
         }

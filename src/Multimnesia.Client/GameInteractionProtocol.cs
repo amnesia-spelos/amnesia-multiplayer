@@ -288,11 +288,11 @@ public static class GameInteractionProtocol
 
     public static string StartCustomStory(string identifier) => $"startcustomstory:{identifier}";
 
-    // The first Command of every game Session; the Shared Pose needs the first two Capabilities, Holds the third, and
-    // Shared Callbacks the fourth.
+    // The first Command of every game Session; the Shared Pose needs the first two Capabilities, Holds the third,
+    // Shared Callbacks the fourth, and `/tp-to-peer` the fifth.
     public const string Negotiate =
         $"protocol 2 {ProtocolNegotiation.Avatars} {ProtocolNegotiation.LocalPose} {ProtocolNegotiation.Interactions} " +
-        ProtocolNegotiation.SharedCallbacks;
+        $"{ProtocolNegotiation.SharedCallbacks} {ProtocolNegotiation.PlayerPlace}";
 
     // Uses the default model, with collision on.
     public static string AvatarCreate(string avatarIdentifier) => $"avatarcreate {avatarIdentifier}";
@@ -311,6 +311,16 @@ public static class GameInteractionProtocol
         ProtocolVersion2Line.FormatNumber(pose.Pitch),
         pose.Crouch ? "1" : "0",
         pose.Lantern ? "1" : "0",
+        pose.Map);
+
+    // playerplace <x> <y> <z> <yaw> <crouch> <map>: places the local player at the feet position, body yaw, and crouch of a Pose.
+    public static string PlayerPlace(LanMessage.Pose pose) => string.Join(' ',
+        "playerplace",
+        ProtocolVersion2Line.FormatNumber(pose.X),
+        ProtocolVersion2Line.FormatNumber(pose.Y),
+        ProtocolVersion2Line.FormatNumber(pose.Z),
+        ProtocolVersion2Line.FormatNumber(pose.Yaw),
+        pose.Crouch ? "1" : "0",
         pose.Map);
 
     public static string SubscribeLocalPose(int hz) => $"localpose subscribe {hz.ToString(CultureInfo.InvariantCulture)}";

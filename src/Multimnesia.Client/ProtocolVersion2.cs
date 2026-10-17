@@ -11,17 +11,21 @@ public sealed record ProtocolNegotiation(string Outcome, int? Version, IReadOnly
     public const string LocalPose = "localpose";
     public const string Interactions = "interactions";
     public const string SharedCallbacks = "sharedcallbacks";
+    public const string PlayerPlace = "playerplace";
 
     // An older game answers `protocol` with WARNING:Unknown command.
     public static ProtocolNegotiation UnknownCommand { get; } = new("unknown-command", null, []);
 
-    public bool GrantsSharedPose =>
-        Outcome == "ok" && Version == SupportedVersion && Capabilities.Contains(Avatars) && Capabilities.Contains(LocalPose);
+    public bool GrantsSharedPose => Grants(Avatars) && Grants(LocalPose);
+
+    public bool GrantsInteractions => Grants(Interactions);
+
+    public bool GrantsSharedCallbacks => Grants(SharedCallbacks);
+
+    public bool GrantsPlayerPlace => Grants(PlayerPlace);
 
     // A game older than the Capability ignores its name, so it is simply missing from the granted list.
-    public bool GrantsInteractions => Outcome == "ok" && Version == SupportedVersion && Capabilities.Contains(Interactions);
-
-    public bool GrantsSharedCallbacks => Outcome == "ok" && Version == SupportedVersion && Capabilities.Contains(SharedCallbacks);
+    private bool Grants(string capability) => Outcome == "ok" && Version == SupportedVersion && Capabilities.Contains(capability);
 
     // RESPONSE protocol ok <version> [<capability>...], or RESPONSE protocol <failure>
     public static ProtocolNegotiation FromResponse(GameEvent.Responded response) =>

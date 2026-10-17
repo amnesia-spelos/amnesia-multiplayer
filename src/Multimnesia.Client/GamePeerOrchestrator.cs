@@ -10,9 +10,12 @@ public abstract record PeerCommand
     public sealed record HostCommand : PeerCommand;
     public sealed record Join(string Destination) : PeerCommand;
     public sealed record LeaveCommand : PeerCommand;
+    // Takes no player name while a Multiplayer Session has two players; `/tp-to-peer <name>` can name one later.
+    public sealed record TeleportToPeerCommand : PeerCommand;
 
     public static PeerCommand Host { get; } = new HostCommand();
     public static PeerCommand Leave { get; } = new LeaveCommand();
+    public static PeerCommand TeleportToPeer { get; } = new TeleportToPeerCommand();
 }
 
 public abstract record PeerInput
@@ -31,6 +34,8 @@ public static class PeerCommandParser
         if (message.StartsWith("/host ", StringComparison.Ordinal)) return new PeerInput.Rejected("Usage: /host");
         if (message == "/leave") return new PeerInput.Command(PeerCommand.Leave);
         if (message.StartsWith("/leave ", StringComparison.Ordinal)) return new PeerInput.Rejected("Usage: /leave");
+        if (message == "/tp-to-peer") return new PeerInput.Command(PeerCommand.TeleportToPeer);
+        if (message.StartsWith("/tp-to-peer ", StringComparison.Ordinal)) return new PeerInput.Rejected("Usage: /tp-to-peer");
         if (message == "/join" || message.StartsWith("/join ", StringComparison.Ordinal))
         {
             const string prefix = "/join ";
@@ -80,12 +85,18 @@ public interface ISessionOperations
 public sealed class GamePeerOrchestrator
 {
     private readonly ISessionOperations _operations;
+    // Places the local player at the other player and returns the SYSTEM feedback; it writes only to the local game.
+    private readonly Func<CancellationToken, Task<string>> _teleportToPeer;
     private int _multiplayerSessionEndVersion;
     private CancellationTokenSource? _joinCancellation;
 
-    public GamePeerOrchestrator(ISessionOperations operations, GamePeerState initialState = GamePeerState.Local)
+    public GamePeerOrchestrator(
+        ISessionOperations operations,
+        GamePeerState initialState = GamePeerState.Local,
+        Func<CancellationToken, Task<string>>? teleportToPeer = null)
     {
         _operations = operations;
+        _teleportToPeer = teleportToPeer ?? (_ => Task.FromResult(PlayerTeleport.UnsupportedFeedback));
         State = initialState;
         operations.MultiplayerSessionEnded += () =>
         {
@@ -118,6 +129,10 @@ public sealed class GamePeerOrchestrator
                     GamePeerState.Joining => "Joining cancelled.",
                     _ => "You left the Multiplayer Session."
                 });
+            case PeerInput.Command { Value: PeerCommand.TeleportToPeerCommand }:
+                if (State is not (GamePeerState.Hosting or GamePeerState.Joined))
+                    return SystemFeedback("You are not in a Multiplayer Session.");
+                return SystemFeedback(await _teleportToPeer(cancellationToken));
             case PeerInput.Command when State != GamePeerState.Local:
                 return SystemFeedback("Leave the current Multiplayer Session first.");
             case PeerInput.Command { Value: PeerCommand.HostCommand }:

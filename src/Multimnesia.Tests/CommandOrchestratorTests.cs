@@ -11,11 +11,15 @@ public sealed class CommandOrchestratorTests
         { "/join game-box", new PeerInput.Command(new PeerCommand.Join("game-box")) },
         { "/join 192.168.1.10", new PeerInput.Command(new PeerCommand.Join("192.168.1.10")) },
         { "/leave", new PeerInput.Command(PeerCommand.Leave) },
+        { "/tp-to-peer", new PeerInput.Command(PeerCommand.TeleportToPeer) },
         { "hello", new PeerInput.OrdinaryChat() },
         { "/host now", new PeerInput.Rejected("Usage: /host") },
         { "/join", new PeerInput.Rejected("Usage: /join <hostname-or-IPv4>") },
         { "/join host extra", new PeerInput.Rejected("Usage: /join <hostname-or-IPv4>") },
         { "/leave now", new PeerInput.Rejected("Usage: /leave") },
+        { "/tp-to-peer Daniel", new PeerInput.Rejected("Usage: /tp-to-peer") },
+        { "/tp-to-peer ", new PeerInput.Rejected("Usage: /tp-to-peer") },
+        { "/tp-to-peers", new PeerInput.Rejected("Unknown command") },
         { "/dance", new PeerInput.Rejected("Unknown command") },
         { "/hostile", new PeerInput.Rejected("Unknown command") },
         { "/leaver", new PeerInput.Rejected("Unknown command") },
@@ -78,6 +82,47 @@ public sealed class CommandOrchestratorTests
         await orchestrator.HandleAsync(new ChatEntry("Player", "/dance"), TestContext.Current.CancellationToken);
 
         Assert.Empty(operations.SentChat);
+    }
+
+    [Theory]
+    [InlineData(GamePeerState.Hosting)]
+    [InlineData(GamePeerState.Joined)]
+    public async Task Teleporting_to_the_other_player_in_a_Multiplayer_Session_reports_the_teleport_and_is_never_relayed(
+        GamePeerState state)
+    {
+        var operations = new RecordingSessionOperations();
+        var teleports = 0;
+        var orchestrator = new GamePeerOrchestrator(operations, state, _ =>
+        {
+            teleports++;
+            return Task.FromResult("Teleported to the other player.");
+        });
+
+        var feedback = await orchestrator.HandleAsync(new ChatEntry("Player", "/tp-to-peer"), TestContext.Current.CancellationToken);
+
+        Assert.Equal(1, teleports);
+        Assert.Equal(new ChatEntry("SYSTEM", "Teleported to the other player."), feedback);
+        Assert.Equal(state, orchestrator.State);
+        Assert.Empty(operations.SentChat);
+    }
+
+    [Theory]
+    [InlineData(GamePeerState.Local)]
+    [InlineData(GamePeerState.Joining)]
+    public async Task Teleporting_to_the_other_player_outside_a_Multiplayer_Session_does_not_teleport(GamePeerState state)
+    {
+        var teleports = 0;
+        var orchestrator = new GamePeerOrchestrator(new RecordingSessionOperations(), state, _ =>
+        {
+            teleports++;
+            return Task.FromResult("Teleported to the other player.");
+        });
+
+        var feedback = await orchestrator.HandleAsync(new ChatEntry("Player", "/tp-to-peer"), TestContext.Current.CancellationToken);
+
+        Assert.Equal(0, teleports);
+        Assert.Equal("You are not in a Multiplayer Session.", feedback?.Message);
+        Assert.Equal(state, orchestrator.State);
     }
 
     [Fact]

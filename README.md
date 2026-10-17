@@ -84,8 +84,9 @@ Every slash-prefixed chat entry is interpreted as a Game Peer command; commands 
 - **`/host`** — starts an in-process Multiplayer Relay bound to all IPv4 interfaces on the configured port (`5000` by default) and begins waiting for a Joining Player. Reports the usable private IPv4 addresses to join at.
 - **`/join <hostname-or-IPv4>`** — attempts to join a Session Host's Multiplayer Session within a 10-second deadline (configurable). If the hostname resolves to multiple eligible IPv4 addresses, they are tried sequentially within that deadline. IPv6 is unsupported.
 - **`/leave`** — leaves a Multiplayer Session you are hosting or have joined, or cancels an in-progress `/join`.
+- **`/tp-to-peer`** — places you where the other player stands, from their latest Pose: their feet position, the way they face, and crouching if they crouch. Use it when a door locks or a wall closes behind the player who went first. It works only while both players are on the same map, and needs an `Amnesia.exe` that grants `playerplace`. The other player sees your Avatar snap to them. It takes no argument.
 
-`/host` and `/join` are only valid while not already in a Multiplayer Session; `/leave` is valid while hosting, joining, or joined. Invalid transitions and unknown or malformed commands produce an exact SYSTEM chat message rather than switching sessions implicitly.
+`/host` and `/join` are only valid while not already in a Multiplayer Session; `/leave` is valid while hosting, joining, or joined; `/tp-to-peer` is valid while hosting or joined with the other player present. Invalid transitions and unknown or malformed commands produce an exact SYSTEM chat message rather than switching sessions implicitly.
 
 ### Lifecycle outcomes
 
@@ -105,6 +106,17 @@ Every slash-prefixed chat entry is interpreted as a Game Peer command; commands 
 | Joining Player's game is not in the main menu, or is still handling a previous start (seen by both) | `Custom Story <id> could not start for the Joining Player: their game is not in the main menu.` |
 | Joining Player's game lacks Custom Story start support or does not reply within 5 seconds (seen by both) | `Custom Story <id> could not start for the Joining Player: their game does not support Custom Story starts or did not respond.` |
 | Joining Player starts a Custom Story themselves (seen by Joining Player) | `Only the Session Host's Custom Story starts are shared.` |
+
+| You use `/tp-to-peer` and are placed at the other player | `Teleported to the other player.` |
+| You use `/tp-to-peer` outside a Multiplayer Session, or while still joining | `You are not in a Multiplayer Session.` |
+| You use `/tp-to-peer` with nobody else in the Multiplayer Session | `The other player is not in the Multiplayer Session.` |
+| You use `/tp-to-peer` before any Pose of the other player arrived | `The other player's position is not known yet.` |
+| You use `/tp-to-peer` while the other player is on another map | `The other player is on a different map.` |
+| You use `/tp-to-peer` and your game does not grant `playerplace` | `Your game does not support /tp-to-peer; update it to teleport to the other player.` |
+| Your game refuses `/tp-to-peer` because you are not in play (paused, in a menu, inventory, or journal, loading, dead, in a flashback, or a script took control) | `Your game refused the teleport: you are not in play.` |
+| Your game refuses `/tp-to-peer` as malformed | `Your game refused the teleport: the request was malformed.` |
+| Your game does not answer `/tp-to-peer` within 5 seconds | `Your game did not answer the teleport.` |
+| You use `/tp-to-peer` again before your game answered the last one | `A teleport is already in progress.` |
 
 When the Joining Player leaves or disconnects, the Session Host keeps hosting and can admit a replacement. When the Session Host leaves, the Multiplayer Session ends and the Joining Player returns to being unconnected from any session.
 
@@ -297,6 +309,7 @@ Run this after any change to how Shared Callbacks are shared (#43), with the Rel
 11. **Button and lamp.** One player presses a button and lights a candle. Both show in the other game.
 12. **Both players trigger the same one-shot area.** It runs once in each game. Two players picking up the same item at nearly the same time also run its pickup callback once in each game.
 13. **Sticky area.** In My Lady's Insanity's `Prison_torture` map, the Holder fits `playpipesmall` into one of the `StickySmallArea` areas. It snaps into the same place in both games and stays there, the area's attach callback runs once in each game, and carrying it through the area without letting it attach in the Holder's game never attaches it in the other game. Then the other player grabs it out: it detaches in both games and follows that player's hands.
+14. **Locked out.** One player walks through a door and locks it from the other side, by a script or a level whose door locks behind the player. The other player types `/tp-to-peer`. They see `Teleported to the other player.` and stand where the first player stands, facing the same way and crouching if that player crouches. The first player sees their Avatar snap there rather than glide through the door. With the first player on another map, `/tp-to-peer` instead shows `The other player is on a different map.` and nothing moves.
 
 On 2026-10-11 the chapter 1 playtest passed. Two Custom Stories played afterwards, My Lady's Insanity and Quiet, were each ended by a rate-limit disconnect. See the contact Claim loop under [Expected behavior and limitations](#expected-behavior-and-limitations).
 
@@ -310,6 +323,7 @@ Two players host, join, chat, start the same Custom Story together, see each oth
 - **Map changes and returning to the main menu are not shared.** Only the Session Host's fresh Custom Story start is. Continue, Load Game, death reloads, quitting, and every map transition after the start are local.
 - **Changing game settings ends the Multiplayer Session for that player.** Applying settings restarts the game's Game Interaction Protocol server (amnesia-tdd-tcp#66), so the Game Peer loses its local game and has to rejoin. Pausing through the menu or a note does not.
 - **An Avatar stays frozen at its last Pose when its player returns to the main menu.** The game sends no Poses from the main menu and reports no map-left event, so the other player keeps seeing a motionless Avatar where that player last stood. Start the Custom Story again to resynchronize.
+- **`/tp-to-peer` does not follow the other player to another map.** It places you only on the map you are both on. A player left behind on another map has to reach it themselves.
 - **Enemies ignore the Joining Player.** Enemy AI is aware only of the player in its own game.
 - Avatar footstep sounds.
 - **What Entity Interaction Sync does not share.** Holds share how players move map-placed props, doors, levers, valves, and sliders, and breaks of props a player Holds. These are not shared:
