@@ -36,6 +36,11 @@ void OnStart()
     SetEntityCallbackFunc("mansion_1", "MansionDoorCallback");
     AddEntityCollideCallback("grunt", "SpawnGruntArea", "GruntEnteredSpawnArea", false, 1);
     SetEntityCallbackFunc("grunt", "GruntCallback");
+
+    // The Brute encounter (#78). Interacting with cabinet_simple_1 spawns the Brute on the Grunt's patrol, reversed.
+    // Whichever enemy spawns first, the other one's trigger goes away until the story starts fresh.
+    SetEntityPlayerInteractCallback("cabinet_simple_1", "SpawnBrute", true);
+    SetEntityCallbackFunc("brute", "BruteCallback");
 }
 
 void MansionDoorCallback(string &in asEntity, string &in asType)
@@ -55,14 +60,34 @@ void GruntCallback(string &in asEntity, string &in asType)
     if(asType == "OnAutoDisabled") Print("TEST77: grunt auto-disabled\n");
 }
 
+void BruteCallback(string &in asEntity, string &in asType)
+{
+    if(asType == "OnAutoDisabled") Print("TEST78: brute auto-disabled\n");
+}
+
 void SpawnGrunt(string &in asParent, string &in asChild, int alState)
 {
+    SetLocalVarInt("GruntSpawned", 1);
+    SetEntityPlayerInteractCallback("cabinet_simple_1", "", true);
     SetEntityActive("grunt", true);
     for (int i = 0; i < 5; i++)
     {
         AddEnemyPatrolNode("grunt", "PathNodeArea_6", 5.0f, "");
         AddEnemyPatrolNode("grunt", "PathNodeArea_13", 10.0f, "");
         AddEnemyPatrolNode("grunt", "PathNodeArea_2", 5.0f, "");
+    }
+}
+
+void SpawnBrute(string &in asEntity)
+{
+    SetLocalVarInt("BruteSpawned", 1);
+    RemoveEntityCollideCallback("Player", "SpawnGruntArea");
+    SetEntityActive("brute", true);
+    for (int i = 0; i < 5; i++)
+    {
+        AddEnemyPatrolNode("brute", "PathNodeArea_2", 5.0f, "");
+        AddEnemyPatrolNode("brute", "PathNodeArea_13", 10.0f, "");
+        AddEnemyPatrolNode("brute", "PathNodeArea_6", 5.0f, "");
     }
 }
 
@@ -99,13 +124,14 @@ void RoomLightLeverChanged(string &in asEntity, int alState)
 }
 
 // Shows the count this game's callback received: the room light comes on red for 0, green for 1, and
-// blue for 2. The checkpoint reset the Grunt, so it comes back for the next death. The death at count 1
-// replaces this checkpoint, so its next death receives 1 again, as vanilla. The death at count 3 changes
-// maps.
+// blue for 2. The checkpoint reset the enemies, so each one spawned before comes back for the next death.
+// The death at count 1 replaces this checkpoint, so its next death receives 1 again, as vanilla. The death
+// at count 3 changes maps.
 void LightOffDeath(string &in asName, int alCount)
 {
     SetLightVisible("RoomLight", true);
-    SetEntityActive("grunt", true);
+    if(GetLocalVarInt("GruntSpawned") == 1) SetEntityActive("grunt", true);
+    if(GetLocalVarInt("BruteSpawned") == 1) SetEntityActive("brute", true);
     RoomLightColorChanged(asName, alCount);
     if(asName == "light_off" && alCount == 1)
         CheckPoint("light_off_again", "PlayerStartArea_1", "LightOffDeath", "", "");

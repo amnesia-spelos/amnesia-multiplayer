@@ -28,7 +28,7 @@
                 <File Id="11" Path="static_objects/mansionbase/wall/door_frame.dae" />
                 <File Id="12" Path="static_objects/mansionbase/wall/welder02_convex.dae" />
             </FileIndex_StaticObjects>
-            <FileIndex_Entities NumOfFiles="23">
+            <FileIndex_Entities NumOfFiles="24">
                 <File Id="0" Path="entities/item/lantern/lantern.ent" />
                 <File Id="1" Path="entities/door/level_cellar/level_celler.ent" />
                 <File Id="2" Path="entities/lamp/candlestick_tri/candlestick_tri.ent" />
@@ -52,6 +52,7 @@
                 <File Id="20" Path="entities/furniture/cabinet_nice/cabinet_nice.ent" />
                 <File Id="21" Path="entities/furniture/cabinet_simple/cabinet_simple.ent" />
                 <File Id="22" Path="entities/enemy/servant_grunt/servant_grunt.ent" />
+                <File Id="23" Path="entities/enemy/servant_brute/servant_brute.ent" />
             </FileIndex_Entities>
             <FileIndex_Decals NumOfFiles="0" />
             <StaticObjects>
@@ -741,6 +742,14 @@
                     </UserVariables>
                 </Entity>
                 <Entity Active="false" FileIndex="22" Group="0" ID="139" Name="grunt" Rotation="0 3.92699 0" Scale="1 1 1" Tag="" WorldPos="6.25 0 28">
+                    <UserVariables>
+                        <Var Name="CallbackFunc" Value="" />
+                        <Var Name="DisableTriggers" Value="false" />
+                        <Var Name="Hallucination" Value="false" />
+                        <Var Name="HallucinationEndDist" Value="3" />
+                    </UserVariables>
+                </Entity>
+                <Entity Active="false" FileIndex="23" Group="0" ID="158" Name="brute" Rotation="0 3.92699 0" Scale="1 1 1" Tag="" WorldPos="2.25 0 28.25">
                     <UserVariables>
                         <Var Name="CallbackFunc" Value="" />
                         <Var Name="DisableTriggers" Value="false" />
