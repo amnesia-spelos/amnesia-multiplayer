@@ -37,11 +37,11 @@ To produce a release archive instead of a bare Game Peer folder, run `.\scripts\
 
 Game Peer versions follow SemVer as `0.MINOR.PATCH` while the project is in alpha:
 
-- Each codenamed milestone bumps the minor version; fixes to that milestone bump the patch version under the same codename. The current release is `v0.3.0`, codename "Dread".
+- Each codenamed milestone bumps the minor version; fixes to that milestone bump the patch version under the same codename. The current release is `v0.3.0`, codename "Dread". `main` builds `v0.3.1`, a fix to "Dread", which is in development.
 - There is no `-alpha` suffix. Instead, GitHub releases are marked pre-release.
-- Release titles and archive names include the codename, for example `amnesia-multiplayer-v0.3.0-dread-win-x64.zip`.
+- Release titles and archive names include the codename, for example `amnesia-multiplayer-v0.3.1-dread-win-x64.zip`.
 
-The version and codename are defined once, in `src/Directory.Build.props`, and stamped into the executable's file version. When the Game Peer first connects to its local game, chat shows `Amnesia Multiplayer v0.3.0 "Dread" connected.`, and each per-run log file starts with the same version. Game Peers do not compare versions with each other; the `LanProtocol` version check at admission decides compatibility.
+The version and codename are defined once, in `src/Directory.Build.props`, and stamped into the executable's file version. When the Game Peer first connects to its local game, chat shows `Amnesia Multiplayer v0.3.1 "Dread" connected.`, and each per-run log file starts with the same version. Game Peers do not compare versions with each other; the `LanProtocol` version check at admission decides compatibility.
 
 ## Setup
 
@@ -209,7 +209,7 @@ A build is considered verified only when every step above produces the documente
 Run this one from the extracted release archive on two PCs, never from a dev build: it is what makes a release publishable (`docs/RELEASING.md`). It covers the Shared Pose and the release packaging; the steps above still cover chat, sessions, and the Shared Custom Story Start, and the [Entity Interaction Sync walkthrough](#entity-interaction-sync-walkthrough) covers Holds.
 
 1. On both PCs, back up `Amnesia.exe` and extract the archive into the Amnesia folder as its `INSTALL.txt` describes, then add the private-network firewall rule on the PC that will host.
-2. On both PCs, double-click `Start Multiplayer.bat` in the Amnesia folder. Confirm the game starts, the Game Peer gets its own console window, and the game's chat shows `Amnesia Multiplayer v0.3.0 "Dread" connected.` — the version each PC is running.
+2. On both PCs, double-click `Start Multiplayer.bat` in the Amnesia folder. Confirm the game starts, the Game Peer gets its own console window, and the game's chat shows `Amnesia Multiplayer v0.3.1 "Dread" connected.` — the version each PC is running.
 3. On PC A, `/host`. On PC B, `/join <PC A's LAN address>`. On PC A, start "Amnesia Multiplayer Test". Confirm both games load the map.
 4. Walk around on both PCs. Confirm each player sees the other as the skeleton Avatar, moving smoothly rather than jumping between positions, turned the way that player is facing, walking, idling, crouching, and looking up and down as that player does, and that walking into the Avatar blocks rather than passing through it.
 5. Confirm ordinary chat still works both ways while moving.

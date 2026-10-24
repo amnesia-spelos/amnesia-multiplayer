@@ -1,7 +1,7 @@
 <Project>
   <!-- The single definition of the Game Peer's version and codename; see the README's Versioning section. -->
   <PropertyGroup>
-    <Version>0.3.0</Version>
+    <Version>0.3.1</Version>
     <Codename>Dread</Codename>
   </PropertyGroup>
   <ItemGroup>

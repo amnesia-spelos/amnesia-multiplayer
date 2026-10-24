@@ -7,7 +7,7 @@ the building and packaging; tagging, verifying, and publishing stay human steps.
 Versions follow the scheme in the README's [Versioning](../README.md#versioning) section. Each
 repository has its own version line: Whisper is multiplayer `v0.1.0` and `amnesia-tdd-tcp`
 `v0.2.0`; Grasp is multiplayer `v0.2.0` and `amnesia-tdd-tcp` `v0.3.0`; Dread is multiplayer
-`v0.3.0` and `amnesia-tdd-tcp` `v0.4.0`.
+`v0.3.0` and `amnesia-tdd-tcp` `v0.4.0`; its `v0.3.1` fix ships against `amnesia-tdd-tcp` `v0.4.1`.
 
 ## Before you start
 
@@ -23,13 +23,13 @@ repository has its own version line: Whisper is multiplayer `v0.1.0` and `amnesi
 1. **Tag `amnesia-tdd-tcp`** at the commit that supplies `Amnesia.exe`, on its own version line:
 
    ```powershell
-   git -C ..\amnesia-tdd-tcp tag v0.4.0
+   git -C ..\amnesia-tdd-tcp tag v0.4.1
    ```
 
 2. **Tag this repository** with the version in `src\Directory.Build.props`:
 
    ```powershell
-   git tag v0.3.0
+   git tag v0.3.1
    ```
 
 3. **Run the script.** It refuses unless both checkouts are clean and exactly on a tag, builds
@@ -61,8 +61,8 @@ repository has its own version line: Whisper is multiplayer `v0.1.0` and `amnesi
    creating a tag of its own:
 
    ```powershell
-   git -C ..\amnesia-tdd-tcp push origin v0.4.0
-   git push origin v0.3.0
+   git -C ..\amnesia-tdd-tcp push origin v0.4.1
+   git push origin v0.3.1
    ```
 
 8. **Publish**, by running the two `gh release create ... --prerelease` commands the script
