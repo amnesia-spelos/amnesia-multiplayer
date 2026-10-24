@@ -8,7 +8,8 @@ if not exist "multiplayer\Multimnesia.Client.exe" goto :missing_peer
 start "" "%~dp0Amnesia.exe"
 rem The Game Peer runs from its own folder, so an appsettings.json put beside it is the one read.
 rem It retries until the game is listening, so starting it right away is fine.
-start "Amnesia Multiplayer" /d "%~dp0multiplayer" "%~dp0multiplayer\Multimnesia.Client.exe"
+rem Arguments given to this file, such as --color FF00FF, are passed on to the Game Peer.
+start "Amnesia Multiplayer" /d "%~dp0multiplayer" "%~dp0multiplayer\Multimnesia.Client.exe" %*
 goto :eof
 
 :missing_game

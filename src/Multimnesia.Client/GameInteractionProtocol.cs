@@ -4,7 +4,7 @@ using Multimnesia.Contracts;
 
 namespace Multimnesia.Client;
 
-public sealed record ChatEntry(string Author, string Message)
+public sealed record ChatEntry(string Author, string Message, ChatColor? AuthorColor = null)
 {
     private const string LocalSubmissionPrefix = "EVENT:CHAT:";
 
@@ -44,6 +44,10 @@ public static class GameInteractionProtocol
     private const string UnknownCommandWarning = "WARNING:Unknown command";
     private const string PongResponse = "RESPONSE:ping:pong";
     private const string LocalPoseStatePrefix = "STATE localpose ";
+    private const string ReportedBodiesStatePrefix = "STATE reportedbodies ";
+    // Legacy Events continue with ':' instead.
+    private const string Version2EventPrefix = "EVENT ";
+    private const int BodyEntryFieldCount = 2 + ProtocolVersion2Line.BodyStateFieldCount;
     // Legacy Responses continue with ':' instead.
     private const string Version2ResponsePrefix = "RESPONSE ";
     private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
@@ -78,16 +82,110 @@ public static class GameInteractionProtocol
         if (line == PongResponse) return new GameEvent.Ponged();
         if (line.StartsWith(LocalPoseStatePrefix, StringComparison.Ordinal))
             return TryParseLocalPose(line, out var pose) ? new GameEvent.LocalPoseReported(pose) : new GameEvent.Unknown(line);
+        if (line.StartsWith("STATE enemypose ", StringComparison.Ordinal))
+            return TryParseEnemyPose(line) is { } enemy ? new GameEvent.EnemyPoseReported(enemy) : new GameEvent.Unknown(line);
+        if (line.StartsWith(ReportedBodiesStatePrefix, StringComparison.Ordinal))
+            return TryParseReportedBodies(line) ?? new GameEvent.Unknown(line);
+        if (line.StartsWith(Version2EventPrefix, StringComparison.Ordinal))
+            return line.Split(' ', 3)[1] switch
+            {
+                "mapentered" => ProtocolVersion2Line.TrySplit(line, fixedFieldCount: 2, hasPath: true, out var fields)
+                    ? new GameEvent.MapEntered(fields[2])
+                    : new GameEvent.Unknown(line),
+                "checkpoint" => ProtocolVersion2Line.TrySplit(line, fixedFieldCount: 5, hasPath: true, out var fields) &&
+                    TryParseCheckPoint(fields.AsSpan(2)) is { } checkPoint
+                    ? new GameEvent.CheckPointReported(checkPoint)
+                    : new GameEvent.Unknown(line),
+                "playerdeath" => ProtocolVersion2Line.TrySplit(line, fixedFieldCount: 6, hasPath: true, out var fields) &&
+                    TryParseCount(fields[2], out var death) && death > 0 && TryParseCheckPoint(fields.AsSpan(3)) is { } deathCheckPoint
+                    ? new GameEvent.PlayerDied(death, deathCheckPoint)
+                    : new GameEvent.Unknown(line),
+                "enemyattack" => TryParseEnemyAttack(line) is { } attack
+                    ? new GameEvent.EnemyAttackReported(attack)
+                    : new GameEvent.Unknown(line),
+                "enemydoorbreak" => TryParseEnemyDoorBreak(line) is { } doorBreak
+                    ? new GameEvent.EnemyDoorBroke(doorBreak)
+                    : new GameEvent.Unknown(line),
+                "sharedcallback" or "buttonstate" or "lampstate" => TryParseWorldMessage(line) is { } change
+                    ? new GameEvent.WorldChanged(change)
+                    : new GameEvent.Unknown(line),
+                _ => TryParseInteractionEvent(line) ?? new GameEvent.Unknown(line)
+            };
         if (line.StartsWith(Version2ResponsePrefix, StringComparison.Ordinal))
         {
             // RESPONSE <keyword> <outcome> [<field>...]
             var fields = line.Split(' ');
+            if (fields is [_, "chatentry", var outcome])
+                return ParseChatEntryOutcome(outcome) is { } chatEntryOutcome
+                    ? new GameEvent.ChatEntryResponded(chatEntryOutcome)
+                    : new GameEvent.Unknown(line);
             return fields.Length >= 3 && !fields.Contains(string.Empty)
                 ? new GameEvent.Responded(fields[1], fields[2], fields[3..])
                 : new GameEvent.Unknown(line);
         }
         return new GameEvent.Unknown(line);
     }
+
+    private static LanMessage.EnemyPose? TryParseEnemyPose(string line)
+    {
+        if (!ProtocolVersion2Line.TrySplit(line, 12, hasPath: true, out var fields) ||
+            !ProtocolVersion2Line.TryParseIdentifier(fields[2], out var id) ||
+            !ulong.TryParse(fields[3], NumberStyles.None, CultureInfo.InvariantCulture, out var time) ||
+            !uint.TryParse(fields[4], NumberStyles.None, CultureInfo.InvariantCulture, out var teleport) ||
+            !ProtocolVersion2Line.TryParseNumber(fields[5], out var x) ||
+            !ProtocolVersion2Line.TryParseNumber(fields[6], out var y) ||
+            !ProtocolVersion2Line.TryParseNumber(fields[7], out var z) ||
+            !ProtocolVersion2Line.TryParseNumber(fields[8], out var yaw) ||
+            !ProtocolVersion2Line.TryParseNumber(fields[10], out var clipTime) || fields[11] is not ("0" or "1")) return null;
+        var pose = new LanMessage.EnemyPose(fields[12], id, time, teleport, x, y, z, yaw, fields[9], clipTime, fields[11] == "1");
+        return LanProtocol.IsValid(pose) ? pose : null;
+    }
+
+    // <count> <callback> <checkPoint> <map>, the checkpoint fields shared by `checkpoint` and `playerdeath` Events
+    private static CheckPoint? TryParseCheckPoint(ReadOnlySpan<string> fields) =>
+        TryParseCount(fields[0], out var count) && fields[1] is "0" or "1" && LanProtocol.IsValidItemName(fields[2])
+            ? new CheckPoint(count, fields[1] == "1", fields[2], fields[3])
+            : null;
+
+    private static bool TryParseCount(string text, out int value) =>
+        int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out value);
+
+    // EVENT enemyattack <entityId> <normal|breakdoor> <sizeX> <sizeY> <sizeZ> <offsetX> <offsetY> <offsetZ> <map>
+    private static LanMessage.EnemyAttack? TryParseEnemyAttack(string line)
+    {
+        var numbers = new double[6];
+        if (!ProtocolVersion2Line.TrySplit(line, fixedFieldCount: 10, hasPath: true, out var fields) ||
+            !ProtocolVersion2Line.TryParseIdentifier(fields[2], out var id) ||
+            ParseEnemyAttackKind(fields[3]) is not { } kind) return null;
+        for (var i = 0; i < numbers.Length; i++)
+            if (!ProtocolVersion2Line.TryParseNumber(fields[4 + i], out numbers[i])) return null;
+        var attack = new LanMessage.EnemyAttack(
+            fields[10], id, kind, numbers[0], numbers[1], numbers[2], numbers[3], numbers[4], numbers[5]);
+        return LanProtocol.IsValid(attack) ? attack : null;
+    }
+
+    // EVENT enemydoorbreak <doorId> <map>
+    private static LanMessage.EnemyDoorBreak? TryParseEnemyDoorBreak(string line)
+    {
+        if (!ProtocolVersion2Line.TrySplit(line, fixedFieldCount: 3, hasPath: true, out var fields) ||
+            !ProtocolVersion2Line.TryParseIdentifier(fields[2], out var doorId)) return null;
+        var doorBreak = new LanMessage.EnemyDoorBreak(fields[3], doorId);
+        return LanProtocol.IsValid(doorBreak) ? doorBreak : null;
+    }
+
+    private static EnemyAttackKind? ParseEnemyAttackKind(string token) => token switch
+    {
+        "normal" => EnemyAttackKind.Normal,
+        "breakdoor" => EnemyAttackKind.BreakDoor,
+        _ => null
+    };
+
+    private static string EnemyAttackKindToken(EnemyAttackKind attack) => attack switch
+    {
+        EnemyAttackKind.Normal => "normal",
+        EnemyAttackKind.BreakDoor => "breakdoor",
+        _ => throw new ArgumentOutOfRangeException(nameof(attack))
+    };
 
     // STATE localpose <timeMs> <teleportCounter> <x> <y> <z> <yaw> <pitch> <crouch> <lantern> <map>
     private static bool TryParseLocalPose(string line, out LocalPose pose)
@@ -108,21 +206,183 @@ public static class GameInteractionProtocol
         return true;
     }
 
+    // EVENT sharedcallback playercollide <entityId> <state> <map>, EVENT sharedcallback entitycollide <parentId> <entityId>
+    // <state> <map>, EVENT sharedcallback interact <entityId> <map>, EVENT sharedcallback useitem <entityId> <item> <map>,
+    // EVENT sharedcallback pickup|flashback <entityId> <map>, EVENT sharedcallback combine <item> <otherItem> <map>,
+    // EVENT sharedcallback stickyattach <areaId> <entityId> <bodyId> <map>, EVENT sharedcallback autodisabled <entityId> <map>,
+    // EVENT buttonstate|lampstate <entityId> <0|1> <map>
+    private static LanMessage.WorldMessage? TryParseWorldMessage(string line)
+    {
+        var parts = line.Split(' ', 4);
+        var (keyword, kind) = (parts[1], parts.Length > 2 ? parts[2] : "");
+        var fixedFieldCount = (keyword, kind) switch
+        {
+            ("sharedcallback", "playercollide" or "useitem" or "combine") => 5,
+            ("sharedcallback", "entitycollide" or "stickyattach") => 6,
+            ("sharedcallback", "interact" or "pickup" or "flashback" or "autodisabled") => 4,
+            ("buttonstate" or "lampstate", _) => 4,
+            _ => 0
+        };
+        if (fixedFieldCount == 0 || !ProtocolVersion2Line.TrySplit(line, fixedFieldCount, hasPath: true, out var fields)) return null;
+        var map = fields[fixedFieldCount];
+        if (kind == "combine")
+            return keyword == "sharedcallback" && LanProtocol.IsValidItemName(fields[3]) && LanProtocol.IsValidItemName(fields[4])
+                ? new LanMessage.Combine(map, fields[3], fields[4])
+                : null;
+        var first = keyword == "sharedcallback" ? 3 : 2;
+        if (!ProtocolVersion2Line.TryParseIdentifier(fields[first], out var entityId)) return null;
+        switch (keyword, kind)
+        {
+            case ("sharedcallback", "playercollide") when ParseCollideState(fields[4]) is { } entered:
+                return new LanMessage.PlayerCollide(map, entityId, entered);
+            case ("sharedcallback", "entitycollide") when ProtocolVersion2Line.TryParseIdentifier(fields[4], out var childId) &&
+                ParseCollideState(fields[5]) is { } entered:
+                return new LanMessage.EntityCollide(map, entityId, childId, entered);
+            case ("sharedcallback", "interact"):
+                return new LanMessage.Interact(map, entityId);
+            case ("sharedcallback", "useitem") when LanProtocol.IsValidItemName(fields[4]):
+                return new LanMessage.UseItem(map, entityId, fields[4]);
+            case ("sharedcallback", "pickup"):
+                return new LanMessage.Pickup(map, entityId);
+            case ("sharedcallback", "flashback"):
+                return new LanMessage.Flashback(map, entityId);
+            case ("sharedcallback", "stickyattach") when ProtocolVersion2Line.TryParseIdentifier(fields[4], out var attachedId) &&
+                ProtocolVersion2Line.TryParseIdentifier(fields[5], out var bodyId):
+                return new LanMessage.StickyAttach(map, entityId, attachedId, bodyId);
+            case ("sharedcallback", "autodisabled"):
+                return new LanMessage.AutoDisabled(map, entityId);
+            case ("buttonstate", _) when fields[3] is "0" or "1":
+                return new LanMessage.ButtonState(map, entityId, fields[3] == "1");
+            case ("lampstate", _) when fields[3] is "0" or "1":
+                return new LanMessage.LampState(map, entityId, fields[3] == "1");
+            default:
+                return null;
+        }
+    }
+
+    private static bool? ParseCollideState(string wireName) => wireName switch
+    {
+        "1" => true,
+        "-1" => false,
+        _ => null
+    };
+
+    // EVENT interactionstart <entityId> <bodyId> <map>, EVENT interactionend <entityId> <bodyId> <ending> <map>,
+    // EVENT reportcontact|reportsettled|entityreleased <entityId> <map>, EVENT reportbroke <entityId> <state> <map>
+    private static GameEvent? TryParseInteractionEvent(string line)
+    {
+        var name = line.Split(' ', 3)[1];
+        var fixedFieldCount = name switch
+        {
+            "interactionstart" => 4,
+            "interactionend" => 5,
+            "reportcontact" or "reportsettled" or "entityreleased" => 3,
+            "reportbroke" => 3 + ProtocolVersion2Line.BodyStateFieldCount,
+            _ => 0
+        };
+        if (fixedFieldCount == 0 ||
+            !ProtocolVersion2Line.TrySplit(line, fixedFieldCount, hasPath: true, out var fields) ||
+            !ProtocolVersion2Line.TryParseIdentifier(fields[2], out var entityId)) return null;
+        var map = fields[fixedFieldCount];
+        switch (name)
+        {
+            case "interactionstart" when ProtocolVersion2Line.TryParseIdentifier(fields[3], out var bodyId):
+                return new GameEvent.InteractionStarted(entityId, bodyId, map);
+            case "interactionend" when ProtocolVersion2Line.TryParseIdentifier(fields[3], out var bodyId) && ParseEnding(fields[4]) is { } ending:
+                return new GameEvent.InteractionEnded(entityId, bodyId, ending, map);
+            case "reportcontact":
+                return new GameEvent.ReportContacted(entityId, map);
+            case "reportsettled":
+                return new GameEvent.ReportSettled(entityId, map);
+            case "entityreleased":
+                return new GameEvent.EntityReleased(entityId, map);
+            case "reportbroke" when ProtocolVersion2Line.TryParseBodyState(fields.AsSpan(3, ProtocolVersion2Line.BodyStateFieldCount), out var state):
+                return new GameEvent.ReportBroke(entityId, state, map);
+            default:
+                return null;
+        }
+    }
+
+    private static ChatEntryOutcome? ParseChatEntryOutcome(string wireName) => wireName switch
+    {
+        "ok" => ChatEntryOutcome.Ok,
+        "invalid" => ChatEntryOutcome.Invalid,
+        "invalid-author" => ChatEntryOutcome.InvalidAuthor,
+        "invalid-message" => ChatEntryOutcome.InvalidMessage,
+        "unavailable" => ChatEntryOutcome.Unavailable,
+        _ => null
+    };
+
+    private static InteractionEnding? ParseEnding(string wireName) => wireName switch
+    {
+        "released" => InteractionEnding.Released,
+        "thrown" => InteractionEnding.Thrown,
+        "too-far" => InteractionEnding.TooFar,
+        "destroyed" => InteractionEnding.Destroyed,
+        _ => null
+    };
+
+    // STATE reportedbodies <timeMs> <count> <entry>... <map>, where each entry is <entityId> <bodyId> <state>
+    private static GameEvent? TryParseReportedBodies(string line)
+    {
+        if (!ProtocolVersion2Line.TrySplit(line, fixedFieldCount: 4, hasPath: true, out var header) ||
+            !ulong.TryParse(header[2], NumberStyles.None, CultureInfo.InvariantCulture, out var timeMs) ||
+            !int.TryParse(header[3], NumberStyles.None, CultureInfo.InvariantCulture, out var count) ||
+            count > LanProtocol.MaximumBodies ||
+            !ProtocolVersion2Line.TrySplit(header[4], count * BodyEntryFieldCount, hasPath: true, out var fields)) return null;
+
+        var entries = new BodyEntry[count];
+        for (var index = 0; index < count; index++)
+        {
+            var entry = fields.AsSpan(index * BodyEntryFieldCount, BodyEntryFieldCount);
+            if (!ProtocolVersion2Line.TryParseIdentifier(entry[0], out var entityId) ||
+                !ProtocolVersion2Line.TryParseIdentifier(entry[1], out var bodyId) ||
+                !ProtocolVersion2Line.TryParseBodyState(entry[2..], out var state)) return null;
+            entries[index] = new(entityId, bodyId, state);
+        }
+        return new GameEvent.ReportedBodies(timeMs, entries, fields[^1]);
+    }
+
+    // The map an Event or State Update shows the local game on, if it names one.
+    public static string? LocalMapOf(GameEvent gameEvent) => gameEvent switch
+    {
+        GameEvent.LocalPoseReported reported => reported.Pose.Map,
+        GameEvent.MapEntered entered => entered.Map,
+        GameEvent.InteractionStarted started => started.Map,
+        GameEvent.InteractionEnded ended => ended.Map,
+        GameEvent.ReportContacted contacted => contacted.Map,
+        GameEvent.ReportSettled settled => settled.Map,
+        GameEvent.ReportBroke broke => broke.Map,
+        GameEvent.ReportedBodies reported => reported.Map,
+        GameEvent.EntityReleased released => released.Map,
+        GameEvent.WorldChanged changed => changed.Change.Map,
+        GameEvent.CheckPointReported reported => reported.CheckPoint.Map,
+        GameEvent.PlayerDied died => died.CheckPoint.Map,
+        _ => null
+    };
+
     // Replies that LocalGameCommands turns into an Unrecognized start, which the Joining Player reports as unavailable.
     public static bool IsUnrecognizedReply(GameEvent gameEvent) => gameEvent is
         GameEvent.StartCustomStoryResponded { Outcome: StartCustomStoryOutcome.Unrecognized } or GameEvent.UnknownCommandWarned;
 
-    public static string Display(ChatEntry entry) => $"chat:{entry.Author}:{entry.Message}";
+    // chatentry <authorColor> <messageColor> <author>:<message>, where "-" is the game default color.
+    public static string Display(ChatEntry entry) => $"chatentry {entry.AuthorColor?.Hex ?? "-"} - {entry.Author}:{entry.Message}";
 
     public static string StartCustomStory(string identifier) => $"startcustomstory:{identifier}";
 
-    // The first Command of every game Session; the Shared Pose needs both Capabilities.
-    public const string NegotiateSharedPose = $"protocol 2 {ProtocolNegotiation.Avatars} {ProtocolNegotiation.LocalPose}";
+    // The first Command of every game Session; the Shared Pose needs the first two Capabilities, Holds the third,
+    // Shared Callbacks the fourth, and `/tp-to-peer` the fifth.
+    public const string Negotiate =
+        $"protocol 2 {ProtocolNegotiation.Avatars} {ProtocolNegotiation.LocalPose} {ProtocolNegotiation.Interactions} " +
+        $"{ProtocolNegotiation.SharedCallbacks} {ProtocolNegotiation.PlayerPlace} {ProtocolNegotiation.Enemies}";
 
     // Uses the default model, with collision on.
     public static string AvatarCreate(string avatarIdentifier) => $"avatarcreate {avatarIdentifier}";
 
     public static string AvatarRemove(string avatarIdentifier) => $"avatarremove {avatarIdentifier}";
+
+    public static string AvatarEnemySight(string avatarIdentifier, bool enabled) =>
+        $"avatarenemysight {avatarIdentifier} {(enabled ? "1" : "0")}";
 
     // avatarpose <id> <timeMs> <teleportCounter> <x> <y> <z> <yaw> <pitch> <crouch> <lantern> <map>
     public static string AvatarPose(string avatarIdentifier, LanMessage.Pose pose) => string.Join(' ',
@@ -138,15 +398,112 @@ public static class GameInteractionProtocol
         pose.Lantern ? "1" : "0",
         pose.Map);
 
+    // playerplace <x> <y> <z> <yaw> <crouch> <map>: places the local player at the feet position, body yaw, and crouch of a Pose.
+    public static string PlayerPlace(LanMessage.Pose pose) => string.Join(' ',
+        "playerplace",
+        ProtocolVersion2Line.FormatNumber(pose.X),
+        ProtocolVersion2Line.FormatNumber(pose.Y),
+        ProtocolVersion2Line.FormatNumber(pose.Z),
+        ProtocolVersion2Line.FormatNumber(pose.Yaw),
+        pose.Crouch ? "1" : "0",
+        pose.Map);
+
+    public static string EnemyPose(LanMessage.EnemyPose pose) => string.Join(' ',
+        "enemypose", ProtocolVersion2Line.FormatIdentifier(pose.EntityId),
+        pose.TimeMs.ToString(CultureInfo.InvariantCulture), pose.TeleportCounter.ToString(CultureInfo.InvariantCulture),
+        ProtocolVersion2Line.FormatNumber(pose.X), ProtocolVersion2Line.FormatNumber(pose.Y), ProtocolVersion2Line.FormatNumber(pose.Z),
+        ProtocolVersion2Line.FormatNumber(pose.Yaw), pose.Clip, ProtocolVersion2Line.FormatNumber(pose.ClipTime), pose.Loop ? "1" : "0", pose.Map);
+
+    public static string EnemyAttack(LanMessage.EnemyAttack attack) => string.Join(' ',
+        "enemyattack", ProtocolVersion2Line.FormatIdentifier(attack.EntityId),
+        EnemyAttackKindToken(attack.Attack),
+        ProtocolVersion2Line.FormatNumber(attack.SizeX), ProtocolVersion2Line.FormatNumber(attack.SizeY),
+        ProtocolVersion2Line.FormatNumber(attack.SizeZ), ProtocolVersion2Line.FormatNumber(attack.OffsetX),
+        ProtocolVersion2Line.FormatNumber(attack.OffsetY), ProtocolVersion2Line.FormatNumber(attack.OffsetZ), attack.Map);
+
+    // shareddeath <episode> <death> <count> <checkPoint> <map>, numbered by this Game Peer for its own game.
+    public static string SharedDeath(int episode, LanMessage.SharedDeath death) => string.Join(' ',
+        "shareddeath", episode.ToString(CultureInfo.InvariantCulture), death.Death.ToString(CultureInfo.InvariantCulture),
+        death.Count.ToString(CultureInfo.InvariantCulture), death.CheckPoint, death.Map);
+
+    public static string EnemyDoorBreak(LanMessage.EnemyDoorBreak doorBreak) =>
+        $"enemydoorbreak {ProtocolVersion2Line.FormatIdentifier(doorBreak.DoorId)} {doorBreak.Map}";
+
+    public static string EnemyDrive(int id, string map) => $"enemydrive {ProtocolVersion2Line.FormatIdentifier(id)} {map}";
+    public static string EnemyRelease(int id, string map) => $"enemyrelease {ProtocolVersion2Line.FormatIdentifier(id)} {map}";
+
     public static string SubscribeLocalPose(int hz) => $"localpose subscribe {hz.ToString(CultureInfo.InvariantCulture)}";
 
     public const string UnsubscribeLocalPose = "localpose unsubscribe";
+
+    public static string SubscribeReportedBodies(int hz) => $"reportedbodies subscribe {hz.ToString(CultureInfo.InvariantCulture)}";
+
+    public const string UnsubscribeReportedBodies = "reportedbodies unsubscribe";
+
+    // Every Peer-Driven Entity Command ends with the map the Game Peer means, so it never reaches an entity in another map.
+    public static string EntityDrive(int entityId, string map) =>
+        $"entitydrive {ProtocolVersion2Line.FormatIdentifier(entityId)} {map}";
+
+    public static string EntityInteracting(int entityId, bool active, string map) =>
+        $"entityinteracting {ProtocolVersion2Line.FormatIdentifier(entityId)} {(active ? "1" : "0")} {map}";
+
+    public static string EntityRelease(int entityId, string map) =>
+        $"entityrelease {ProtocolVersion2Line.FormatIdentifier(entityId)} {map}";
+
+    public static string EntityBreak(int entityId, BodyState state, string map) =>
+        $"entitybreak {ProtocolVersion2Line.FormatIdentifier(entityId)} {ProtocolVersion2Line.FormatBodyState(state)} {map}";
+
+    // entitybodies <timeMs> <count> [<entry>...] <map>
+    public static string EntityBodies(ulong timeMs, IReadOnlyList<BodyEntry> entries, string map) => string.Join(' ',
+    [
+        "entitybodies",
+        timeMs.ToString(CultureInfo.InvariantCulture),
+        entries.Count.ToString(CultureInfo.InvariantCulture),
+        .. entries.Select(entry => string.Join(' ',
+            ProtocolVersion2Line.FormatIdentifier(entry.PropId),
+            ProtocolVersion2Line.FormatIdentifier(entry.BodyId),
+            ProtocolVersion2Line.FormatBodyState(entry.State))),
+        map
+    ]);
+
+    // The Command that makes another player's change in the local game. Every field is an identifier, a state, or a
+    // validated item name; the game looks up its own Map Script registration and never runs text it was sent.
+    public static string Apply(LanMessage.WorldMessage change) => change switch
+    {
+        LanMessage.PlayerCollide collide =>
+            $"sharedcallback playercollide {ProtocolVersion2Line.FormatIdentifier(collide.EntityId)} {CollideState(collide.Entered)} {collide.Map}",
+        LanMessage.EntityCollide collide => string.Join(' ',
+            "sharedcallback entitycollide", ProtocolVersion2Line.FormatIdentifier(collide.ParentId),
+            ProtocolVersion2Line.FormatIdentifier(collide.EntityId), CollideState(collide.Entered), collide.Map),
+        LanMessage.Interact interact => $"sharedcallback interact {ProtocolVersion2Line.FormatIdentifier(interact.EntityId)} {interact.Map}",
+        LanMessage.UseItem useItem when LanProtocol.IsValidItemName(useItem.Item) =>
+            $"sharedcallback useitem {ProtocolVersion2Line.FormatIdentifier(useItem.EntityId)} {useItem.Item} {useItem.Map}",
+        LanMessage.Pickup pickup => $"sharedcallback pickup {ProtocolVersion2Line.FormatIdentifier(pickup.EntityId)} {pickup.Map}",
+        LanMessage.Flashback flashback =>
+            $"sharedcallback flashback {ProtocolVersion2Line.FormatIdentifier(flashback.EntityId)} {flashback.Map}",
+        LanMessage.Combine combine when LanProtocol.IsValidItemName(combine.ItemA) && LanProtocol.IsValidItemName(combine.ItemB) =>
+            $"sharedcallback combine {combine.ItemA} {combine.ItemB} {combine.Map}",
+        LanMessage.StickyAttach sticky => $"sharedcallback stickyattach {ProtocolVersion2Line.FormatIdentifier(sticky.AreaId)} " +
+            $"{ProtocolVersion2Line.FormatIdentifier(sticky.EntityId)} {ProtocolVersion2Line.FormatIdentifier(sticky.BodyId)} {sticky.Map}",
+        LanMessage.AutoDisabled disabled =>
+            $"sharedcallback autodisabled {ProtocolVersion2Line.FormatIdentifier(disabled.EntityId)} {disabled.Map}",
+        LanMessage.ButtonState button =>
+            $"buttonstate {ProtocolVersion2Line.FormatIdentifier(button.EntityId)} {(button.SwitchedOn ? "1" : "0")} {button.Map}",
+        LanMessage.LampState lamp => $"lampstate {ProtocolVersion2Line.FormatIdentifier(lamp.EntityId)} {(lamp.Lit ? "1" : "0")} {lamp.Map}",
+        _ => throw new ArgumentException("The change cannot be applied.", nameof(change))
+    };
+
+    private static string CollideState(bool entered) => entered ? "1" : "-1";
 
     // A legacy Command; the game answers it after processing every line written before it.
     public const string Ping = "ping";
 }
 
 public enum StartCustomStoryOutcome { Starting, NotFound, Invalid, NotInMainMenu, Unrecognized }
+
+public enum ChatEntryOutcome { Ok, Invalid, InvalidAuthor, InvalidMessage, Unavailable }
+
+public enum InteractionEnding { Released, Thrown, TooFar, Destroyed }
 
 public abstract record GameEvent
 {
@@ -155,7 +512,27 @@ public abstract record GameEvent
     public sealed record StartCustomStoryResponded(StartCustomStoryOutcome Outcome) : GameEvent;
     public sealed record UnknownCommandWarned : GameEvent;
     public sealed record Ponged : GameEvent;
+    public sealed record ChatEntryResponded(ChatEntryOutcome Outcome) : GameEvent;
+    public sealed record EnemyPoseReported(LanMessage.EnemyPose Pose) : GameEvent;
+    public sealed record EnemyAttackReported(LanMessage.EnemyAttack Attack) : GameEvent;
+    public sealed record EnemyDoorBroke(LanMessage.EnemyDoorBreak DoorBreak) : GameEvent;
+    // The `enemies` Events about the current map's checkpoint registration, and the local player's own deaths on it.
+    public sealed record CheckPointReported(CheckPoint CheckPoint) : GameEvent;
+    public sealed record PlayerDied(int Death, CheckPoint CheckPoint) : GameEvent;
     public sealed record LocalPoseReported(LocalPose Pose) : GameEvent;
+    // The `interactions` Events about the local player's interactions, and the report of the bodies they decide.
+    public sealed record InteractionStarted(int EntityId, int BodyId, string Map) : GameEvent;
+    public sealed record InteractionEnded(int EntityId, int BodyId, InteractionEnding Ending, string Map) : GameEvent;
+    public sealed record ReportContacted(int EntityId, string Map) : GameEvent;
+    public sealed record ReportSettled(int EntityId, string Map) : GameEvent;
+    public sealed record ReportBroke(int EntityId, BodyState State, string Map) : GameEvent;
+    public sealed record ReportedBodies(ulong TimeMs, IReadOnlyList<BodyEntry> Entries, string Map) : GameEvent;
+    // A Map Visit started; the previous one's Peer-Driven Entities are released and its report is empty.
+    public sealed record MapEntered(string Map) : GameEvent;
+    // A script deactivated, removed, or moved a Peer-Driven Entity, and the game stopped following it.
+    public sealed record EntityReleased(int EntityId, string Map) : GameEvent;
+    // The local player triggered a Shared Callback, or switched a button or lit a lamp (the `sharedcallbacks` Events).
+    public sealed record WorldChanged(LanMessage.WorldMessage Change) : GameEvent;
     public sealed record Responded(string Keyword, string Outcome, IReadOnlyList<string> Fields) : GameEvent;
     public sealed record Unknown(string Line) : GameEvent;
 }

@@ -13,6 +13,8 @@ public sealed class SessionNetworkOptions
     public TimeSpan HeartbeatInterval { get; init; } = TimeSpan.FromSeconds(2);
     public TimeSpan HeartbeatTimeout { get; init; } = TimeSpan.FromSeconds(10);
     public int ProtocolVersion { get; init; } = LanProtocol.CurrentVersion;
+    // Carried with each Chat Entry this player sends; null leaves the Chat Author name in the game default color.
+    public ChatColor? ChatColor { get; init; }
 }
 
 public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
@@ -24,6 +26,20 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     // Poses have their own allowance: 30 per second, but a brief network stall releases them in one burst.
     public const int MaxInboundPoseBurst = 600;
     public const int InboundPosesPerSecond = 60;
+    // Bodies have an allowance of their own like Poses, so carrying a prop never spends the session message budget.
+    public const int MaxInboundBodiesBurst = 600;
+    public const int InboundBodiesPerSecond = 60;
+    // Hold messages have their own allowance: a cave-in Claims and settles up to 32 entities at once, but never for long.
+    public const int MaxInboundHoldBurst = 96;
+    public const int InboundHoldsPerSecond = 20;
+    // One Session Host reports all enemies, independently of the number of players. Headroom for 64 active enemies
+    // at up to 60 Hz, including a second of queued samples released after a network stall. Custom maps beyond this
+    // envelope need a larger allowance; the mp-test-cs encounter uses one.
+    public const int EnemyStreams = 64;
+    public const int MaxInboundEnemyPoseBurst = EnemyStreams * 60;
+    public const int InboundEnemyPosesPerSecond = EnemyStreams * 60;
+    // The Session Host and three Joining Players (ADR 0007).
+    public const int MaxPlayers = 4;
     private const string Incompatible = "The Multiplayer Session uses an incompatible protocol version.";
     private const string Full = "The Multiplayer Session is full.";
     private const string RateLimited = "You were disconnected for exceeding the Multiplayer Session's message rate limit.";
@@ -34,7 +50,13 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     private readonly Action<RelayLogEntry> _log;
     private readonly Func<string, ValueTask> _receiveCustomStoryStarted;
     private readonly Func<string, SharedCustomStoryStartOutcome, ValueTask> _receiveCustomStoryStartOutcome;
+    private readonly Func<LanMessage.EnemyPose, ValueTask> _receiveEnemyPose;
+    private readonly Func<LanMessage.EnemyEvent, ValueTask> _receiveEnemyEvent;
+    private readonly Func<LanMessage.DeathMessage, ValueTask> _receiveDeathMessage;
     private readonly Func<LanMessage.Pose, ValueTask> _receivePose;
+    private readonly Func<LanMessage.HoldMessage, ValueTask> _receiveHoldMessage;
+    private readonly Func<LanMessage.Bodies, ValueTask> _receiveBodies;
+    private readonly Func<LanMessage.WorldMessage, ValueTask> _receiveWorldMessage;
     private readonly SemaphoreSlim _handshakeSlots = new(MaxConcurrentHandshakes, MaxConcurrentHandshakes);
     private readonly object _gate = new();
     private readonly CancellationTokenSource _lifetime = new();
@@ -55,7 +77,13 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         Action<RelayLogEntry>? log = null,
         Func<string, ValueTask>? receiveCustomStoryStarted = null,
         Func<string, SharedCustomStoryStartOutcome, ValueTask>? receiveCustomStoryStartOutcome = null,
-        Func<LanMessage.Pose, ValueTask>? receivePose = null)
+        Func<LanMessage.Pose, ValueTask>? receivePose = null,
+        Func<LanMessage.HoldMessage, ValueTask>? receiveHoldMessage = null,
+        Func<LanMessage.Bodies, ValueTask>? receiveBodies = null,
+        Func<LanMessage.WorldMessage, ValueTask>? receiveWorldMessage = null,
+        Func<LanMessage.EnemyPose, ValueTask>? receiveEnemyPose = null,
+        Func<LanMessage.EnemyEvent, ValueTask>? receiveEnemyEvent = null,
+        Func<LanMessage.DeathMessage, ValueTask>? receiveDeathMessage = null)
     {
         _options = options;
         _notice = notice ?? (_ => ValueTask.CompletedTask);
@@ -64,7 +92,13 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         _log = log ?? (_ => { });
         _receiveCustomStoryStarted = receiveCustomStoryStarted ?? (_ => ValueTask.CompletedTask);
         _receiveCustomStoryStartOutcome = receiveCustomStoryStartOutcome ?? ((_, _) => ValueTask.CompletedTask);
+        _receiveEnemyPose = receiveEnemyPose ?? (_ => ValueTask.CompletedTask);
+        _receiveEnemyEvent = receiveEnemyEvent ?? (_ => ValueTask.CompletedTask);
+        _receiveDeathMessage = receiveDeathMessage ?? (_ => ValueTask.CompletedTask);
         _receivePose = receivePose ?? (_ => ValueTask.CompletedTask);
+        _receiveHoldMessage = receiveHoldMessage ?? (_ => ValueTask.CompletedTask);
+        _receiveBodies = receiveBodies ?? (_ => ValueTask.CompletedTask);
+        _receiveWorldMessage = receiveWorldMessage ?? (_ => ValueTask.CompletedTask);
     }
 
     public Guid SessionCorrelationId { get; private set; }
@@ -223,6 +257,61 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         outbound?.OfferPose(pose);
     }
 
+    public void SendEnemyPose(LanMessage.EnemyPose pose)
+    {
+        if (!LanProtocol.IsValid(pose)) return;
+        lock (_gate) _admittedOutbound?.OfferEnemyPose(pose);
+    }
+
+    // Ordered like a Hold message, and validated here like an Enemy Pose. Only the Session Host sends one.
+    public Task SendEnemyEventAsync(LanMessage.EnemyEvent message, CancellationToken cancellationToken) => message switch
+    {
+        LanMessage.EnemyAttack attack when LanProtocol.IsValid(attack) => SendOrderedAsync(attack, hostOnly: true),
+        LanMessage.EnemyDoorBreak doorBreak when LanProtocol.IsValid(doorBreak) => SendOrderedAsync(doorBreak, hostOnly: true),
+        _ => Task.CompletedTask
+    };
+
+    // Ordered like an enemy attack: a Joining Player sends only its own deaths, and the Session Host only the episodes.
+    public Task SendDeathMessageAsync(LanMessage.DeathMessage message, CancellationToken cancellationToken) => message switch
+    {
+        LanMessage.PlayerDeath death when LanProtocol.IsValid(death) => SendOrderedAsync(death, joiningOnly: true),
+        LanMessage.SharedDeath death when LanProtocol.IsValid(death) => SendOrderedAsync(death, hostOnly: true),
+        _ => Task.CompletedTask
+    };
+
+    // Latest-wins like the Pose, and validated here for the same reason.
+    public void SendBodies(LanMessage.Bodies bodies)
+    {
+        if (!LanProtocol.IsValid(bodies)) return;
+        LanOutbound? outbound;
+        lock (_gate) outbound = _joinedOutbound ?? _admittedOutbound;
+        outbound?.OfferBodies(bodies);
+    }
+
+    // Ordered and exactly once, like chat: a Hold message that cannot be queued ends the Multiplayer Session.
+    public Task SendHoldMessageAsync(LanMessage.HoldMessage message, CancellationToken cancellationToken) =>
+        SendOrderedAsync(message);
+
+    // A world message that cannot be queued ends the Multiplayer Session the same way.
+    public Task SendWorldMessageAsync(LanMessage.WorldMessage message, CancellationToken cancellationToken) =>
+        SendOrderedAsync(message);
+
+    private async Task SendOrderedAsync(LanMessage message, bool hostOnly = false, bool joiningOnly = false)
+    {
+        LanOutbound? outbound;
+        TcpClient? connection;
+        lock (_gate)
+        {
+            outbound = hostOnly ? _admittedOutbound : joiningOnly ? _joinedOutbound : _joinedOutbound ?? _admittedOutbound;
+            connection = hostOnly ? _admittedConnection : joiningOnly ? _joinedConnection : _joinedConnection ?? _admittedConnection;
+        }
+        if (outbound is null || connection is null) return;
+        if (outbound.TryWrite(new(message))) return;
+
+        connection.Dispose();
+        await _notice("The remote Game Peer could not keep up with interaction traffic.");
+    }
+
     public async Task SendChatAsync(ChatEntry entry, CancellationToken cancellationToken)
     {
         LanOutbound? outbound;
@@ -233,7 +322,7 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
             connection = _joinedConnection ?? _admittedConnection;
         }
         if (outbound is null || connection is null) return;
-        if (outbound.TryWrite(new(new LanMessage.ChatEntry(entry.Author, entry.Message)))) return;
+        if (outbound.TryWrite(new(new LanMessage.ChatEntry(entry.Author, entry.Message, _options.ChatColor?.Hex)))) return;
 
         connection.Dispose();
         await _notice("The remote Game Peer could not keep up with chat traffic.");
@@ -441,10 +530,15 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     {
         var role = isHost ? RelayRole.Host : RelayRole.Joining;
         var failure = RelayFailureCategory.None;
+        // The Session Host applies one player's Sender Allowance to each Joining Player; a Joining Player's
+        // connection to the Session Host carries every other player in the largest Multiplayer Session.
+        var playersCarried = isHost ? 1 : MaxPlayers - 1;
         var windowStart = DateTime.UtcNow;
         var windowCount = 0;
-        var poseAllowance = (double)MaxInboundPoseBurst;
-        var poseAllowanceAt = windowStart;
+        var poseAllowance = new InboundAllowance(playersCarried * MaxInboundPoseBurst, playersCarried * InboundPosesPerSecond, windowStart);
+        var enemyAllowance = new InboundAllowance(MaxInboundEnemyPoseBurst, InboundEnemyPosesPerSecond, windowStart);
+        var bodiesAllowance = new InboundAllowance(playersCarried * MaxInboundBodiesBurst, playersCarried * InboundBodiesPerSecond, windowStart);
+        var holdAllowance = new InboundAllowance(playersCarried * MaxInboundHoldBurst, playersCarried * InboundHoldsPerSecond, windowStart);
         try
         {
             while (!cancellationToken.IsCancellationRequested)
@@ -454,17 +548,14 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
 
                 var now = DateTime.UtcNow;
                 bool withinAllowance;
-                if (message is LanMessage.Pose)
-                {
-                    poseAllowance = Math.Min(MaxInboundPoseBurst,
-                        poseAllowance + (now - poseAllowanceAt).TotalSeconds * InboundPosesPerSecond);
-                    poseAllowanceAt = now;
-                    withinAllowance = --poseAllowance >= 0;
-                }
+                if (message is LanMessage.Pose) withinAllowance = poseAllowance.TryTake(now);
+                else if (message is LanMessage.EnemyPose) withinAllowance = enemyAllowance.TryTake(now);
+                else if (message is LanMessage.Bodies) withinAllowance = bodiesAllowance.TryTake(now);
+                else if (message is LanMessage.HoldMessage) withinAllowance = holdAllowance.TryTake(now);
                 else
                 {
                     if (now - windowStart >= InboundRateWindow) { windowStart = now; windowCount = 0; }
-                    withinAllowance = ++windowCount <= MaxInboundMessagesPerWindow;
+                    withinAllowance = ++windowCount <= playersCarried * MaxInboundMessagesPerWindow;
                 }
                 if (!withinAllowance)
                 {
@@ -476,7 +567,8 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
                 switch (message)
                 {
                     case LanMessage.ChatEntry chat:
-                        await _receiveChat(new ChatEntry(chat.Author, chat.Message));
+                        await _receiveChat(new ChatEntry(
+                            chat.Author, chat.Message, ChatColor.TryParse(chat.AuthorColor, out var authorColor) ? authorColor : null));
                         break;
                     case LanMessage.CustomStoryStarted started when !isHost:
                         Log(RelaySeverity.Information, RelayEventName.CustomStoryStartReceived, role, "Admitted->Admitted",
@@ -489,8 +581,30 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
                             customStoryStartOutcome: reported.Outcome);
                         await _receiveCustomStoryStartOutcome(reported.Identifier, reported.Outcome);
                         break;
+                    case LanMessage.EnemyPose enemy when !isHost:
+                        await _receiveEnemyPose(enemy);
+                        break;
+                    case LanMessage.EnemyEvent enemyEvent when !isHost:
+                        await _receiveEnemyEvent(enemyEvent);
+                        break;
+                    case LanMessage.PlayerDeath death when isHost:
+                        await _receiveDeathMessage(death);
+                        break;
+                    case LanMessage.SharedDeath death when !isHost:
+                        await _receiveDeathMessage(death);
+                        break;
                     case LanMessage.Pose pose:
                         await _receivePose(pose);
+                        break;
+                    case LanMessage.Bodies bodies:
+                        await _receiveBodies(bodies);
+                        break;
+                    // Only the Multiplayer Relay's arbiter denies Claims.
+                    case LanMessage.HoldMessage hold when hold is not LanMessage.ClaimDenied || !isHost:
+                        await _receiveHoldMessage(hold);
+                        break;
+                    case LanMessage.WorldMessage world:
+                        await _receiveWorldMessage(world);
                         break;
                     case LanMessage.Heartbeat:
                         break;

@@ -193,7 +193,13 @@ public sealed class SharedCustomStoryStartTests
         public event Action? MultiplayerSessionEnded { add { } remove { } }
         public event Action? OtherPlayerPresenceChanged { add { } remove { } }
         public int OtherPlayerArrival => 0;
+        public void SendEnemyPose(LanMessage.EnemyPose pose) { }
+        public Task SendEnemyEventAsync(LanMessage.EnemyEvent message, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task SendDeathMessageAsync(LanMessage.DeathMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
         public void SendPose(LanMessage.Pose pose) { }
+        public void SendBodies(LanMessage.Bodies bodies) { }
+        public Task SendHoldMessageAsync(LanMessage.HoldMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task SendWorldMessageAsync(LanMessage.WorldMessage message, CancellationToken cancellationToken) => Task.CompletedTask;
         public bool JoiningPlayerAdmitted { get; set; }
         public bool IsJoined { get; set; }
         public List<string> SentStarts { get; } = [];

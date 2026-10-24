@@ -32,6 +32,11 @@ public sealed class SharedPose
     private int _working;
     // The OtherPlayerArrival the Avatar was created for, or NoAvatar.
     private int _avatarArrival = NoAvatar;
+    private string? _localMap;
+    // Immutable snapshot; list-shaped for the other players (ADR 0008).
+    private string[] _otherMaps = [];
+    // Only the command worker changes the Avatar's setting, after creating it.
+    private bool _enemySight;
 
     public SharedPose(
         ISessionOperations sessions,
@@ -47,7 +52,7 @@ public sealed class SharedPose
         _log = log;
         _negotiation = negotiation;
         _cancellationToken = cancellationToken;
-        sessions.OtherPlayerPresenceChanged += Update;
+        sessions.OtherPlayerPresenceChanged += HandlePresenceChanged;
         // After a local game reconnect, the other player may already be present.
         Update();
     }
@@ -66,9 +71,27 @@ public sealed class SharedPose
     // Latest-wins: replaces any received Pose not yet written to the local game. Never blocks.
     public void HandleReceivedPose(LanMessage.Pose pose)
     {
+        Volatile.Write(ref _otherMaps, [pose.Map]);
         Volatile.Write(ref _receivedPose, pose);
         Update();
     }
+
+    public void HandleLocalGameEvent(GameEvent gameEvent)
+    {
+        if (GameInteractionProtocol.LocalMapOf(gameEvent) is not { } map || map == Volatile.Read(ref _localMap)) return;
+        Volatile.Write(ref _localMap, map);
+        Update();
+    }
+
+    private void HandlePresenceChanged()
+    {
+        Volatile.Write(ref _otherMaps, []);
+        Update();
+    }
+
+    private bool ShouldEnableEnemySight => _avatarArrival != NoAvatar && !_sessions.IsJoined &&
+        _negotiation.Result.GrantsEnemies && Volatile.Read(ref _localMap) is { } map &&
+        Volatile.Read(ref _otherMaps).Contains(map);
 
     // The local game answered the ping, so it has processed every Pose written before it.
     public void HandlePong()
@@ -93,7 +116,7 @@ public sealed class SharedPose
                 _log(ConnectionLogSeverity.Warning, LocalGameEventName.SharedPoseCommandFailed, line);
                 if (Interlocked.Exchange(ref _modelMissingNoticeShown, 1) == 0) return _displaySystem(AvatarModelMissingNotice);
                 break;
-            case { Keyword: "avatarcreate" or "avatarremove" or "avatarpose" or "localpose", Outcome: not "ok" }:
+            case { Keyword: "avatarcreate" or "avatarremove" or "avatarpose" or "avatarenemysight" or "localpose", Outcome: not "ok" }:
                 _log(ConnectionLogSeverity.Warning, LocalGameEventName.SharedPoseCommandFailed, line);
                 break;
         }
@@ -118,6 +141,7 @@ public sealed class SharedPose
                 {
                     var previous = _avatarArrival;
                     _avatarArrival = arrival;
+                    _enemySight = false;
                     // A replacement gets a fresh Avatar: its Poses do not continue the timeline of the player who left.
                     if (previous != NoAvatar)
                         await _writeLine(GameInteractionProtocol.AvatarRemove(AvatarIdentifier), _cancellationToken);
@@ -127,6 +151,13 @@ public sealed class SharedPose
                         await _writeLine(GameInteractionProtocol.SubscribeLocalPose(LocalPoseRateHz), _cancellationToken);
                     else if (arrival == NoAvatar)
                         await _writeLine(GameInteractionProtocol.UnsubscribeLocalPose, _cancellationToken);
+                    continue;
+                }
+                var enemySight = ShouldEnableEnemySight;
+                if (enemySight != _enemySight)
+                {
+                    _enemySight = enemySight;
+                    await _writeLine(GameInteractionProtocol.AvatarEnemySight(AvatarIdentifier, enemySight), _cancellationToken);
                     continue;
                 }
                 if (_avatarArrival == NoAvatar) Interlocked.Exchange(ref _receivedPose, null);
@@ -143,6 +174,7 @@ public sealed class SharedPose
                 Volatile.Write(ref _working, 0);
                 // Work offered after the checks above but before the release would otherwise wait for the next Update.
                 var pending = _sessions.OtherPlayerArrival != _avatarArrival ||
+                    ShouldEnableEnemySight != _enemySight ||
                     Volatile.Read(ref _receivedPose) is not null && (_avatarArrival == NoAvatar || CanWritePose);
                 if (!pending || Interlocked.CompareExchange(ref _working, 1, 0) != 0) return;
             }

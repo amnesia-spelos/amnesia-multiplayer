@@ -7,7 +7,7 @@ namespace Multimnesia.Client;
 
 public sealed record OutboundMessage(LanMessage Message, TaskCompletionSource? Sent = null);
 
-// The frames for one admitted Game Peer: session messages in order, then the newest Pose whenever none are waiting.
+// The frames for one admitted Game Peer: session messages in order, then the newest Pose and bodies whenever none are waiting.
 public sealed class LanOutbound(int capacity)
 {
     private readonly Channel<OutboundMessage> _messages = Channel.CreateBounded<OutboundMessage>(new BoundedChannelOptions(capacity)
@@ -22,7 +22,10 @@ public sealed class LanOutbound(int capacity)
         SingleReader = true,
         FullMode = BoundedChannelFullMode.DropWrite
     });
+    private readonly Dictionary<(string Map, int EntityId), LanMessage.EnemyPose> _enemyPoses = [];
+    private readonly Queue<(string Map, int EntityId)> _enemyOrder = [];
     private LanMessage.Pose? _pose;
+    private LanMessage.Bodies? _bodies;
 
     // False when the session messages are full or the outbound is complete.
     public bool TryWrite(OutboundMessage message)
@@ -39,13 +42,43 @@ public sealed class LanOutbound(int capacity)
         _wake.Writer.TryWrite(true);
     }
 
+    // Latest-wins, beside the Pose: replaces any bodies not yet sent.
+    public void OfferBodies(LanMessage.Bodies bodies)
+    {
+        Volatile.Write(ref _bodies, bodies);
+        _wake.Writer.TryWrite(true);
+    }
+
+    // One newest-only slot per enemy. FIFO across slots keeps a busy enemy from starving the rest.
+    public void OfferEnemyPose(LanMessage.EnemyPose pose)
+    {
+        lock (_enemyPoses)
+        {
+            var key = (pose.Map, pose.EntityId);
+            if (!_enemyPoses.ContainsKey(key)) _enemyOrder.Enqueue(key);
+            _enemyPoses[key] = pose;
+        }
+        _wake.Writer.TryWrite(true);
+    }
+
+    private LanMessage.EnemyPose? TakeEnemyPose()
+    {
+        lock (_enemyPoses)
+        {
+            if (!_enemyOrder.TryDequeue(out var key)) return null;
+            var pose = _enemyPoses[key];
+            _enemyPoses.Remove(key);
+            return pose;
+        }
+    }
+
     public void Complete()
     {
         _messages.Writer.TryComplete();
         _wake.Writer.TryComplete();
     }
 
-    // Single reader. Ends once complete and the session messages are sent; an unsent Pose is dropped.
+    // Single reader. Ends once complete and the session messages are sent; an unsent Pose or bodies are dropped.
     public async IAsyncEnumerable<OutboundMessage> ReadAllAsync([EnumeratorCancellation] CancellationToken cancellationToken)
     {
         while (true)
@@ -53,6 +86,8 @@ public sealed class LanOutbound(int capacity)
             if (_messages.Reader.TryRead(out var message)) { yield return message; continue; }
             if (_messages.Reader.Completion.IsCompleted) yield break;
             if (Interlocked.Exchange(ref _pose, null) is { } pose) { yield return new(pose); continue; }
+            if (Interlocked.Exchange(ref _bodies, null) is { } bodies) { yield return new(bodies); continue; }
+            if (TakeEnemyPose() is { } enemy) { yield return new(enemy); continue; }
             if (!await _wake.Reader.WaitToReadAsync(cancellationToken)) yield break;
             _wake.Reader.TryRead(out _);
         }

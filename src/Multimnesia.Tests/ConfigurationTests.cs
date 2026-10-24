@@ -14,7 +14,42 @@ public sealed class ConfigurationTests
         Assert.Equal(5000, options.RelayPort);
         Assert.Equal(10, options.JoinTimeoutSeconds);
         Assert.Equal("Information", options.LogLevel);
+        Assert.Null(options.ChatColor);
+        Assert.Null(options.ParsedChatColor);
         Assert.Empty(options.Validate());
+    }
+
+    [Theory]
+    [InlineData("FF00FF")]
+    [InlineData("ff00ff")]
+    public void Game_peer_accepts_a_six_hex_digit_chat_color(string value)
+    {
+        var options = new GamePeerOptions { ChatColor = value };
+
+        Assert.Empty(options.Validate());
+        Assert.Equal("FF00FF", options.ParsedChatColor?.Hex);
+    }
+
+    [Theory]
+    [InlineData("FF00")]
+    [InlineData("#FF00FF")]
+    [InlineData("FF00FFAA")]
+    [InlineData("ZZZZZZ")]
+    public void Game_peer_rejects_a_malformed_chat_color(string value)
+    {
+        var options = new GamePeerOptions { ChatColor = value };
+
+        Assert.Contains(options.Validate(), error => error.Contains("GamePeer:ChatColor", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData("--color", "ff00ff")]
+    [InlineData("--GamePeer:ChatColor", "ff00ff")]
+    public void Both_command_line_forms_set_the_chat_color(string key, string value)
+    {
+        var options = GamePeerConfiguration.Load([key, value], jsonPath: null);
+
+        Assert.Equal("ff00ff", options.ChatColor);
     }
 
     [Fact]

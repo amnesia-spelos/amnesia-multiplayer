@@ -21,15 +21,15 @@ The player whose computer runs the Multiplayer Relay.
 _Avoid_: Server, authority
 
 **Joining Player**:
-The second player whose Game Peer joins the Session Host's Multiplayer Session over the local network.
+A player whose Game Peer joins the Session Host's Multiplayer Session over the local network; a Multiplayer Session may have several.
 _Avoid_: Client, guest
 
 **Shared Custom Story Start**:
-The Session Host's fresh start of a Custom Story, reproduced on the Joining Player's game within the same Multiplayer Session.
+The Session Host's fresh start of a Custom Story, reproduced on every Joining Player's game within the same Multiplayer Session.
 _Avoid_: Story sync, map sync, remote start
 
 **Shared Pose**:
-A player's Pose, continuously reproduced as an Avatar in the other player's game within the same Multiplayer Session.
+A player's Pose, continuously reproduced as an Avatar in every other player's game within the same Multiplayer Session.
 _Avoid_: Movement sync, position sync, remote player, ghost
 
 **Hold**:
@@ -52,6 +52,34 @@ _Avoid_: Revocation, rejection
 The part of a Hold during which the Holder is not interacting with the entity but still decides where it goes, until it comes to rest: after the Holder lets go, or from the start of a Hold taken by touch.
 _Avoid_: Cooldown, flight, release window
 
+**Shared Callback**:
+A Map Script callback that a player triggers in their own game, or that a Shared Enemy triggers in the Session Host's game, run in every other player's game too, as the callback that game's own Map Script registered for the same entities. Picking up a map-placed non-consumable item, combining two inventory items, setting off a Flashback area, a sticky area attaching an entity the player Holds, and a Shared Enemy disabling itself at the end of its patrol are Shared Callbacks too: every other game makes the same pickup, combine, flashback, sticky attach, or disable for itself. Consumable pickups and combines stay local.
+_Avoid_: Callback sync, remote script, trigger relay
+
+**Pending Shared Callback**:
+A Shared Callback for a map a player's game is not on, kept until that game enters the map.
+_Avoid_: Queued trigger, deferred callback
+
+**Shared Enemy**:
+A map-placed enemy that is one threat to every player in a Multiplayer Session, able to hunt and attack any of them, rather than a separate copy in each player's game.
+_Avoid_: Synced monster, remote enemy, AI sync
+
+**Enemy Pose**:
+The Session Host's report of one Shared Enemy's position, rotation, and animation, from which every other game drives its copy of that enemy.
+_Avoid_: Enemy sync, monster state
+
+**Shared Death**:
+One episode in which every player on a map whose current checkpoint has a death callback dies, decided by the Session Host's Game Peer when any of them dies there. Each game runs its own checkpoint and callback once, with the Session Host's checkpoint count. A death on a map without a callback is not a Shared Death: the dead player respawns, and Shared Enemies are left as they are.
+_Avoid_: Shared kill, death sync, team wipe
+
+**Inbound Allowance**:
+How many messages of one kind a Game Peer accepts on one connection, as a burst it may receive at once and a rate at which that burst refills, before it disconnects the connection for flooding. A Joining Player's Inbound Allowance covers every other player in the largest Multiplayer Session.
+_Avoid_: Budget, rate limit, quota
+
+**Sender Allowance**:
+The Inbound Allowance the Session Host applies to each Joining Player, sized for one player. The Multiplayer Relay forwards only the messages that stay within it.
+_Avoid_: Per-sender budget, relay limit
+
 ## Trusted-LAN boundary
 
-The Game Interaction Protocol connection between a Game Peer and its local game is loopback-only and never crosses the network. The Multiplayer Relay's LAN listener is intended for a private, firewalled network between trusted computers: it is unauthenticated, so the Session Host must control access at the firewall, not the protocol. The LAN wire protocol (`LanProtocol`) carries only bounded, structurally validated Chat Entries, Join/Admission negotiation, Heartbeats, Departure notices, Shared Custom Story Starts with their outcomes, and Poses for the Shared Pose. A Shared Custom Story Start may name an installed Custom Story by its Custom Story Identifier, and a Pose carries only numbers, two flags, and a map path that the receiving Game Peer formats into its own `avatarpose` line, but the protocol has no message type that names or executes an arbitrary remote script or command, so a peer on the LAN cannot use it to run code on the other machine.
+The Game Interaction Protocol connection between a Game Peer and its local game is loopback-only and never crosses the network. The Multiplayer Relay's LAN listener is intended for a private, firewalled network between trusted computers: it is unauthenticated, so the Session Host must control access at the firewall, not the protocol. The LAN wire protocol (`LanProtocol`) carries only bounded, structurally validated Chat Entries, each with an optional author Chat Color of exactly six hex digits, Join/Admission negotiation, Heartbeats, Departure notices, Shared Custom Story Starts with their outcomes, Poses for the Shared Pose, Holds: Claims, Claim Denials, interaction starts and ends, breaks, settles, and the Holder's body stream, Shared Callbacks with button and lamp states, Enemy Poses, enemy attacks and door breaks, and Shared Death reports and episodes. A Chat Color is only digits that the receiving Game Peer formats into its own `chatentry` line, a Shared Custom Story Start may name an installed Custom Story by its Custom Story Identifier, and a Pose carries only numbers, two flags, and a map path that the receiving Game Peer formats into its own `avatarpose` line. An Enemy Pose names a map-placed enemy by map path and integer entity ID, and carries a sender clock, teleport counter, bounded feet position and yaw, a bounded single-field animation identifier, clip time, and a loop flag. An enemy attack names a map-placed enemy the same way, and carries one of two attack kinds and a box of six bounded numbers, with a positive size; it never carries damage. An enemy door break names a map-placed door by map path and integer entity ID only. Only the Session Host sends Enemy Poses, enemy attacks, and door breaks; the receiving Game Peer composes its own `enemydrive`, `enemypose`, `enemyrelease`, `enemyattack`, and `enemydoorbreak` lines, its game decides whether the attack hits its own player, and it breaks only its own copy of the door. A death report carries only a map path, a positive death number, and the number of the last episode received; a Shared Death episode carries a map path, a positive episode number, two non-negative integers (the death it answers and the checkpoint count), and a checkpoint name of 1 to 64 printable ASCII characters without spaces. Only a Joining Player sends death reports and only the Session Host sends episodes; the receiving Game Peer composes its own `shareddeath` line, and the game runs only the checkpoint callback its own Map Script registered, never one a message names. A Hold message names a map-placed entity only by a map path and integer prop and body IDs, and carries only bounded numbers, unit quaternions, a flag, and at most 32 bodies; the receiving Game Peer composes every `entity...` line it writes to its own game. A Shared Callback names a Map Script registration, an item to pick up, a Flashback area, a sticky area and the body it attached, or an enemy that disabled itself only by a map path, integer entity and body IDs, a collide state, and for an item use or a combine one or two item names of 1 to 64 printable ASCII characters without spaces; a button or lamp state names its entity by a map path and an integer ID and carries one flag. The receiving Game Peer composes every `sharedcallback`, `buttonstate`, and `lampstate` line it writes to its own game, and the game runs only the callback its own Map Script registered for those identifiers, picks up only its own copy of the named item, plays only its own Flashback area's flashback, attaches only its own copy of the named body to its own sticky area, and disables only its own copy of the named enemy. A shared pickup or combine changes the receiving player's own inventory, never one a message describes. So `LanProtocol` may name an installed Custom Story to start, carry the other player's Pose, Enemy Poses, and enemy attacks, name a door an enemy broke, name a checkpoint for a Shared Death, carry Holds on map-placed entities by integer identifier, and name a Map Script registration, an item to pick up, a Flashback area, a sticky area and the body it attached, an enemy that disabled itself, a button, or a lamp by identifier, but it has no message type that names or executes a function, a script, or an arbitrary remote command, so a peer on the LAN cannot use it to run code of its choosing on the other machine.
