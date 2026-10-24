@@ -37,7 +37,7 @@ To produce a release archive instead of a bare Game Peer folder, run `.\scripts\
 
 Game Peer versions follow SemVer as `0.MINOR.PATCH` while the project is in alpha:
 
-- Each codenamed milestone bumps the minor version; fixes to that milestone bump the patch version under the same codename. The current release is `v0.2.0`, codename "Grasp". `main` builds `v0.3.0`, codename "Dread", which is in development.
+- Each codenamed milestone bumps the minor version; fixes to that milestone bump the patch version under the same codename. The current release is `v0.3.0`, codename "Dread".
 - There is no `-alpha` suffix. Instead, GitHub releases are marked pre-release.
 - Release titles and archive names include the codename, for example `amnesia-multiplayer-v0.3.0-dread-win-x64.zip`.
 
@@ -75,7 +75,7 @@ Once both players are in the Custom Story, each Game Peer streams its own player
 - It requires an `Amnesia.exe` that supports Avatars. If yours does not, you see `Your game does not support Avatars; movement will not be shared.` once, and chat and Custom Story starts keep working.
 - If the skeleton entity is not installed, you see `The Avatar model is not installed; the other player will be invisible.` and the Multiplayer Session continues.
 
-An Avatar walks, idles, crouches, and looks up and down as its player does. It makes no footsteps, and enemies ignore it. See [Expected behavior and limitations](#expected-behavior-and-limitations).
+An Avatar walks, idles, crouches, and looks up and down as its player does. It makes no footsteps, so enemies cannot hear it, but the Session Host's Shared Enemies can see, chase, and attack the Joining Player's Avatar. See [Expected behavior and limitations](#expected-behavior-and-limitations).
 
 ## Player commands
 
@@ -317,7 +317,7 @@ On 2026-10-15 the pickup, combine, and flashback steps (2–7 and 12) passed on 
 
 ## Expected behavior and limitations
 
-Two players host, join, chat, start the same Custom Story together, see each other move, and share how they move props, doors, levers, valves, and sliders. What that does *not* cover:
+Two players host, join, chat, start the same Custom Story together, see each other move, share how they move props, doors, levers, valves, and sliders, and face the same Grunts and Brutes as Shared Enemies. What that does *not* cover:
 
 - **Only Custom Story starts are shared.** In the main game, each player starts or loads it themselves (#23). Once both are on the same map, the Shared Pose and Holds work there as in a Custom Story.
 - **Map changes and returning to the main menu are not shared.** Only the Session Host's fresh Custom Story start is. Continue, Load Game, death reloads, quitting, and every map transition after the start are local.
@@ -326,6 +326,7 @@ Two players host, join, chat, start the same Custom Story together, see each oth
 - **`/tp-to-peer` does not follow the other player to another map.** It places you only on the map you are both on. A player left behind on another map has to reach it themselves.
 - **A Shared Enemy may visibly jump when a player arrives on or leaves its map mid-chase.** A Shared Enemy is shared only while both players are on its map (ADR 0009). When the Joining Player arrives, or the Session Host arrives on the Joining Player's map, the Joining Player's own enemy is replaced by the Session Host's and jumps to wherever that one is. When either player leaves, or the Session Host leaves the Multiplayer Session, the Joining Player's enemy regains its own AI from the newest Enemy Pose, slightly ahead of where it was shown, and the Session Host's enemy carries on undisturbed. The two games' enemies then go their own way until the players share the map again.
 - **Shared Enemies see the Joining Player but do not hear them.** With a game build supporting `avatarenemysight` and `enemyattack`, the Session Host's enemies see and attack both players while they share a map and keep their current target until losing sight, and the doors they break and the callbacks they trigger are shared. Avatars remain silent. Grunts and Brutes are Shared Enemies: the game loads a Brute as a Grunt with its own model, sounds, and attacks. Kaernks stay separate in each game until amnesia-tdd-tcp#103. A custom enemy is shared only if its entity file's `EntityType` is `Enemy_Grunt`. An enemy-triggered callback or door break while the players are on different maps happens only in the game where it happened.
+- **Hallucinations vanish only for the Session Host's player.** A hallucination enemy dissolves when the Session Host's player comes near it; the Joining Player neither triggers its disappearance nor sees the full poof (#83). A chapter 1 Shared Enemy encounter of the main game has not yet had its own walkthrough (#79).
 - Avatar footstep sounds.
 - **What Entity Interaction Sync does not share.** Holds share how players move map-placed props, doors, levers, valves, and sliders, and breaks of props a player Holds. These are not shared:
   - Consumable items. Tinderboxes, lamp oil, sanity potions, and laudanum are picked up and combined by each player alone, and so is any item a script or a broken prop spawns, such as a potion spilled from a jar. Non-consumable pickups and combines are Shared Callbacks.
