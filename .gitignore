@@ -489,3 +489,6 @@ output/
 # Generated Avatar caches (sources are .dae and .dae_anim)
 resources/entities/multiplayer/skeleton_spelos/TheSkeletonSpelos.msh
 resources/entities/multiplayer/skeleton_spelos/TheSkeletonSpelos_*.anm
+
+# VPS experiment: friend tunnel folder with a throwaway private key
+scripts/vps/out/

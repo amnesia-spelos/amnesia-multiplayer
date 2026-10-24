@@ -57,6 +57,20 @@ Session Host's measurements (2026-09-25): `fra` 17 ms, `ewr` 101, `ord` 123, `se
 
 The Joining Player can check the path with `Test-NetConnection <vps-ip> -Port 5000`. Ping always fails: the firewall group allows no ICMP.
 
+## Variant: the friend hosts
+
+The VPS owner joins and a friend is the Session Host. The Relay runs in the Session Host's Game Peer, so the Session Host gets LAN-like latency and the Joining Player carries the whole path. The friend needs no Vultr access, no repository and no IP exchange:
+
+1. `.\scripts\vps\up.ps1 -FriendHosts`. It allows the relay port from this PC only, opens TCP 443 to anyone until `down.ps1`, and generates a throwaway SSH key. The key can only open the relay's reverse forward (`restrict,permitlisten`, user `tunnel`, no shell), and `AllowUsers root@<this PC>` keeps root to this PC on 443 too. Once the VPS exists it writes `scripts\vps\out\multimnesia-tunnel.zip` (`tunnel.cmd` + `tunnel_key`).
+2. Send the friend the zip. It is valid only for this VPS.
+3. Friend, in this order: extract, double-click `tunnel.cmd` and keep the window open, start the Game Peer and the game, type `/host`. SmartScreen may ask once (More info → Run anyway).
+4. This PC: `/join <vps-ip>`.
+5. `.\scripts\vps\down.ps1` closes the 443 rule, deletes the VPS (revoking the key) and deletes the zip.
+
+The tunnel does not care about `/host`: each join opens a fresh connection to `127.0.0.1:5000`, so re-hosting or a dropped Multiplayer Session needs no tunnel restart. If nothing is hosted, the VPS accepts the join and closes it at once, so it fails fast and the friend's window shows nothing. If the tunnel itself drops, `tunnel.cmd` reconnects every 10 seconds. The first retries can fail for up to 45 seconds while the VPS still holds the old forward.
+
+The friend uses port 443 because ISPs and routers almost never block it outbound. `tunnel.cmd` locks `tunnel_key` to the friend's account with `icacls`, because Windows `ssh` rejects a key other accounts can read.
+
 ## Troubleshooting
 
 - **Join times out and the host log shows no handshake:** the Vultr firewall dropped it because the Joining Player's public IP is not allowed (home IPs change). Rerun `up.ps1 -JoinerIp <ip>` (or `-OpenRelay`); rule changes take up to a minute.

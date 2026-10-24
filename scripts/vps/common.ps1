@@ -5,11 +5,17 @@ $VpsName = 'multimnesia-vps'
 $RelayPort = 5000
 # Marks the up.ps1 -OpenRelay rule so down.ps1 can remove it.
 $OpenRelayNote = 'Open relay until down.ps1'
+# Marks the up.ps1 -FriendHosts rule that opens the friend's SSH port; down.ps1 removes it too.
+$FriendSshNote = 'Friend SSH until down.ps1'
+$FriendSshPort = 443
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
+# up.ps1 -FriendHosts writes the folder (and zip) to send to the friend here; down.ps1 deletes it.
+$FriendTunnelDir = Join-Path $PSScriptRoot 'out\multimnesia-tunnel'
 $VultrCli = if ($env:VULTR_CLI) { $env:VULTR_CLI } else { Join-Path $RepoRoot '..\vultr-cli.exe' }
 $PublicKeyPath = Join-Path $HOME '.ssh\multimnesia_vps.pub'
 # Windows OpenSSH, not Git Bash's ssh: only it reads the Bitwarden agent's named pipe.
 $WindowsSsh = Join-Path $env:SystemRoot 'System32\OpenSSH\ssh.exe'
+$WindowsSshKeygen = Join-Path $env:SystemRoot 'System32\OpenSSH\ssh-keygen.exe'
 
 if (-not $env:VULTR_API_KEY) { throw 'VULTR_API_KEY is not set.' }
 if (-not (Test-Path $VultrCli)) { throw "vultr-cli not found at $VultrCli; set VULTR_CLI." }

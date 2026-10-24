@@ -1,6 +1,8 @@
 #cloud-config
 # Turns a fresh Vultr Debian instance into a dumb TCP forwarder for the Multiplayer Relay port.
 # The 00- prefix makes these settings win: sshd keeps the first value it reads for each option.
+# up.ps1 -FriendHosts uncomments the "#friend-host:" lines and fills in the {{...}} placeholders;
+# otherwise they stay YAML comments.
 write_files:
   - path: /etc/ssh/sshd_config.d/00-multimnesia.conf
     content: |
@@ -10,7 +12,21 @@ write_files:
       KbdInteractiveAuthentication no
       ClientAliveInterval 15
       ClientAliveCountMax 3
+#friend-host:      # The friend reaches sshd on 443 (rarely blocked outbound), which the firewall opens to anyone.
+#friend-host:      Port 22
+#friend-host:      Port 443
+#friend-host:      AllowUsers root@{{JOINER_IP}} tunnel
+#friend-host:      AuthorizedKeysFile .ssh/authorized_keys /etc/ssh/authorized_keys.d/%u
+#friend-host:      # The key's port-forwarding option also allows -L, which would make the VPS an open proxy.
+#friend-host:      PermitOpen none
+#friend-host:  # The friend's key may only open the relay's reverse forward: no shell, no other ports.
+#friend-host:  - path: /etc/ssh/authorized_keys.d/tunnel
+#friend-host:    content: |
+#friend-host:      restrict,port-forwarding,permitlisten="0.0.0.0:5000" {{TUNNEL_PUBLIC_KEY}}
 runcmd:
   # Vultr's Debian image ships ufw enabled for SSH only; the Vultr firewall group is the access control.
   - if command -v ufw >/dev/null; then ufw allow 5000/tcp; fi
+#friend-host:  - if command -v ufw >/dev/null; then ufw allow 443/tcp; fi
+#friend-host:  # A password of '*' (not locked '!') so sshd accepts the key whatever the PAM setting.
+#friend-host:  - useradd --create-home --shell /usr/sbin/nologin tunnel && usermod --password '*' tunnel
   - systemctl restart ssh
