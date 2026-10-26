@@ -274,7 +274,7 @@ public sealed class LocalGameSession(
         async Task HandleCommandAsync(GamePeerOrchestrator orchestrator, ChatEntry entry)
         {
             var feedback = await orchestrator.HandleAsync(entry, cancellationToken);
-            if (feedback is not null) await DisplaySystemAsync(feedback.Message);
+            if (feedback is not null) await DisplayAsync(feedback);
         }
 
         async Task RunIgnoringDisconnectAsync(Task operation)

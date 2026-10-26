@@ -255,6 +255,20 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Successful_hosting_is_displayed_in_green_in_the_local_game()
+    {
+        var (game, _, _) = await ConnectAsync();
+        await using var _ = game;
+        Assert.Equal(Negotiate, await game.ReadLineAsync());
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks");
+        _sessions.HostResult = SessionOperationResult.SucceededWith("Hosting Multiplayer Session at 100.101.102.103:5000.");
+
+        await game.SendAsync("EVENT:CHAT:Alice:/host");
+
+        Assert.Equal("chatentry - 00FF00 SYSTEM:Hosting Multiplayer Session at 100.101.102.103:5000.", await game.ReadLineAsync());
+    }
+
+    [Fact]
     public async Task Received_Poses_do_not_hold_back_chat_while_the_local_game_is_frozen_loading()
     {
         await using var game = await ConnectWithSharedPoseAsync();
@@ -1174,7 +1188,8 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
             return Task.CompletedTask;
         }
         public List<(string, SharedCustomStoryStartOutcome)> SentOutcomes { get; } = [];
-        public Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken) => Task.FromResult(SessionOperationResult.Succeeded);
+        public SessionOperationResult HostResult { get; set; } = SessionOperationResult.Succeeded;
+        public Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken) => Task.FromResult(HostResult);
         public Task<SessionOperationResult> JoinAsync(string destination, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task LeaveAsync(GamePeerState state, CancellationToken cancellationToken) => throw new NotSupportedException();
         public List<ChatEntry> SentChat { get { lock (_sentChat) return [.. _sentChat]; } }
