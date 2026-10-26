@@ -3,7 +3,7 @@
 This repository contains the Game Peer application for a trusted-LAN, two-player multiplayer session for Amnesia: The Dark Descent. `Multimnesia.Client` is the Game Peer: one deployable application that connects to the local game, runs an in-process Multiplayer Relay when hosting, and speaks a small versioned LAN protocol to the other Game Peer. See `docs/adr/0001-in-process-plain-tcp-multiplayer-relay.md` for why the Multiplayer Relay is in-process rather than a separate service, and `CONTEXT.md` for the domain vocabulary (Multiplayer Session, Multiplayer Relay, Game Peer, Session Host, Joining Player) used throughout this document.
 
 > [!WARNING]
-> The Multiplayer Relay is unauthenticated and unencrypted. Run it only between trusted computers on a trusted, private LAN. Never expose its port to the internet or configure router port forwarding for it.
+> The Multiplayer Relay is unauthenticated and unencrypted. Run it only between trusted computers on a trusted, private LAN, or over Tailscale as described in [Playing over the internet](#playing-over-the-internet). Never expose its port to the internet or configure router port forwarding for it.
 
 Players do not build any of this: a release archive contains the modified `Amnesia.exe`, the Game Peer, and the game content, laid out to extract into the Amnesia folder. See its `INSTALL.txt`, and `docs/RELEASING.md` for how that archive is produced.
 
@@ -155,6 +155,19 @@ Ordinary play requires no configuration beyond these defaults; no relay URL or b
 ## Firewall
 
 Allow inbound TCP traffic to the configured Multiplayer Relay port (5000 by default) on the Session Host's **private** network profile only. Do not open the Game Interaction Protocol port (5150 by default) in Windows Firewall: it is local, loopback-only traffic and must never be exposed to the LAN. Do not create public-network firewall rules or router port forwarding for the Multiplayer Relay port; it is unauthenticated and intended only for a trusted private LAN.
+
+## Playing over the internet
+
+To play outside a LAN, put the PCs on one private network with [Tailscale](https://tailscale.com), then host and join as on a LAN. Tailscale is free for personal use, encrypts the traffic, and connects PCs behind home routers without port forwarding. See `docs/adr/0010-tailscale-for-internet-play.md` for why we recommend it.
+
+1. Every player installs Tailscale on their PC and signs in with a free account.
+2. The Session Host [shares their PC](https://tailscale.com/kb/1084/sharing) with each Joining Player from the Tailscale admin console, and each Joining Player accepts the invite. Sharing gives a Joining Player access to that one PC only, not to the Session Host's other devices.
+3. The Session Host types `/host`.
+4. Each Joining Player types `/join <Session Host's Tailscale address>`. That address starts with `100.` and is shown in the Tailscale app on the Session Host's PC. `/host` does not print it yet (#84).
+
+Tailscale marks its network as private in Windows, so the firewall rule from [Firewall](#firewall) already covers it. Do not use Tailscale Funnel: it makes the port public.
+
+Other virtual-LAN tools such as ZeroTier or Radmin VPN work the same way, but only Tailscale is tested.
 
 ## Troubleshooting
 
