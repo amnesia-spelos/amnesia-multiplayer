@@ -127,7 +127,7 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
             _listener = listener;
             SessionCorrelationId = Guid.NewGuid();
             _acceptLoop = AcceptLoopAsync(listener, _lifetime.Token);
-            var addresses = UsablePrivateAddresses().Select(address => $"{address}:{_options.Port}").ToArray();
+            var addresses = AdvertisedHostAddresses().Select(address => $"{address}:{_options.Port}").ToArray();
             var destinations = addresses.Length == 0 ? $"port {_options.Port}" : string.Join(", ", addresses);
             return Task.FromResult(SessionOperationResult.SucceededWith($"Hosting Multiplayer Session at {destinations}."));
         }
@@ -690,18 +690,22 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         _joinedOutbound = null;
     }
 
-    private static IEnumerable<IPAddress> UsablePrivateAddresses() =>
+    private static IEnumerable<IPAddress> AdvertisedHostAddresses() =>
         NetworkInterface.GetAllNetworkInterfaces()
             .Where(network => network.OperationalStatus == OperationalStatus.Up && network.NetworkInterfaceType != NetworkInterfaceType.Loopback)
             .SelectMany(network => network.GetIPProperties().UnicastAddresses)
             .Select(unicast => unicast.Address)
             .Where(address => address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(address) && !address.IsIPv6LinkLocal)
-            .Where(IsPrivate);
+            .Where(IsAdvertisedHostAddress);
 
-    private static bool IsPrivate(IPAddress address)
+    // Private IPv4 ranges, plus 100.64.0.0/10, the shared address space Tailscale and NetBird assign tailnet addresses from.
+    public static bool IsAdvertisedHostAddress(IPAddress address)
     {
         var bytes = address.GetAddressBytes();
-        return bytes[0] == 10 || bytes[0] == 172 && bytes[1] is >= 16 and <= 31 || bytes[0] == 192 && bytes[1] == 168;
+        return bytes[0] == 10
+            || (bytes[0] == 172 && bytes[1] is >= 16 and <= 31)
+            || (bytes[0] == 192 && bytes[1] == 168)
+            || (bytes[0] == 100 && bytes[1] is >= 64 and <= 127);
     }
 
     private static async Task IgnoreCancellationAsync(Task task)

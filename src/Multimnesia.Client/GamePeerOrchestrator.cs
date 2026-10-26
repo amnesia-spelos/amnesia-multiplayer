@@ -141,7 +141,10 @@ public sealed class GamePeerOrchestrator
             case PeerInput.Command when State != GamePeerState.Local:
                 return SystemFeedback("Leave the current Multiplayer Session first.");
             case PeerInput.Command { Value: PeerCommand.HostCommand }:
-                return Apply(await _operations.HostAsync(cancellationToken), GamePeerState.Hosting);
+                var hostResult = await _operations.HostAsync(cancellationToken);
+                var hostFeedback = Apply(hostResult, GamePeerState.Hosting);
+                // Green tells the Session Host at a glance that the Multiplayer Relay is up.
+                return hostResult.Success && hostFeedback is not null ? hostFeedback with { MessageColor = ChatColor.Green } : hostFeedback;
             case PeerInput.Command { Value: PeerCommand.Join join }:
                 var sessionEndVersion = Volatile.Read(ref _multiplayerSessionEndVersion);
                 State = GamePeerState.Joining;

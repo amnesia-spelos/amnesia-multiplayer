@@ -10,6 +10,26 @@ namespace Multimnesia.Tests;
 
 public sealed class MultiplayerSessionOperationsTests
 {
+    [Theory]
+    [InlineData("10.0.0.5", true)]
+    [InlineData("172.16.0.1", true)]
+    [InlineData("172.31.255.254", true)]
+    [InlineData("192.168.1.10", true)]
+    [InlineData("100.64.0.1", true)]
+    [InlineData("100.101.102.103", true)]
+    [InlineData("100.127.255.254", true)]
+    [InlineData("100.63.255.255", false)]
+    [InlineData("100.128.0.1", false)]
+    [InlineData("172.15.0.1", false)]
+    [InlineData("172.32.0.1", false)]
+    [InlineData("8.8.8.8", false)]
+    [InlineData("25.1.2.3", false)]
+    [InlineData("26.1.2.3", false)]
+    public void Hosting_advertises_private_and_tailnet_addresses_only(string address, bool advertised)
+    {
+        Assert.Equal(advertised, TcpSessionOperations.IsAdvertisedHostAddress(IPAddress.Parse(address)));
+    }
+
     [Fact]
     public async Task Joining_Player_can_leave_and_a_replacement_can_join()
     {

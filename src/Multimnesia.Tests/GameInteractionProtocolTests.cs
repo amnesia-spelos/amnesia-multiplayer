@@ -165,4 +165,12 @@ public sealed class GameInteractionProtocolTests
 
         Assert.Equal("chatentry FF00FF - Alice:hi", GameInteractionProtocol.Display(new ChatEntry("Alice", "hi", color)));
     }
+
+    [Fact]
+    public void A_message_color_applies_to_the_chat_message()
+    {
+        Assert.True(ChatColor.TryParse("00ff00", out var color));
+
+        Assert.Equal("chatentry - 00FF00 SYSTEM:ready", GameInteractionProtocol.Display(new ChatEntry("SYSTEM", "ready", MessageColor: color)));
+    }
 }

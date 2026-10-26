@@ -71,7 +71,7 @@ that. Plain `LanProtocol` over a public port supplies none.
 | --- | --- | --- |
 | The Multiplayer Relay listens on `IPAddress.Any`, port `RelayPort` (default 5000) | `src/Multimnesia.Client/TcpSessionOperations.cs:124`, `src/Multimnesia.Client/GamePeerOptions.cs:10` | It listens on every interface, the VPN adapter included. Nothing to configure per VPN. |
 | `/join` resolves the destination via DNS and keeps only IPv4 addresses | `TcpSessionOperations.cs:90`, `:153-154` | Overlay IPv4 addresses and MagicDNS-style names work. IPv6-only paths (incl. "IPv6 direct") do not. |
-| `/host` prints only addresses in 10/8, 172.16/12 and 192.168/16 | `TcpSessionOperations.cs:130`, `:693-705` | Tailscale and NetBird (100.64.0.0/10: [Tailscale](https://tailscale.com/kb/1015/100.x-addresses), [NetBird](https://docs.netbird.io/about-netbird/how-netbird-works)), Hamachi (25.x: [GoTo](https://support.goto.com/hamachi/help/the-logmein-hamachi-client-hamachi-c-hamachi-aboutclients)) and Radmin (26.x, inferred from its firewall instructions: [help](https://www.radmin-vpn.com/help/)) addresses are **not printed**. `/join` still accepts them, but players must find the address in the VPN app. Filed as #84 for the Tailscale range. |
+| `/host` prints only addresses in 10/8, 172.16/12 and 192.168/16 | `TcpSessionOperations.cs:130`, `:693-705` | Tailscale and NetBird (100.64.0.0/10: [Tailscale](https://tailscale.com/kb/1015/100.x-addresses), [NetBird](https://docs.netbird.io/about-netbird/how-netbird-works)), Hamachi (25.x: [GoTo](https://support.goto.com/hamachi/help/the-logmein-hamachi-client-hamachi-c-hamachi-aboutclients)) and Radmin (26.x, inferred from its firewall instructions: [help](https://www.radmin-vpn.com/help/)) addresses are **not printed**. `/join` still accepts them, but players must find the address in the VPN app. Filed as #84 for the Tailscale range; since #84, `/host` also prints 100.64.0.0/10 addresses. |
 | Protocol is unauthenticated and unencrypted by design; trust boundary is a private firewalled network | `docs/adr/0001-in-process-plain-tcp-multiplayer-relay.md:19`, `CONTEXT.md` "Trusted-LAN boundary" | Overlay networks keep the boundary. Public exposure breaks it. |
 | Up to three Joining Players designed (ADR 0007), two players for now (ADR 0008) | `docs/adr/0007-multiplayer-relay-forwards-to-several-joining-players.md`, `docs/adr/0008-two-players-until-shared-enemies.md` | Every free tier below covers four players. |
 | Largest `LanProtocol` frame is 32 KiB | `src/Multimnesia.Contracts/LanProtocol.cs:120` | Message-based transports with small packets (EOS: 1170 bytes) would need fragmentation. |
@@ -112,8 +112,8 @@ that. Plain `LanProtocol` over a public port supplies none.
   internet, on ports 443, 8443 and 10000 only, TLS-only, with bandwidth limits. Serve keeps it tailnet-only. **Funnel
   would make the relay public, so never use it for the Multiplayer Relay.** Plain tailnet access needs neither: the
   relay's port is already reachable over the tailnet.
-- **Addresses**: 100.64.0.0/10 ([kb/1015](https://tailscale.com/kb/1015/100.x-addresses)), which `/host` does not
-  print (Repo facts).
+- **Addresses**: 100.64.0.0/10 ([kb/1015](https://tailscale.com/kb/1015/100.x-addresses)), which `/host` did not
+  print until #84 (Repo facts).
 
 ### 1.3 ZeroTier details
 

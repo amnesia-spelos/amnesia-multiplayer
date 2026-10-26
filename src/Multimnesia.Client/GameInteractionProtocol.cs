@@ -4,7 +4,7 @@ using Multimnesia.Contracts;
 
 namespace Multimnesia.Client;
 
-public sealed record ChatEntry(string Author, string Message, ChatColor? AuthorColor = null)
+public sealed record ChatEntry(string Author, string Message, ChatColor? AuthorColor = null, ChatColor? MessageColor = null)
 {
     private const string LocalSubmissionPrefix = "EVENT:CHAT:";
 
@@ -366,7 +366,8 @@ public static class GameInteractionProtocol
         GameEvent.StartCustomStoryResponded { Outcome: StartCustomStoryOutcome.Unrecognized } or GameEvent.UnknownCommandWarned;
 
     // chatentry <authorColor> <messageColor> <author>:<message>, where "-" is the game default color.
-    public static string Display(ChatEntry entry) => $"chatentry {entry.AuthorColor?.Hex ?? "-"} - {entry.Author}:{entry.Message}";
+    public static string Display(ChatEntry entry) =>
+        $"chatentry {entry.AuthorColor?.Hex ?? "-"} {entry.MessageColor?.Hex ?? "-"} {entry.Author}:{entry.Message}";
 
     public static string StartCustomStory(string identifier) => $"startcustomstory:{identifier}";
 

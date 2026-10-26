@@ -140,6 +140,20 @@ public sealed class CommandOrchestratorTests
     }
 
     [Fact]
+    public async Task Successful_hosting_is_reported_in_green()
+    {
+        var orchestrator = new GamePeerOrchestrator(new RecordingSessionOperations
+        {
+            HostResult = SessionOperationResult.SucceededWith("Hosting Multiplayer Session at 100.101.102.103:31337.")
+        });
+
+        var feedback = await orchestrator.HandleAsync(new ChatEntry("Player", "/host"), TestContext.Current.CancellationToken);
+
+        Assert.True(ChatColor.TryParse("00FF00", out var green));
+        Assert.Equal(new ChatEntry("SYSTEM", "Hosting Multiplayer Session at 100.101.102.103:31337.", MessageColor: green), feedback);
+    }
+
+    [Fact]
     public async Task Join_transitions_through_joining_until_negotiated_admission_completes()
     {
         var completion = new TaskCompletionSource<SessionOperationResult>(TaskCreationOptions.RunContinuationsAsynchronously);

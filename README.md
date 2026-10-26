@@ -81,7 +81,7 @@ An Avatar walks, idles, crouches, and looks up and down as its player does. It m
 
 Every slash-prefixed chat entry is interpreted as a Game Peer command; commands are never relayed as ordinary chat. Ordinary chat requires no command: while hosting or joined, it is relayed to the other Game Peer without a local echo (the local game already displays what you typed).
 
-- **`/host`** — starts an in-process Multiplayer Relay bound to all IPv4 interfaces on the configured port (`5000` by default) and begins waiting for a Joining Player. Reports the usable private IPv4 addresses to join at.
+- **`/host`** — starts an in-process Multiplayer Relay bound to all IPv4 interfaces on the configured port (`5000` by default) and begins waiting for a Joining Player. Reports the private IPv4 and shared (`100.64.0.0/10`, where Tailscale addresses come from) addresses to join at, in green.
 - **`/join <hostname-or-IPv4>`** — attempts to join a Session Host's Multiplayer Session within a 10-second deadline (configurable). If the hostname resolves to multiple eligible IPv4 addresses, they are tried sequentially within that deadline. IPv6 is unsupported.
 - **`/leave`** — leaves a Multiplayer Session you are hosting or have joined, or cancels an in-progress `/join`.
 - **`/tp-to-peer`** — places you where the other player stands, from their latest Pose: their feet position, the way they face, and crouching if they crouch. Use it when a door locks or a wall closes behind the player who went first. It works only while both players are on the same map, and needs an `Amnesia.exe` that grants `playerplace`. The other player sees your Avatar snap to them. It takes no argument.
@@ -163,7 +163,7 @@ To play outside a LAN, put the PCs on one private network with [Tailscale](https
 1. Every player installs Tailscale on their PC and signs in with a free account.
 2. The Session Host [shares their PC](https://tailscale.com/kb/1084/sharing) with each Joining Player from the Tailscale admin console, and each Joining Player accepts the invite. Sharing gives a Joining Player access to that one PC only, not to the Session Host's other devices.
 3. The Session Host types `/host`.
-4. Each Joining Player types `/join <Session Host's Tailscale address>`. That address starts with `100.` and is shown in the Tailscale app on the Session Host's PC. `/host` does not print it yet (#84).
+4. Each Joining Player types `/join <Session Host's Tailscale address>`. `/host` prints that address, the one starting with `100.`, next to any LAN addresses.
 
 Tailscale marks its network as private in Windows, so the firewall rule from [Firewall](#firewall) already covers it. Do not use Tailscale Funnel: it makes the port public.
 
@@ -198,7 +198,7 @@ At the default `Information` level the Game Peer log contains no IP addresses. L
 This is the record of the manual walkthrough required before considering a build release-ready. Repeat it after any change to session orchestration, the LAN protocol, or the Multiplayer Relay.
 
 1. Start the modified game and `Multimnesia.Client.exe` on both PCs (PC A and PC B).
-2. On PC A, type `/host`. Confirm the SYSTEM message lists a usable LAN address and port.
+2. On PC A, type `/host`. Confirm the SYSTEM message is green and lists a usable LAN address and port.
 3. On PC B, type `/join <PC A's LAN address>`. Confirm PC A sees `A player is attempting to join.` then `A player joined.`, and PC B sees a successful-join SYSTEM message.
 4. On PC A, send an ordinary chat message. Confirm it appears on PC B without a duplicate local echo on PC A.
 5. On PC B, send an ordinary chat message. Confirm it appears on PC A without a duplicate local echo on PC B.
