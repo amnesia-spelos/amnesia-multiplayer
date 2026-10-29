@@ -6,7 +6,7 @@ namespace Multimnesia.Tests;
 
 public sealed class TrafficRecorderTests
 {
-    private static readonly LanMessage.Pose Pose = new(1, 0, 1, 2, 3, 0, 0, false, false, "maps/secret_cellar.map");
+    private static readonly LanMessage.Pose Pose = new(1, 0, 1, 2, 3, 0, 0, false, false, 0, "maps/secret_cellar.map");
     private readonly List<string> _warnings = [];
 
     private TrafficRecorder Start(Stream output, bool statistics = true, bool trace = false, long traceMaxBytes = 1024 * 1024,

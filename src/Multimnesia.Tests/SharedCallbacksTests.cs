@@ -175,7 +175,7 @@ public sealed class SharedCallbacksTests
         var sharedCallbacks = CreateSharedCallbacks();
         sharedCallbacks.HandleReceivedWorldMessage(OpenedDrawer);
 
-        await sharedCallbacks.HandleLocalGameEventAsync(new GameEvent.LocalPoseReported(new(1000, 0, 0, 0, 0, 0, 0, false, false, Study)));
+        await sharedCallbacks.HandleLocalGameEventAsync(new GameEvent.LocalPoseReported(new(1000, 0, 0, 0, 0, 0, 0, false, false, 0, Study)));
 
         await _game.WaitForLinesAsync(1);
         Assert.Equal([$"sharedcallback interact 7 {Study}"], _game.Lines);
@@ -322,7 +322,7 @@ public sealed class SharedCallbacksTests
         await _game.WaitForLinesAsync(1);
 
         sharedCallbacks.HandleResponse(new GameEvent.Responded("sharedcallback", "wrong-map", []));
-        await sharedCallbacks.HandleLocalGameEventAsync(new GameEvent.LocalPoseReported(new(1000, 0, 0, 0, 0, 0, 0, false, false, Study)));
+        await sharedCallbacks.HandleLocalGameEventAsync(new GameEvent.LocalPoseReported(new(1000, 0, 0, 0, 0, 0, 0, false, false, 0, Study)));
 
         await Task.Delay(50, TestContext.Current.CancellationToken);
         Assert.Single(_game.Lines);

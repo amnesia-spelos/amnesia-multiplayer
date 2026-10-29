@@ -15,9 +15,10 @@ public abstract record LanMessage
     public sealed record Heartbeat : LanMessage;
     public sealed record CustomStoryStarted(string Identifier) : LanMessage;
     public sealed record CustomStoryStartOutcome(string Identifier, SharedCustomStoryStartOutcome Outcome) : LanMessage;
-    // The fields of a `STATE localpose` State Update, unchanged in meaning (ADR 0003).
+    // The fields of a `STATE localpose` State Update, unchanged in meaning (ADR 0003). Lean runs from -1 (left) to 1 (right).
     public sealed record Pose(
-        ulong TimeMs, uint TeleportCounter, double X, double Y, double Z, double Yaw, double Pitch, bool Crouch, bool Lantern, string Map) : LanMessage;
+        ulong TimeMs, uint TeleportCounter, double X, double Y, double Z, double Yaw, double Pitch, bool Crouch, bool Lantern, double Lean,
+        string Map) : LanMessage;
 
     // One Shared Enemy, using the game's enemy report clock and animation fields (ADR 0009).
     public sealed record EnemyPose(
@@ -118,7 +119,7 @@ public sealed class LanProtocolException(string message, Exception? innerExcepti
 
 public static class LanProtocol
 {
-    public const int CurrentVersion = 13;
+    public const int CurrentVersion = 14;
     // Fits the largest bodies message: 32 entries of 13 longest-form numbers and a fully escaped map path.
     public const int MaximumFrameBytes = 32 * 1024;
     // Keeps a Pose's numbers within the game's 15-digit, 4-decimal line format; real positions and angles are far smaller.
@@ -191,6 +192,7 @@ public static class LanProtocol
                 pitch = value.Pitch,
                 crouch = value.Crouch,
                 lantern = value.Lantern,
+                lean = value.Lean,
                 map = value.Map
             },
             LanMessage.Pose => throw new LanProtocolException("Invalid Pose."),
@@ -473,7 +475,10 @@ public static class LanProtocol
 
     public static bool IsValid(LanMessage.Pose pose) =>
         IsPoseNumber(pose.X) && IsPoseNumber(pose.Y) && IsPoseNumber(pose.Z) && IsPoseNumber(pose.Yaw) && IsPoseNumber(pose.Pitch) &&
-        IsValidMap(pose.Map);
+        IsValidLean(pose.Lean) && IsValidMap(pose.Map);
+
+    // The game's own bound on a lean; NaN fails both comparisons.
+    public static bool IsValidLean(double lean) => lean is >= -1 and <= 1;
 
     public static bool IsValid(LanMessage.Bodies bodies) =>
         IsValidMap(bodies.Map) && bodies.Entries is { Count: <= MaximumBodies } entries &&
@@ -600,6 +605,7 @@ public static class LanProtocol
             root.GetProperty("pitch").GetDouble(),
             root.GetProperty("crouch").GetBoolean(),
             root.GetProperty("lantern").GetBoolean(),
+            root.GetProperty("lean").GetDouble(),
             root.GetProperty("map").GetString()!);
         return IsValid(pose) ? pose : throw new LanProtocolException("Invalid Pose.");
     }

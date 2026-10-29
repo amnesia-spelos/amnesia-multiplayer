@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Amends the `LanProtocol` invariant stated in ADR 0001 and ADR 0002. Amended below for the raised lantern (issue #24).
+Accepted. Amends the `LanProtocol` invariant stated in ADR 0001 and ADR 0002. Amended below for the raised lantern (issue #24) and for lean (issue #87).
 
 ## Context
 
@@ -35,3 +35,7 @@ Pose sending is latest-wins: an unsent Pose is replaced by a newer one rather th
 ## Amendment: the raised lantern
 
 amnesia-spelos/amnesia-tdd-tcp#40 added a `<lantern>` flag after `<crouch>` in both `STATE localpose` and `avatarpose`, changing Protocol Version 2 in place because it had not been released. The `pose` message becomes `pose { timeMs, teleportCounter, x, y, z, yaw, pitch, crouch, lantern, map }`, with `lantern` a boolean required when read, and `LanProtocol` becomes version 4. The bump makes a version 3 Game Peer fail admission as incompatible instead of being admitted and then dropped at its first `pose`, which a mismatched build on one of the two LAN computers would otherwise cause.
+
+## Amendment: lean
+
+amnesia-spelos/amnesia-tdd-tcp#113 added a `<lean>` number after `<lantern>` in both `STATE localpose` and `avatarpose`, from -1 (fully left) to 1 (fully right), the camera's current lean roll over its maximum after the game's collision cutoff. Protocol Version 2 had shipped by then, so it is behind a new `lean` Capability instead of a change in place: a Session without it keeps both lines as before. The Game Peer requests `lean` and grants itself the Shared Pose only when the game grants `avatars`, `localpose`, and `lean`, so an older game is told it does not support Avatars instead of having every `avatarpose` rejected. The `pose` message becomes `pose { timeMs, teleportCounter, x, y, z, yaw, pitch, crouch, lantern, lean, map }`, with `lean` a number required when read and outside -1 to 1 malformed, and `LanProtocol` becomes version 14 so a version 13 Game Peer fails admission. The game interpolates lean like camera pitch, so the Game Peer does nothing more to smooth it.

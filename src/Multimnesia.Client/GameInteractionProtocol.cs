@@ -187,11 +187,11 @@ public static class GameInteractionProtocol
         _ => throw new ArgumentOutOfRangeException(nameof(attack))
     };
 
-    // STATE localpose <timeMs> <teleportCounter> <x> <y> <z> <yaw> <pitch> <crouch> <lantern> <map>
+    // STATE localpose <timeMs> <teleportCounter> <x> <y> <z> <yaw> <pitch> <crouch> <lantern> <lean> <map>, as a game granted lean reports it
     private static bool TryParseLocalPose(string line, out LocalPose pose)
     {
         pose = default!;
-        if (!ProtocolVersion2Line.TrySplit(line, fixedFieldCount: 11, hasPath: true, out var fields) ||
+        if (!ProtocolVersion2Line.TrySplit(line, fixedFieldCount: 12, hasPath: true, out var fields) ||
             !ulong.TryParse(fields[2], NumberStyles.None, CultureInfo.InvariantCulture, out var timeMs) ||
             !uint.TryParse(fields[3], NumberStyles.None, CultureInfo.InvariantCulture, out var teleportCounter) ||
             !ProtocolVersion2Line.TryParseNumber(fields[4], out var x) ||
@@ -200,9 +200,11 @@ public static class GameInteractionProtocol
             !ProtocolVersion2Line.TryParseNumber(fields[7], out var yaw) ||
             !ProtocolVersion2Line.TryParseNumber(fields[8], out var pitch) ||
             fields[9] is not ("0" or "1") ||
-            fields[10] is not ("0" or "1")) return false;
+            fields[10] is not ("0" or "1") ||
+            !ProtocolVersion2Line.TryParseNumber(fields[11], out var lean) ||
+            !LanProtocol.IsValidLean(lean)) return false;
 
-        pose = new(timeMs, teleportCounter, x, y, z, yaw, pitch, fields[9] == "1", fields[10] == "1", fields[11]);
+        pose = new(timeMs, teleportCounter, x, y, z, yaw, pitch, fields[9] == "1", fields[10] == "1", lean, fields[12]);
         return true;
     }
 
@@ -371,11 +373,11 @@ public static class GameInteractionProtocol
 
     public static string StartCustomStory(string identifier) => $"startcustomstory:{identifier}";
 
-    // The first Command of every game Session; the Shared Pose needs the first two Capabilities, Holds the third,
-    // Shared Callbacks the fourth, and `/tp-to-peer` the fifth.
+    // The first Command of every game Session; the Shared Pose needs `avatars`, `localpose`, and `lean`, Holds `interactions`,
+    // Shared Callbacks `sharedcallbacks`, `/tp-to-peer` `playerplace`, and Shared Enemies `enemies`.
     public const string Negotiate =
         $"protocol 2 {ProtocolNegotiation.Avatars} {ProtocolNegotiation.LocalPose} {ProtocolNegotiation.Interactions} " +
-        $"{ProtocolNegotiation.SharedCallbacks} {ProtocolNegotiation.PlayerPlace} {ProtocolNegotiation.Enemies}";
+        $"{ProtocolNegotiation.SharedCallbacks} {ProtocolNegotiation.PlayerPlace} {ProtocolNegotiation.Enemies} {ProtocolNegotiation.Lean}";
 
     // Uses the default model, with collision on.
     public static string AvatarCreate(string avatarIdentifier) => $"avatarcreate {avatarIdentifier}";
@@ -385,7 +387,7 @@ public static class GameInteractionProtocol
     public static string AvatarEnemySight(string avatarIdentifier, bool enabled) =>
         $"avatarenemysight {avatarIdentifier} {(enabled ? "1" : "0")}";
 
-    // avatarpose <id> <timeMs> <teleportCounter> <x> <y> <z> <yaw> <pitch> <crouch> <lantern> <map>
+    // avatarpose <id> <timeMs> <teleportCounter> <x> <y> <z> <yaw> <pitch> <crouch> <lantern> <lean> <map>, as a game granted lean reads it
     public static string AvatarPose(string avatarIdentifier, LanMessage.Pose pose) => string.Join(' ',
         "avatarpose", avatarIdentifier,
         pose.TimeMs.ToString(CultureInfo.InvariantCulture),
@@ -397,6 +399,7 @@ public static class GameInteractionProtocol
         ProtocolVersion2Line.FormatNumber(pose.Pitch),
         pose.Crouch ? "1" : "0",
         pose.Lantern ? "1" : "0",
+        ProtocolVersion2Line.FormatNumber(pose.Lean),
         pose.Map);
 
     // playerplace <x> <y> <z> <yaw> <crouch> <map>: places the local player at the feet position, body yaw, and crouch of a Pose.

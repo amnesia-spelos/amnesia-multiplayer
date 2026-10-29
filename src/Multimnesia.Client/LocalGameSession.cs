@@ -60,7 +60,7 @@ public sealed class LocalGameSession(
     string? connectedNotice = null,
     TrafficRecorder? trafficRecorder = null)
 {
-    public const string AvatarsUnsupportedNotice = "Your game does not support Avatars; movement will not be shared.";
+    public const string AvatarsUnsupportedNotice = "Your game does not support Avatars with lean; movement will not be shared.";
     public const string InteractionsUnsupportedNotice = "Your game does not support interactions; moving props will not be shared.";
     public const string SharedCallbacksUnsupportedNotice =
         "Your game does not support Shared Callbacks; triggers, buttons, and lamps will not be shared.";

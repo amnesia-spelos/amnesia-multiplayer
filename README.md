@@ -72,10 +72,10 @@ Once both players are in the Custom Story, each Game Peer streams its own player
 - The Avatar moves smoothly between the Poses that arrive, faces where that player is facing, and has collision: you bump into the other player rather than walking through them.
 - A teleport or a map start snaps the Avatar into place instead of gliding it there.
 - The Shared Pose is active only in a two-player Multiplayer Session. Hosting alone or merely joined, nothing is sent.
-- It requires an `Amnesia.exe` that supports Avatars. If yours does not, you see `Your game does not support Avatars; movement will not be shared.` once, and chat and Custom Story starts keep working.
+- It requires an `Amnesia.exe` that supports Avatars and lean (the `lean` Capability). If yours does not, you see `Your game does not support Avatars with lean; movement will not be shared.` once, and chat and Custom Story starts keep working.
 - If the skeleton entity is not installed, you see `The Avatar model is not installed; the other player will be invisible.` and the Multiplayer Session continues.
 
-An Avatar walks, idles, crouches, and looks up and down as its player does. It makes no footsteps, so enemies cannot hear it, but the Session Host's Shared Enemies can see, chase, and attack the Joining Player's Avatar. See [Expected behavior and limitations](#expected-behavior-and-limitations).
+An Avatar walks, idles, crouches, looks up and down, and leans left and right as its player does. It makes no footsteps, so enemies cannot hear it, but the Session Host's Shared Enemies can see, chase, and attack the Joining Player's Avatar. See [Expected behavior and limitations](#expected-behavior-and-limitations).
 
 ## Player commands
 
@@ -247,13 +247,14 @@ Run this one from the extracted release archive on two PCs, never from a dev bui
 2. On both PCs, double-click `Start Multiplayer.bat` in the Amnesia folder. Confirm the game starts, the Game Peer gets its own console window, and the game's chat shows `Amnesia Multiplayer v0.3.1 "Dread" connected.` — the version each PC is running.
 3. On PC A, `/host`. On PC B, `/join <PC A's LAN address>`. On PC A, start "Amnesia Multiplayer Test". Confirm both games load the map.
 4. Walk around on both PCs. Confirm each player sees the other as the skeleton Avatar, moving smoothly rather than jumping between positions, turned the way that player is facing, walking, idling, crouching, and looking up and down as that player does, and that walking into the Avatar blocks rather than passing through it.
-5. Confirm ordinary chat still works both ways while moving.
-6. Trigger a placement that is not ordinary walking — the map start itself, or a `TeleportPlayer` — and confirm the Avatar snaps to the new position rather than gliding across the level to it.
-7. On PC B, `/leave`. Confirm PC A's Avatar disappears. `/join` again and have PC A start the Custom Story again; confirm both Avatars come back.
-8. With both players in game, close and restart PC B's game (leaving both Game Peers running). Confirm PC B's Game Peer reconnects, and after PC A starts the Custom Story again, both players see each other again.
-9. On both PCs, confirm `multiplayer\logs\game-peer-*.log` exists, that its newest file starts with the version, codename, `LanProtocol` version, and OS, and that the session events from this walkthrough are in it.
+5. On PC B, lean left (Q) and then right (E), standing and then crouched, while looking up and down. Confirm PC A sees the Avatar tilt the same way at the hips with its feet planted, and return upright when the key is released. Repeat with the roles swapped.
+6. Confirm ordinary chat still works both ways while moving.
+7. Trigger a placement that is not ordinary walking — the map start itself, or a `TeleportPlayer` — and confirm the Avatar snaps to the new position rather than gliding across the level to it.
+8. On PC B, `/leave`. Confirm PC A's Avatar disappears. `/join` again and have PC A start the Custom Story again; confirm both Avatars come back.
+9. With both players in game, close and restart PC B's game (leaving both Game Peers running). Confirm PC B's Game Peer reconnects, and after PC A starts the Custom Story again, both players see each other again.
+10. On both PCs, confirm `multiplayer\logs\game-peer-*.log` exists, that its newest file starts with the version, codename, `LanProtocol` version, and OS, and that the session events from this walkthrough are in it.
 
-If either PC's game is an older build without Avatar support, that player sees `Your game does not support Avatars; movement will not be shared.` and chat and Custom Story starts keep working. If the skeleton entity is missing from a game folder, that player sees `The Avatar model is not installed; the other player will be invisible.` Both are degraded modes, not failures of the walkthrough — but a release archive extracted correctly should produce neither.
+If either PC's game is an older build without Avatar or lean support, that player sees `Your game does not support Avatars with lean; movement will not be shared.` and chat and Custom Story starts keep working. If the skeleton entity is missing from a game folder, that player sees `The Avatar model is not installed; the other player will be invisible.` Both are degraded modes, not failures of the walkthrough — but a release archive extracted correctly should produce neither.
 
 ### Entity Interaction Sync walkthrough
 
@@ -388,7 +389,7 @@ The architecture does not preclude any of the above being built later, but none 
 
 ### Shared Enemy walkthrough
 
-Use identical Game Peer builds (`LanProtocol` version 13) and game builds granting `enemies`, `avatars`, `localpose`, `interactions`, and `sharedcallbacks`, with support for `avatarenemysight`, `enemyattack`, `shareddeath`, `enemydoorbreak`, and `autodisabled`, on two LAN PCs. Install the current `mp-test-cs` on both PCs. This verifies Shared Enemy playback (#72), targeting the Joining Player (#73), attacks on the Joining Player (#74), Shared Deaths (#75), arriving on or leaving the map mid-chase (#76), door breaks and enemy-triggered callbacks (#77), and the Brute (#78).
+Use identical Game Peer builds (`LanProtocol` version 14) and game builds granting `enemies`, `avatars`, `localpose`, `lean`, `interactions`, and `sharedcallbacks`, with support for `avatarenemysight`, `enemyattack`, `shareddeath`, `enemydoorbreak`, and `autodisabled`, on two LAN PCs. Install the current `mp-test-cs` on both PCs. This verifies Shared Enemy playback (#72), targeting the Joining Player (#73), attacks on the Joining Player (#74), Shared Deaths (#75), arriving on or leaving the map mid-chase (#76), door breaks and enemy-triggered callbacks (#77), and the Brute (#78).
 
 1. On PC A, `/host`; on PC B, `/join <PC A's LAN address>`. Start "Amnesia Multiplayer Test" on PC A. Confirm both players are in `multiplayer-test.map` and see each other's Avatar.
 2. PC A enters `SpawnGruntArea` (ID 154, centered at `-2 1.875 18.875`). It activates `grunt` (ID 139, initially at `6.25 0 28`). PC B stays near the cabinets, watching the corridor. Confirm PC B sees the same Grunt's position, turning, and animation as PC A, with a small interpolation delay.

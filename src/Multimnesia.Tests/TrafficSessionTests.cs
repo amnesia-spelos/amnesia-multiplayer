@@ -9,7 +9,7 @@ namespace Multimnesia.Tests;
 public sealed class TrafficSessionTests
 {
     private const string Secret = "the password is swordfish";
-    private static readonly LanMessage.Pose Pose = new(1, 0, 1, 2, 3, 0, 0, false, false, "maps/secret_cellar.map");
+    private static readonly LanMessage.Pose Pose = new(1, 0, 1, 2, 3, 0, 0, false, false, 0, "maps/secret_cellar.map");
     private static readonly LanMessage.Claim Claim = new("maps/secret_cellar.map", 7, ClaimReason.Interact);
 
     private static TrafficRecorder StartRecorder(Stream output, bool trace = true) =>

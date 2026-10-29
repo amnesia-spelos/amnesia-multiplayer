@@ -30,9 +30,9 @@ public sealed class HoldsTests
 
     private static GameEvent.ReportedBodies Report(ulong timeMs, params BodyEntry[] entries) => new(timeMs, entries, Map);
 
-    private static LanMessage.Pose PoseOn(string map) => new(1000, 0, 0, 0, 0, 0, 0, false, false, map);
+    private static LanMessage.Pose PoseOn(string map) => new(1000, 0, 0, 0, 0, 0, 0, false, false, 0, map);
 
-    private static GameEvent LocalPoseOn(string map) => new GameEvent.LocalPoseReported(new(1000, 0, 0, 0, 0, 0, 0, false, false, map));
+    private static GameEvent LocalPoseOn(string map) => new GameEvent.LocalPoseReported(new(1000, 0, 0, 0, 0, 0, 0, false, false, 0, map));
 
     private bool LoggedHoldEnding(string holder, string reason) => _game.Logged.Any(entry =>
         entry.Event == LocalGameEventName.HoldEnded &&

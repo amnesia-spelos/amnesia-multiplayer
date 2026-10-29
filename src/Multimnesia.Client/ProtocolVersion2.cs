@@ -15,11 +15,13 @@ public sealed record ProtocolNegotiation(string Outcome, int? Version, IReadOnly
     public bool GrantsEnemies => Grants(Enemies);
 
     public const string PlayerPlace = "playerplace";
+    // Adds <lean> to `localpose` and `avatarpose`; a game without it would drop every Pose this Game Peer writes.
+    public const string Lean = "lean";
 
     // An older game answers `protocol` with WARNING:Unknown command.
     public static ProtocolNegotiation UnknownCommand { get; } = new("unknown-command", null, []);
 
-    public bool GrantsSharedPose => Grants(Avatars) && Grants(LocalPose);
+    public bool GrantsSharedPose => Grants(Avatars) && Grants(LocalPose) && Grants(Lean);
 
     public bool GrantsInteractions => Grants(Interactions);
 
@@ -38,9 +40,11 @@ public sealed record ProtocolNegotiation(string Outcome, int? Version, IReadOnly
             : new(response.Outcome, null, []);
 }
 
-// The local player's Pose as a Protocol Version 2 `localpose` State Update reports it: feet position, body yaw and camera pitch in degrees.
+// The local player's Pose as a Protocol Version 2 `localpose` State Update reports it: feet position, body yaw and camera pitch in degrees,
+// and lean from -1 (left) to 1 (right).
 public sealed record LocalPose(
-    ulong TimeMs, uint TeleportCounter, double X, double Y, double Z, double Yaw, double Pitch, bool Crouch, bool Lantern, string Map);
+    ulong TimeMs, uint TeleportCounter, double X, double Y, double Z, double Yaw, double Pitch, bool Crouch, bool Lantern, double Lean,
+    string Map);
 
 // A map's current checkpoint registration as the game reports it. Count is the count its callback receives on the next
 // death, and Callback whether a death runs one; every entered map starts with the automatic `_auto` checkpoint without one.

@@ -7,8 +7,8 @@ namespace Multimnesia.Tests;
 
 public sealed class LocalGameSessionTests : IAsyncDisposable
 {
-    private const string Negotiate = "protocol 2 avatars localpose interactions sharedcallbacks playerplace enemies";
-    private const string AvatarsUnsupportedNotice = "chatentry - - SYSTEM:Your game does not support Avatars; movement will not be shared.";
+    private const string Negotiate = "protocol 2 avatars localpose interactions sharedcallbacks playerplace enemies lean";
+    private const string AvatarsUnsupportedNotice = "chatentry - - SYSTEM:Your game does not support Avatars with lean; movement will not be shared.";
     private const string InteractionsUnsupportedNotice = "chatentry - - SYSTEM:Your game does not support interactions; moving props will not be shared.";
     private const string SharedCallbacksUnsupportedNotice =
         "chatentry - - SYSTEM:Your game does not support Shared Callbacks; triggers, buttons, and lamps will not be shared.";
@@ -58,7 +58,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         var display = _callbacks.ReceiveChat(new ChatEntry("Bob", "hello")).AsTask();
 
         Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(300)));
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose");
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean");
         Assert.Equal("chatentry - - Bob:hello", await game.ReadLineAsync());
         await display;
     }
@@ -72,20 +72,20 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         var messages = Enumerable.Range(1, 20).Select(number => $"message {number}").ToArray();
 
         var displays = messages.Select(message => _callbacks.ReceiveChat(new ChatEntry("Bob", message)).AsTask()).ToArray();
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose");
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean");
 
         foreach (var message in messages) Assert.Equal($"chatentry - - Bob:{message}", await game.ReadLineAsync());
         await Task.WhenAll(displays);
     }
 
     [Fact]
-    public async Task Granting_both_Capabilities_makes_the_Shared_Pose_available_and_logs_the_negotiation()
+    public async Task Granting_the_Shared_Pose_Capabilities_makes_the_Shared_Pose_available_and_logs_the_negotiation()
     {
         var (game, session, _) = await ConnectAsync();
         await using var _ = game;
         await game.ReadLineAsync();
 
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose");
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean");
         Assert.Equal(InteractionsUnsupportedNotice, await game.ReadLineAsync());
         Assert.Equal(SharedCallbacksUnsupportedNotice, await game.ReadLineAsync());
         await _callbacks.DisplaySystem("marker");
@@ -96,12 +96,13 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         Assert.Equal(ConnectionLogSeverity.Information, logged.Severity);
         Assert.Equal("ok", logged.Negotiation!.Outcome);
         Assert.Equal(2, logged.Negotiation.Version);
-        Assert.Equal(["avatars", "localpose"], logged.Negotiation.Capabilities);
+        Assert.Equal(["avatars", "localpose", "lean"], logged.Negotiation.Capabilities);
     }
 
     [Theory]
     [InlineData("RESPONSE protocol ok 2 avatars", "ok")]
     [InlineData("RESPONSE protocol ok 2 localpose", "ok")]
+    [InlineData("RESPONSE protocol ok 2 avatars localpose", "ok")]
     [InlineData("RESPONSE protocol ok 2", "ok")]
     [InlineData("RESPONSE protocol unsupported-version", "unsupported-version")]
     [InlineData("RESPONSE protocol invalid", "invalid")]
@@ -195,15 +196,15 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         await run;
     }
 
-    private const string LocalPoseState = "STATE localpose 1000 1 1.2500 2.5000 -3.7500 90.0000 -45.0000 0 1 custom_stories/mp-test-cs/maps/start.map";
+    private const string LocalPoseState = "STATE localpose 1000 1 1.2500 2.5000 -3.7500 90.0000 -45.0000 0 1 -0.5000 custom_stories/mp-test-cs/maps/start.map";
     private static readonly LanMessage.Pose ReceivedPose = new(
-        123456, 3, 1.25, -2.5, 3.75, 90, -45, true, false, "custom_stories/My Story: Part 2/maps/cellar one.map");
+        123456, 3, 1.25, -2.5, 3.75, 90, -45, true, false, 1, "custom_stories/My Story: Part 2/maps/cellar one.map");
 
     private async Task<FakeGame> ConnectWithSharedPoseAsync()
     {
         var (game, _, _) = await ConnectAsync();
         Assert.Equal(Negotiate, await game.ReadLineAsync());
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose");
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean");
         Assert.Equal(InteractionsUnsupportedNotice, await game.ReadLineAsync());
         Assert.Equal(SharedCallbacksUnsupportedNotice, await game.ReadLineAsync());
         _sessions.SetPresent(true);
@@ -221,14 +222,14 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         await WaitUntilAsync(() => _sessions.SentPoses.Count > 0);
         await _callbacks.ReceivePose(ReceivedPose);
         Assert.Equal(
-            "avatarpose partner 123456 3 1.2500 -2.5000 3.7500 90.0000 -45.0000 1 0 custom_stories/My Story: Part 2/maps/cellar one.map",
+            "avatarpose partner 123456 3 1.2500 -2.5000 3.7500 90.0000 -45.0000 1 0 1.0000 custom_stories/My Story: Part 2/maps/cellar one.map",
             await game.ReadLineAsync());
         _sessions.SetPresent(false);
 
         Assert.Equal("avatarremove partner", await game.ReadLineAsync());
         Assert.Equal("localpose unsubscribe", await game.ReadLineAsync());
         Assert.Equal(
-            [new LanMessage.Pose(1000, 1, 1.25, 2.5, -3.75, 90, -45, false, true, "custom_stories/mp-test-cs/maps/start.map")],
+            [new LanMessage.Pose(1000, 1, 1.25, 2.5, -3.75, 90, -45, false, true, -0.5, "custom_stories/mp-test-cs/maps/start.map")],
             _sessions.SentPoses);
     }
 
@@ -238,7 +239,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         var (game, _, _) = await ConnectAsync();
         await using var _ = game;
         Assert.Equal(Negotiate, await game.ReadLineAsync());
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose playerplace");
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean playerplace");
         Assert.Equal(InteractionsUnsupportedNotice, await game.ReadLineAsync());
         Assert.Equal(SharedCallbacksUnsupportedNotice, await game.ReadLineAsync());
         await game.SendAsync("EVENT:CHAT:Alice:/host");
@@ -262,7 +263,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         var (game, _, _) = await ConnectAsync();
         await using var _ = game;
         Assert.Equal(Negotiate, await game.ReadLineAsync());
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks");
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks");
         _sessions.HostResult = SessionOperationResult.SucceededWith("Hosting Multiplayer Session at 100.101.102.103:5000.");
 
         await game.SendAsync("EVENT:CHAT:Alice:/host");
@@ -311,7 +312,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
     {
         var (game, _, _) = await ConnectAsync();
         Assert.Equal(Negotiate, await game.ReadLineAsync());
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks");
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks");
         _sessions.SetPresent(true);
         Assert.Equal(["avatarcreate partner", "localpose subscribe 30", "reportedbodies subscribe 30"], await ReadSetupAsync(game));
         return game;
@@ -379,7 +380,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         var (game, _, _) = await ConnectAsync();
         await using var _ = game;
         Assert.Equal(Negotiate, await game.ReadLineAsync());
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks");
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks");
 
         await game.SendAsync($"EVENT sharedcallback useitem 12 key_study {HoldMap}");
         await WaitUntilAsync(() => _sessions.SentWorldMessages.Count == 1);
@@ -401,7 +402,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         var (game, _, _) = await ConnectAsync();
         await using var _ = game;
         Assert.Equal(Negotiate, await game.ReadLineAsync());
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks");
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks");
 
         await _callbacks.ReceiveWorldMessage(new LanMessage.ButtonState("maps/old.map", 5, true));
         await _callbacks.ReceiveCustomStoryStarted("mp-test-cs");
@@ -431,13 +432,13 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         {
             await first.SendAsync("Welcome");
             Assert.Equal(Negotiate, await first.ReadLineAsync());
-            await first.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks");
+            await first.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks");
             Assert.Equal(["avatarcreate partner", "localpose subscribe 30", "reportedbodies subscribe 30"], await ReadSetupAsync(first));
         }
 
         await second.SendAsync("Welcome");
         Assert.Equal(Negotiate, await second.ReadLineAsync());
-        await second.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks");
+        await second.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks");
 
         Assert.Equal(["avatarcreate partner", "localpose subscribe 30", "reportedbodies subscribe 30"], await ReadSetupAsync(second));
         await _callbacks.ReceivePose(ReceivedPose);
@@ -495,16 +496,16 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         var (game, _, _) = await ConnectAsync();
         await using var _ = game;
         await game.ReadLineAsync();
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks playerplace enemies");
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks playerplace enemies");
         _sessions.SetPresent(true);
         var startup = new List<string?>();
         for (var i = 0; i < 4; i++) startup.Add(await game.ReadLineAsync());
         Assert.Contains("avatarcreate partner", startup);
         Assert.DoesNotContain(startup, line => line!.StartsWith("avatarenemysight "));
 
-        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 maps/a.map");
+        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 0.0000 maps/a.map");
         await WaitUntilAsync(() => _sessions.SentPoses.Count == 1);
-        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, true, "maps/a.map"));
+        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, true, 0, "maps/a.map"));
         var shared = new[] { await game.ReadLineAsync(), await game.ReadLineAsync() };
         Assert.Contains("avatarenemysight partner 1", shared);
         Assert.Contains(shared, line => line!.StartsWith("avatarpose partner "));
@@ -514,12 +515,12 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         await game.SendAsync("EVENT mapentered maps/a.map");
         Assert.Equal("avatarenemysight partner 1", await game.ReadLineAsync());
 
-        await _callbacks.ReceivePose(new(2, 0, 0, 0, 0, 0, 0, false, true, "maps/b.map"));
+        await _callbacks.ReceivePose(new(2, 0, 0, 0, 0, 0, 0, false, true, 0, "maps/b.map"));
         var separated = new[] { await game.ReadLineAsync(), await game.ReadLineAsync() };
         Assert.Contains("avatarenemysight partner 0", separated);
         Assert.Contains(separated, line => line!.StartsWith("avatarpose partner "));
 
-        await _callbacks.ReceivePose(new(3, 0, 0, 0, 0, 0, 0, false, true, "maps/a.map"));
+        await _callbacks.ReceivePose(new(3, 0, 0, 0, 0, 0, 0, false, true, 0, "maps/a.map"));
         var returned = new[] { await game.ReadLineAsync(), await game.ReadLineAsync() };
         Assert.Contains("avatarenemysight partner 1", returned);
         await game.SendAsync("EVENT mapentered maps/a.map");
@@ -532,7 +533,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         _sessions.SetPresent(true);
         for (var i = 0; i < 4; i++) await game.ReadLineAsync();
         Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
-        await _callbacks.ReceivePose(new(4, 0, 0, 0, 0, 0, 0, false, true, "maps/a.map"));
+        await _callbacks.ReceivePose(new(4, 0, 0, 0, 0, 0, 0, false, true, 0, "maps/a.map"));
         var rejoined = new[] { await game.ReadLineAsync(), await game.ReadLineAsync() };
         Assert.Contains("avatarenemysight partner 1", rejoined);
     }
@@ -546,12 +547,12 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         var (game, _, _) = await ConnectAsync();
         await using var _ = game;
         await game.ReadLineAsync();
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks" + (enemies ? " enemies" : ""));
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks" + (enemies ? " enemies" : ""));
         _sessions.SetPresent(true);
         for (var i = 0; i < 3; i++) await game.ReadLineAsync();
-        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 maps/a.map");
+        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 0.0000 maps/a.map");
         await WaitUntilAsync(() => _sessions.SentPoses.Count == 1);
-        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, true, "maps/a.map"));
+        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, true, 0, "maps/a.map"));
         Assert.StartsWith("avatarpose partner ", await game.ReadLineAsync());
         Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
     }
@@ -575,19 +576,19 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         var (game, _, _) = await ConnectAsync();
         await using var _ = game;
         await game.ReadLineAsync();
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks playerplace enemies");
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks playerplace enemies");
         _sessions.SetPresent(true);
         // Presence enables the existing streams and enemy reports.
         var commands = new List<string?>();
         for (var i = 0; i < 4; i++) commands.Add(await game.ReadLineAsync());
         Assert.Contains("enemyposes subscribe 30", commands);
         await game.SendAsync("EVENT mapentered maps/a.map");
-        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, false, "maps/elsewhere.map"));
+        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, false, 0, "maps/elsewhere.map"));
         await game.SendAsync("STATE enemypose 139 1000 0 -2 0 28.25 90 Walk 0.2 1 maps/a.map");
-        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 maps/a.map");
+        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 0.0000 maps/a.map");
         await WaitUntilAsync(() => _sessions.SentPoses.Count == 1);
         Assert.Empty(_sessions.SentEnemyPoses);
-        await _callbacks.ReceivePose(new(2, 0, 0, 0, 0, 0, 0, false, false, "maps/a.map"));
+        await _callbacks.ReceivePose(new(2, 0, 0, 0, 0, 0, 0, false, false, 0, "maps/a.map"));
         await game.SendAsync("STATE enemypose 139 1000 0 -2 0 28.25 90 Walk 0.2 1 maps/a.map");
         await game.SendAsync("STATE enemypose 140 1000 0 -2 0 29 90 Walk 0.2 1 maps/a.map");
         await WaitUntilAsync(() => _sessions.SentEnemyPoses.Count == 2);
@@ -601,11 +602,11 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         var (game, _, _) = await ConnectAsync();
         await using var _ = game;
         await game.ReadLineAsync();
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks playerplace enemies");
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks playerplace enemies");
         _sessions.SetPresent(true);
         for (var i = 0; i < 3; i++) await game.ReadLineAsync();
         await game.SendAsync("EVENT mapentered maps/a.map");
-        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 maps/a.map");
+        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 0.0000 maps/a.map");
         await WaitUntilAsync(() => _sessions.SentPoses.Count == 1);
         await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample with { Map = "maps/elsewhere.map" });
         Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
@@ -628,18 +629,18 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         var (game, _, _) = await ConnectAsync();
         await using var _ = game;
         await game.ReadLineAsync();
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks playerplace enemies");
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks playerplace enemies");
         _sessions.SetPresent(true);
         for (var i = 0; i < 4; i++) await game.ReadLineAsync();
         await game.SendAsync("EVENT mapentered maps/a.map");
-        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, false, "maps/elsewhere.map"));
+        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, false, 0, "maps/elsewhere.map"));
         await game.SendAsync("EVENT enemyattack 139 normal 1.2 1.5 1 0 0.75 0.9 maps/a.map");
-        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 maps/a.map");
+        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 0.0000 maps/a.map");
         await WaitUntilAsync(() => _sessions.SentPoses.Count == 1);
         Assert.Empty(_sessions.SentEnemyEvents);
-        await _callbacks.ReceivePose(new(2, 0, 0, 0, 0, 0, 0, false, false, "maps/a.map"));
+        await _callbacks.ReceivePose(new(2, 0, 0, 0, 0, 0, 0, false, false, 0, "maps/a.map"));
         await game.SendAsync("EVENT enemyattack 139 normal 1.2 1.5 1 0 0.75 0.9 maps/a.map");
-        await game.SendAsync("STATE localpose 2 0 0 0 0 0 0 0 0 maps/a.map");
+        await game.SendAsync("STATE localpose 2 0 0 0 0 0 0 0 0 0.0000 maps/a.map");
         await WaitUntilAsync(() => _sessions.SentPoses.Count == 2);
         Assert.Equal(EnemyAttacksProtocolTests.Sample, Assert.Single(_sessions.SentEnemyEvents));
     }
@@ -650,11 +651,11 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         var (game, _, _) = await ConnectAsync();
         await using var _ = game;
         await game.ReadLineAsync();
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks playerplace enemies");
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks playerplace enemies");
         _sessions.SetPresent(true);
         for (var i = 0; i < 3; i++) await game.ReadLineAsync();
         await game.SendAsync("EVENT mapentered maps/a.map");
-        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 maps/a.map");
+        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 0.0000 maps/a.map");
         await WaitUntilAsync(() => _sessions.SentPoses.Count == 1);
         await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample);
         Assert.Equal("enemydrive 139 maps/a.map", await game.ReadLineAsync());
@@ -674,18 +675,18 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         var (game, _, _) = await ConnectAsync();
         await using var _ = game;
         await game.ReadLineAsync();
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks playerplace enemies");
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks playerplace enemies");
         _sessions.SetPresent(true);
         for (var i = 0; i < 4; i++) await game.ReadLineAsync();
         await game.SendAsync("EVENT mapentered maps/a.map");
-        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, false, "maps/elsewhere.map"));
+        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, false, 0, "maps/elsewhere.map"));
         await game.SendAsync("EVENT enemydoorbreak 141 maps/a.map");
-        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 maps/a.map");
+        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 0.0000 maps/a.map");
         await WaitUntilAsync(() => _sessions.SentPoses.Count == 1);
         Assert.Empty(_sessions.SentEnemyEvents);
-        await _callbacks.ReceivePose(new(2, 0, 0, 0, 0, 0, 0, false, false, "maps/a.map"));
+        await _callbacks.ReceivePose(new(2, 0, 0, 0, 0, 0, 0, false, false, 0, "maps/a.map"));
         await game.SendAsync("EVENT enemydoorbreak 141 maps/a.map");
-        await game.SendAsync("STATE localpose 2 0 0 0 0 0 0 0 0 maps/a.map");
+        await game.SendAsync("STATE localpose 2 0 0 0 0 0 0 0 0 0.0000 maps/a.map");
         await WaitUntilAsync(() => _sessions.SentPoses.Count == 2);
         Assert.Equal(EnemyDoorBreaksProtocolTests.Sample, Assert.Single(_sessions.SentEnemyEvents));
     }
@@ -708,11 +709,11 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         var (game, _, _) = await ConnectAsync();
         await using var _ = game;
         await game.ReadLineAsync();
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks playerplace enemies");
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks playerplace enemies");
         _sessions.SetPresent(true);
         for (var i = 0; i < 3; i++) await game.ReadLineAsync();
         await game.SendAsync("EVENT mapentered maps/a.map");
-        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 maps/a.map");
+        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 0.0000 maps/a.map");
         await WaitUntilAsync(() => _sessions.SentPoses.Count == 1);
         await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample);
         await _callbacks.ReceiveEnemyEvent(EnemyAttacksProtocolTests.Sample);
@@ -735,7 +736,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         _sessions.SetPresent(true);
         for (var i = 0; i < 4; i++) await game.ReadLineAsync();
         await game.SendAsync("EVENT mapentered maps/a.map");
-        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, false, "maps/a.map"));
+        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, false, 0, "maps/a.map"));
         var avatar = new[] { await game.ReadLineAsync(), await game.ReadLineAsync() };
         Assert.Contains("avatarenemysight partner 1", avatar);
         return game;
@@ -750,7 +751,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         _sessions.SetPresent(true);
         for (var i = 0; i < 3; i++) await game.ReadLineAsync();
         await game.SendAsync("EVENT mapentered maps/a.map");
-        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 maps/a.map");
+        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 0.0000 maps/a.map");
         await WaitUntilAsync(() => _sessions.SentPoses.Count == 1);
         await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample);
         Assert.Equal("enemydrive 139 maps/a.map", await game.ReadLineAsync());
@@ -776,7 +777,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         await game.SendAsync("EVENT playerdeath 1 0 0 _auto maps/a.map");
         await game.SendAsync("EVENT checkpoint 1 0 _auto maps/a.map");
         Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
-        await _callbacks.ReceivePose(new(2, 0, 0, 0, 0, 0, 0, false, false, "maps/elsewhere.map"));
+        await _callbacks.ReceivePose(new(2, 0, 0, 0, 0, 0, 0, false, false, 0, "maps/elsewhere.map"));
         Assert.Contains("avatarenemysight partner 0", new[] { await game.ReadLineAsync(), await game.ReadLineAsync() });
         await game.SendAsync("EVENT playerdeath 2 0 1 cp_test maps/a.map");
         Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
@@ -802,7 +803,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
     private async Task SyncAsync(FakeGame game)
     {
         var sent = _sessions.SentPoses.Count;
-        await game.SendAsync($"STATE localpose {sent + 100} 0 0 0 0 0 0 0 0 maps/a.map");
+        await game.SendAsync($"STATE localpose {sent + 100} 0 0 0 0 0 0 0 0 0.0000 maps/a.map");
         await WaitUntilAsync(() => _sessions.SentPoses.Count > sent);
     }
 
@@ -965,19 +966,19 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         var (game, _, _) = await ConnectAsync();
         await using var _ = game;
         await game.ReadLineAsync();
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks playerplace enemies");
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks playerplace enemies");
         _sessions.SetPresent(true);
         for (var i = 0; i < 3; i++) await game.ReadLineAsync();
         for (var visit = 1; visit <= 2; visit++)
         {
             await game.SendAsync("EVENT mapentered maps/a.map");
-            await game.SendAsync($"STATE localpose {visit} 0 0 0 0 0 0 0 0 maps/a.map");
+            await game.SendAsync($"STATE localpose {visit} 0 0 0 0 0 0 0 0 0.0000 maps/a.map");
             await WaitUntilAsync(() => _sessions.SentPoses.Count == visit);
             await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample);
             Assert.Equal("enemydrive 139 maps/a.map", await game.ReadLineAsync());
             Assert.StartsWith("enemypose 139 ", await game.ReadLineAsync());
         }
-        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, false, "maps/next.map"));
+        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, false, 0, "maps/next.map"));
         var leaving = new List<string?> { await game.ReadLineAsync(), await game.ReadLineAsync() };
         Assert.Contains("enemyrelease 139 maps/a.map", leaving);
         await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample);
@@ -990,26 +991,26 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         var (game, _, _) = await ConnectAsync();
         await using var _ = game;
         await game.ReadLineAsync();
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks playerplace enemies");
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks playerplace enemies");
         _sessions.SetPresent(true);
         for (var i = 0; i < 3; i++) await game.ReadLineAsync();
         await game.SendAsync("EVENT mapentered maps/elsewhere.map");
-        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 maps/elsewhere.map");
+        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 0.0000 maps/elsewhere.map");
         await WaitUntilAsync(() => _sessions.SentPoses.Count == 1);
-        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, false, "maps/a.map"));
+        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, false, 0, "maps/a.map"));
         Assert.StartsWith("avatarpose ", await game.ReadLineAsync());
         // The Session Host's chase on a map this game is not on leaves this game's enemies vanilla.
         await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample);
         Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
         await game.SendAsync("EVENT mapentered maps/a.map");
-        await game.SendAsync("STATE localpose 2 0 0 0 0 0 0 0 0 maps/a.map");
+        await game.SendAsync("STATE localpose 2 0 0 0 0 0 0 0 0 0.0000 maps/a.map");
         await WaitUntilAsync(() => _sessions.SentPoses.Count == 2);
         await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample with { TimeMs = 2000 });
         Assert.Equal("enemydrive 139 maps/a.map", await game.ReadLineAsync());
         Assert.StartsWith("enemypose 139 2000 ", await game.ReadLineAsync());
         // Leaving the map ends the Map Visit, at which the game releases every copy itself.
         await game.SendAsync("EVENT mapentered maps/elsewhere.map");
-        await game.SendAsync("STATE localpose 3 0 0 0 0 0 0 0 0 maps/elsewhere.map");
+        await game.SendAsync("STATE localpose 3 0 0 0 0 0 0 0 0 0.0000 maps/elsewhere.map");
         await WaitUntilAsync(() => _sessions.SentPoses.Count == 3);
         await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample with { TimeMs = 3000 });
         Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
@@ -1021,18 +1022,18 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         var (game, _, _) = await ConnectAsync();
         await using var _ = game;
         await game.ReadLineAsync();
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks playerplace enemies");
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks playerplace enemies");
         _sessions.SetPresent(true);
         for (var i = 0; i < 3; i++) await game.ReadLineAsync();
         await game.SendAsync("EVENT mapentered maps/a.map");
-        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 maps/a.map");
+        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 0.0000 maps/a.map");
         await WaitUntilAsync(() => _sessions.SentPoses.Count == 1);
-        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, false, "maps/elsewhere.map"));
+        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, false, 0, "maps/elsewhere.map"));
         Assert.StartsWith("avatarpose ", await game.ReadLineAsync());
         // An Enemy Pose ahead of the Session Host's own Pose on this map does not yet take over this game's enemy.
         await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample);
         Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
-        await _callbacks.ReceivePose(new(2, 0, 0, 0, 0, 0, 0, false, false, "maps/a.map"));
+        await _callbacks.ReceivePose(new(2, 0, 0, 0, 0, 0, 0, false, false, 0, "maps/a.map"));
         Assert.StartsWith("avatarpose ", await game.ReadLineAsync());
         await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample with { TimeMs = 2000 });
         Assert.Equal("enemydrive 139 maps/a.map", await game.ReadLineAsync());
@@ -1046,16 +1047,16 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         var (game, _, _) = await ConnectAsync();
         await using var _ = game;
         await game.ReadLineAsync();
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks playerplace enemies");
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks playerplace enemies");
         _sessions.SetPresent(true);
         for (var i = 0; i < 4; i++) await game.ReadLineAsync();
         await game.SendAsync("EVENT mapentered maps/a.map");
         // The Joining Player arrives, leaves, and arrives again while the Session Host's game keeps reporting its enemy.
         foreach (var (map, time) in new[] { ("maps/a.map", 1000UL), ("maps/elsewhere.map", 2000UL), ("maps/a.map", 3000UL) })
         {
-            await _callbacks.ReceivePose(new(time, 0, 0, 0, 0, 0, 0, false, false, map));
+            await _callbacks.ReceivePose(new(time, 0, 0, 0, 0, 0, 0, false, false, 0, map));
             await game.SendAsync($"STATE enemypose 139 {time} 0 -2 0 28.25 90 Walk 0.2 1 maps/a.map");
-            await game.SendAsync($"STATE localpose {time} 0 0 0 0 0 0 0 0 maps/a.map");
+            await game.SendAsync($"STATE localpose {time} 0 0 0 0 0 0 0 0 0.0000 maps/a.map");
             await WaitUntilAsync(() => _sessions.SentPoses.Any(pose => pose.TimeMs == time));
         }
         Assert.Equal([1000UL, 3000UL], _sessions.SentEnemyPoses.Select(pose => pose.TimeMs));
@@ -1115,7 +1116,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         Assert.Equal(LinesOf("avatarcreate partner"), file.StatisticsTotal(connection, "outbound", "avatarcreate"));
         Assert.Equal(1, file.StatisticsTotal(connection, "outbound", "avatarpose").Count);
         Assert.Equal(LinesOf("Welcome to the Amnesia TCP server!"), file.StatisticsTotal(connection, "inbound", "other"));
-        Assert.Equal(LinesOf("RESPONSE protocol ok 2 avatars localpose"), file.StatisticsTotal(connection, "inbound", "RESPONSE protocol"));
+        Assert.Equal(LinesOf("RESPONSE protocol ok 2 avatars localpose lean"), file.StatisticsTotal(connection, "inbound", "RESPONSE protocol"));
         Assert.Equal(LinesOf(LocalPoseState, LocalPoseState), file.StatisticsTotal(connection, "inbound", "STATE localpose"));
         Assert.Contains(file.Records("trace"), record => record.GetProperty("kind").GetString() == "avatarpose");
         Assert.DoesNotContain("swordfish", file.Text);
@@ -1135,7 +1136,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         var first = _callbacks.ReceiveChat(new ChatEntry("Bob", "first")).AsTask();
         var second = _callbacks.ReceiveChat(new ChatEntry("Bob", "second")).AsTask();
         await Task.Delay(150, TestContext.Current.CancellationToken);
-        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks");
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks");
         await Task.WhenAll(first, second);
 
         var summary = Assert.Single((await StopTrafficAsync(output)).Records("summary"));

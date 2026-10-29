@@ -7,8 +7,8 @@ public sealed class PlayerTeleportTests
 {
     private const string Map = "custom_stories/My Story: Part 2/maps/cellar one.map";
     private static readonly ProtocolNegotiation Granted = new("ok", 2, ["avatars", "localpose", "playerplace"]);
-    private static readonly LocalPose Local = new(1000, 1, 0, 0, 0, 0, 0, false, false, Map);
-    private static readonly LanMessage.Pose Other = new(123456, 3, 1.25, -2.5, 3.75, 90, -45, true, true, Map);
+    private static readonly LocalPose Local = new(1000, 1, 0, 0, 0, 0, 0, false, false, 0, Map);
+    private static readonly LanMessage.Pose Other = new(123456, 3, 1.25, -2.5, 3.75, 90, -45, true, true, 0, Map);
     private const string PlaceLine = "playerplace 1.2500 -2.5000 3.7500 90.0000 1 " + Map;
 
     private readonly FakeSessionOperations _sessions = new();
