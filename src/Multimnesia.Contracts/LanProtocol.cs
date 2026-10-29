@@ -111,6 +111,9 @@ public sealed record BodyEntry(int PropId, int BodyId, BodyState State);
 
 public enum SharedCustomStoryStartOutcome { Started, NotFound, Invalid, NotInMainMenu, Unavailable }
 
+// A message read from the wire, with its framed size: the payload and its 4-byte length prefix.
+public readonly record struct LanFrame(LanMessage Message, int Bytes);
+
 public sealed class LanProtocolException(string message, Exception? innerException = null) : IOException(message, innerException);
 
 public static class LanProtocol
@@ -131,7 +134,8 @@ public static class LanProtocol
     public const int MaximumItemNameLength = 64;
     private static readonly UTF8Encoding Utf8 = new(false, true);
 
-    public static async ValueTask WriteAsync(Stream stream, LanMessage message, CancellationToken cancellationToken = default)
+    // Returns the framed size: the payload and its 4-byte length prefix.
+    public static async ValueTask<int> WriteAsync(Stream stream, LanMessage message, CancellationToken cancellationToken = default)
     {
         var payload = JsonSerializer.SerializeToUtf8Bytes<object>(message switch
         {
@@ -269,9 +273,13 @@ public static class LanProtocol
         await stream.WriteAsync(header, cancellationToken);
         await stream.WriteAsync(payload, cancellationToken);
         await stream.FlushAsync(cancellationToken);
+        return header.Length + payload.Length;
     }
 
-    public static async ValueTask<LanMessage> ReadAsync(Stream stream, CancellationToken cancellationToken = default)
+    public static async ValueTask<LanMessage> ReadAsync(Stream stream, CancellationToken cancellationToken = default) =>
+        (await ReadFrameAsync(stream, cancellationToken)).Message;
+
+    public static async ValueTask<LanFrame> ReadFrameAsync(Stream stream, CancellationToken cancellationToken = default)
     {
         var header = new byte[4];
         await ReadExactlyAsync(stream, header, cancellationToken);
@@ -286,7 +294,7 @@ public static class LanProtocol
             using var document = JsonDocument.Parse(payload);
             var root = document.RootElement;
             var type = RequiredString(root, "type", 32);
-            return type switch
+            LanMessage message = type switch
             {
                 "join-request" => new LanMessage.JoinRequest(
                     RequiredInt32(root, "protocolVersion"), RequiredGuid(root, "peerCorrelationId")),
@@ -319,6 +327,7 @@ public static class LanProtocol
                 "lamp-state" => new LanMessage.LampState(RequiredMap(root), RequiredInt32(root, "entityId"), root.GetProperty("lit").GetBoolean()),
                 _ => throw new LanProtocolException("Unknown LAN message type.")
             };
+            return new LanFrame(message, header.Length + length);
         }
         catch (LanProtocolException) { throw; }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException or KeyNotFoundException)

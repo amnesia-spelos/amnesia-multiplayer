@@ -22,6 +22,20 @@ public sealed class LanProtocolTests
     }
 
     [Fact]
+    public async Task Writing_and_reading_report_the_framed_size_including_the_length_prefix()
+    {
+        await using var stream = new MemoryStream();
+        var message = new LanMessage.ChatEntry("Bob", "hello");
+
+        var written = await LanProtocol.WriteAsync(stream, message, TestContext.Current.CancellationToken);
+        stream.Position = 0;
+        var frame = await LanProtocol.ReadFrameAsync(stream, TestContext.Current.CancellationToken);
+
+        Assert.Equal(stream.Length, written);
+        Assert.Equal(new LanFrame(message, written), frame);
+    }
+
+    [Fact]
     public async Task Oversized_frames_are_rejected_before_the_payload_is_read()
     {
         var header = new byte[4];

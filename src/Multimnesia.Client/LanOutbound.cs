@@ -8,7 +8,7 @@ namespace Multimnesia.Client;
 public sealed record OutboundMessage(LanMessage Message, TaskCompletionSource? Sent = null);
 
 // The frames for one admitted Game Peer: session messages in order, then the newest Pose and bodies whenever none are waiting.
-public sealed class LanOutbound(int capacity)
+public sealed class LanOutbound(int capacity, TrafficConnection? traffic = null)
 {
     private readonly Channel<OutboundMessage> _messages = Channel.CreateBounded<OutboundMessage>(new BoundedChannelOptions(capacity)
     {
@@ -22,6 +22,7 @@ public sealed class LanOutbound(int capacity)
         SingleReader = true,
         FullMode = BoundedChannelFullMode.DropWrite
     });
+    private readonly TrafficConnection _traffic = traffic ?? TrafficConnection.Disabled;
     private readonly Dictionary<(string Map, int EntityId), LanMessage.EnemyPose> _enemyPoses = [];
     private readonly Queue<(string Map, int EntityId)> _enemyOrder = [];
     private LanMessage.Pose? _pose;
@@ -31,6 +32,7 @@ public sealed class LanOutbound(int capacity)
     public bool TryWrite(OutboundMessage message)
     {
         if (!_messages.Writer.TryWrite(message)) return false;
+        if (_traffic.IsRecording) _traffic.ObserveOrderedFill(_messages.Reader.Count);
         _wake.Writer.TryWrite(true);
         return true;
     }
@@ -38,14 +40,14 @@ public sealed class LanOutbound(int capacity)
     // Latest-wins: replaces any Pose not yet sent.
     public void OfferPose(LanMessage.Pose pose)
     {
-        Volatile.Write(ref _pose, pose);
+        if (Interlocked.Exchange(ref _pose, pose) is not null) _traffic.CountReplacedPose();
         _wake.Writer.TryWrite(true);
     }
 
     // Latest-wins, beside the Pose: replaces any bodies not yet sent.
     public void OfferBodies(LanMessage.Bodies bodies)
     {
-        Volatile.Write(ref _bodies, bodies);
+        if (Interlocked.Exchange(ref _bodies, bodies) is not null) _traffic.CountReplacedBodies();
         _wake.Writer.TryWrite(true);
     }
 

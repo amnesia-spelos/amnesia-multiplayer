@@ -5,7 +5,6 @@ namespace Multimnesia.Client;
 // The single sink for everything the Game Peer logs: the console, plus this run's log file while it can be written.
 public sealed class GamePeerLog : IDisposable
 {
-    private const int RetainedFiles = 10;
     private const string FilePrefix = "game-peer-";
     private const string FileExtension = ".log";
 
@@ -34,7 +33,7 @@ public sealed class GamePeerLog : IDisposable
         try
         {
             Directory.CreateDirectory(directory);
-            DeleteOldest(directory, keep: RetainedFiles - 1);
+            LogFiles.DeleteOldest(directory, $"{FilePrefix}*{FileExtension}", keep: LogFiles.RetainedFiles - 1);
             // Shared so the player can open the file while the Game Peer runs.
             var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete);
             log._file = new StreamWriter(stream) { AutoFlush = true };
@@ -88,11 +87,17 @@ public sealed class GamePeerLog : IDisposable
         FilePath = null;
         _consoleErrors.WriteLine($"Could not write the log file {path}: {exception.Message} Logging to the console only.");
     }
+}
+
+// The logs directory keeps only each kind's newest files, so a long-lived install never fills the disk.
+public static class LogFiles
+{
+    public const int RetainedFiles = 10;
 
     // File names start with their timestamp, so ordinal order is age order.
-    private static void DeleteOldest(string directory, int keep)
+    public static void DeleteOldest(string directory, string searchPattern, int keep)
     {
-        var files = Directory.GetFiles(directory, $"{FilePrefix}*{FileExtension}").Order(StringComparer.Ordinal).ToArray();
+        var files = Directory.GetFiles(directory, searchPattern).Order(StringComparer.Ordinal).ToArray();
         foreach (var file in files.Take(Math.Max(files.Length - keep, 0)))
         {
             // A file still open elsewhere is left for a later run.

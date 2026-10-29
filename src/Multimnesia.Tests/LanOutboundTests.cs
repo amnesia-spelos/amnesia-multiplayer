@@ -23,6 +23,27 @@ public sealed class LanOutboundTests
     }
 
     [Fact]
+    public async Task Traffic_Statistics_report_the_ordered_lane_peak_and_replaced_Poses_and_bodies_while_the_writer_is_held_back()
+    {
+        var output = new MemoryStream();
+        var recorder = TrafficRecorder.Start(output, new TrafficOptions { Statistics = true }, _ => { });
+        var traffic = recorder.OpenConnection(TrafficChannel.Lan, RelayRole.Host);
+        var outbound = new LanOutbound(capacity: 8, traffic);
+        var bodies = new LanMessage.Bodies(1, "maps/a.map", [new BodyEntry(1, 1, new BodyState(0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0))]);
+
+        for (var i = 0; i < 3; i++) Assert.True(outbound.TryWrite(new(new LanMessage.Heartbeat())));
+        for (ulong time = 1; time <= 5; time++) outbound.OfferPose(PoseAt(time));
+        outbound.OfferBodies(bodies);
+        outbound.OfferBodies(bodies with { TimeMs = 2 });
+        await recorder.DisposeAsync();
+
+        var summary = Assert.Single(TrafficFile.Parse(output).Records("summary"));
+        Assert.Equal(3, summary.GetProperty("orderedPeak").GetInt32());
+        Assert.Equal(4, summary.GetProperty("replacedPoses").GetInt64());
+        Assert.Equal(1, summary.GetProperty("replacedBodies").GetInt64());
+    }
+
+    [Fact]
     public async Task Session_messages_are_sent_in_order_ahead_of_an_unsent_Pose()
     {
         var outbound = new LanOutbound(capacity: 8);

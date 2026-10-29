@@ -16,7 +16,52 @@ public sealed class ConfigurationTests
         Assert.Equal("Information", options.LogLevel);
         Assert.Null(options.ChatColor);
         Assert.Null(options.ParsedChatColor);
+        Assert.False(options.TrafficStatistics);
+        Assert.False(options.TrafficTrace);
+        Assert.Equal(200, options.TrafficTraceMaxMegabytes);
         Assert.Empty(options.Validate());
+    }
+
+    [Theory]
+    [InlineData(new[] { "--stats" }, true, false)]
+    [InlineData(new[] { "--trace" }, false, true)]
+    [InlineData(new[] { "--stats", "--trace" }, true, true)]
+    [InlineData(new[] { "--trace", "--color", "ff00ff", "--stats" }, true, true)]
+    [InlineData(new[] { "--stats", "true" }, true, false)]
+    [InlineData(new[] { "--stats", "false", "--trace" }, false, true)]
+    [InlineData(new[] { "--GamePeer:TrafficTrace", "true" }, false, true)]
+    public void Traffic_switches_turn_on_each_feature_independently(string[] args, bool statistics, bool trace)
+    {
+        var options = GamePeerConfiguration.Load(args, jsonPath: null);
+
+        Assert.Equal(statistics, options.TrafficStatistics);
+        Assert.Equal(trace, options.TrafficTrace);
+    }
+
+    [Fact]
+    public void Traffic_features_can_be_turned_on_in_the_JSON_configuration()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"multimnesia-config-{Guid.NewGuid():N}.json");
+        File.WriteAllText(path, """{ "GamePeer": { "TrafficStatistics": true, "TrafficTrace": true, "TrafficTraceMaxMegabytes": 5 } }""");
+        try
+        {
+            var options = GamePeerConfiguration.Load([], path);
+
+            Assert.True(options.TrafficStatistics);
+            Assert.True(options.TrafficTrace);
+            Assert.Equal(5, options.TrafficTraceMaxMegabytes);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Game_peer_rejects_a_trace_size_that_is_not_positive(int megabytes)
+    {
+        var options = new GamePeerOptions { TrafficTraceMaxMegabytes = megabytes };
+
+        Assert.Contains(options.Validate(), error => error.Contains("GamePeer:TrafficTraceMaxMegabytes", StringComparison.Ordinal));
     }
 
     [Theory]

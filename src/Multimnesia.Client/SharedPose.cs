@@ -23,6 +23,7 @@ public sealed class SharedPose
     private readonly Action<ConnectionLogSeverity, LocalGameEventName, string> _log;
     private readonly Task<ProtocolNegotiation> _negotiation;
     private readonly CancellationToken _cancellationToken;
+    private readonly TrafficConnection _traffic;
     private LanMessage.Pose? _receivedPose;
     // Poses written that the local game has not yet confirmed, and how many of them the pending ping confirms.
     private int _unconfirmedPoses;
@@ -44,7 +45,8 @@ public sealed class SharedPose
         Func<string, ValueTask> displaySystem,
         Action<ConnectionLogSeverity, LocalGameEventName, string> log,
         Task<ProtocolNegotiation> negotiation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TrafficConnection? traffic = null)
     {
         _sessions = sessions;
         _writeLine = writeLine;
@@ -52,6 +54,7 @@ public sealed class SharedPose
         _log = log;
         _negotiation = negotiation;
         _cancellationToken = cancellationToken;
+        _traffic = traffic ?? TrafficConnection.Disabled;
         sessions.OtherPlayerPresenceChanged += HandlePresenceChanged;
         // After a local game reconnect, the other player may already be present.
         Update();
@@ -72,7 +75,7 @@ public sealed class SharedPose
     public void HandleReceivedPose(LanMessage.Pose pose)
     {
         Volatile.Write(ref _otherMaps, [pose.Map]);
-        Volatile.Write(ref _receivedPose, pose);
+        if (Interlocked.Exchange(ref _receivedPose, pose) is not null) _traffic.CountReplacedPose();
         Update();
     }
 

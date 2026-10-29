@@ -144,6 +144,9 @@ Safe defaults work for both Game Peers on one PC. Configuration can be supplied 
 | `JoinTimeoutSeconds` | `10` | Overall deadline for a `/join` attempt, including trying every resolved address. |
 | `LogLevel` | `Information` | Minimum severity logged to the console and the log file: `Debug`, `Information`, `Warning`, or `Error`. `Debug` additionally logs remote endpoints. |
 | `ChatColor` | unset | Chat Color of your Chat Author name on the other player's screen: six hex digits, `RRGGBB`, without `#`. Unset uses the game's default color. Your own messages always appear in the default color on your own screen. Also settable with the short switch `--color`. |
+| `TrafficStatistics` | `false` | Writes [Traffic Statistics](#measuring-traffic) to the traffic file. Also settable with the switch `--stats`. |
+| `TrafficTrace` | `false` | Writes the [Traffic Trace](#measuring-traffic) to the traffic file. Also settable with the switch `--trace`. |
+| `TrafficTraceMaxMegabytes` | `200` | The Traffic Trace stops once the traffic file reaches this size; Traffic Statistics carry on. Must be a positive number. |
 
 Ordinary play requires no configuration beyond these defaults; no relay URL or bind address needs to be supplied. Override any setting from the command line, for example:
 
@@ -183,6 +186,25 @@ Other virtual-LAN tools such as ZeroTier or Radmin VPN work the same way, but on
 - **`Custom Story <id> could not start for the Joining Player: their game does not support Custom Story starts or did not respond.`** — the Joining Player's `Amnesia.exe` predates Custom Story start support, or their game did not reply within 5 seconds. Install a current build from `amnesia-tdd-tcp`; the Joining Player's Game Peer console logs any unrecognized reply.
 - **Local-game connection errors** — confirm the modified `Amnesia.exe` from `amnesia-tdd-tcp` is running and listening on `GamePort` before starting the Game Peer; it retries automatically once the game becomes reachable.
 - Set `LogLevel` to `Debug` to see per-connection endpoints and handshake attempts while diagnosing a LAN issue; never share `Debug` logs outside your own troubleshooting, as they include peer IP addresses.
+- **Lag, stutter, or delayed messages** — measure the traffic, as described below, and attach the traffic file to your report.
+
+### Measuring traffic
+
+Two switches, both off by default, record what crosses the Game Peer's connections to its local game and to the other Game Peers:
+
+```powershell
+.\Multimnesia.Client.exe --stats            # Traffic Statistics only
+.\Multimnesia.Client.exe --stats --trace    # Traffic Statistics and the Traffic Trace
+```
+
+The same can be set in `appsettings.json` with `TrafficStatistics` and `TrafficTrace`. `LogLevel` does not affect either; `Debug` does not turn them on.
+
+- **Traffic Statistics** (`--stats`): every second, one `statistics` record per open connection, counting the messages of each kind in each direction and their bytes, how full the queue of ordered LAN messages got, how long writes to the local game waited, and how many Poses and Bodies were replaced by newer ones before they were sent. Each connection also gets a `summary` record with its lifetime totals when it closes, or when the Game Peer stops.
+- **Traffic Trace** (`--trace`): one `trace` record per message, giving its direction, kind, size, and time. It stops once the traffic file reaches `TrafficTraceMaxMegabytes` (200 MB by default), with one warning in the main log; Traffic Statistics carry on. If the Game Peer cannot write records as fast as messages arrive, some trace records are dropped rather than delaying the game, and the statistics count them as `traceDropped`.
+
+When either switch is on, the main log says so at startup and names the file: `logs\traffic-yyyyMMdd-HHmmss.jsonl`, beside the run's `game-peer-*.log` and with the same timestamp. It is JSON Lines, one record per line, and never goes to the console. The newest 10 traffic files are kept. Each LAN connection is identified by the same peer correlation id as in the main log, on both PCs, and `connection` records note when each connection opened, was admitted, and closed, and why. If the file cannot be written, the main log warns and the Game Peer carries on without it.
+
+The traffic file names messages by their protocol kind only, such as `pose`, `chat-entry`, or `STATE localpose`. It never contains message content: no chat text, map paths, positions, item or entity names. It is safe to attach to a bug report.
 
 ## Reporting a problem
 

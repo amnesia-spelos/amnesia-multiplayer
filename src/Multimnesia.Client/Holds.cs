@@ -31,6 +31,7 @@ public sealed class Holds
     private readonly Action<ConnectionLogSeverity, LocalGameEventName, string> _log;
     private readonly Task<ProtocolNegotiation> _negotiation;
     private readonly CancellationToken _cancellationToken;
+    private readonly TrafficConnection _traffic;
     // Who Holds each entity. On the Session Host this table is the Multiplayer Relay's arbiter: every Claim, the Session
     // Host's own included, is ordered by a compare-and-set on it.
     private readonly Dictionary<Entity, Holder> _holds = [];
@@ -56,13 +57,15 @@ public sealed class Holds
         Func<string, CancellationToken, ValueTask> writeLine,
         Action<ConnectionLogSeverity, LocalGameEventName, string> log,
         Task<ProtocolNegotiation> negotiation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TrafficConnection? traffic = null)
     {
         _sessions = sessions;
         _writeLine = writeLine;
         _log = log;
         _negotiation = negotiation;
         _cancellationToken = cancellationToken;
+        _traffic = traffic ?? TrafficConnection.Disabled;
         sessions.OtherPlayerPresenceChanged += HandlePresenceChanged;
         // After a local game reconnect, the other player may already be present.
         HandlePresenceChanged();
@@ -332,7 +335,7 @@ public sealed class Holds
     public void HandleReceivedBodies(LanMessage.Bodies bodies)
     {
         if (!IsActive) return;
-        Volatile.Write(ref _receivedBodies, bodies);
+        if (Interlocked.Exchange(ref _receivedBodies, bodies) is not null) _traffic.CountReplacedBodies();
         Update();
     }
 

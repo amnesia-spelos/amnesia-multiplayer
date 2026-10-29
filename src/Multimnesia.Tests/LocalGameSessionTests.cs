@@ -16,6 +16,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
     private readonly FakeSessionOperations _sessions = new();
     private readonly List<LocalGameLogEntry> _log = [];
     private SessionCallbacks _callbacks = null!;
+    private TrafficRecorder _traffic = TrafficRecorder.Disabled;
 
     public async ValueTask DisposeAsync()
     {
@@ -26,7 +27,8 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
     private LocalGameSession CreateSession(Stream gameStream) => new(
         gameStream,
         callbacks => { _callbacks = callbacks; return _sessions; },
-        entry => { lock (_log) _log.Add(entry); });
+        entry => { lock (_log) _log.Add(entry); },
+        trafficRecorder: _traffic);
 
     private async Task<(FakeGame Game, LocalGameSession Session, Task Run)> ConnectAsync()
     {
@@ -1063,6 +1065,94 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
         while (!condition()) await Task.Delay(10, timeout.Token);
+    }
+
+    private MemoryStream RecordTraffic(bool trace = false)
+    {
+        var output = new MemoryStream();
+        _traffic = TrafficRecorder.Start(output, new TrafficOptions
+        {
+            Statistics = true,
+            Trace = trace,
+            StatisticsInterval = TimeSpan.FromMilliseconds(50)
+        }, _ => { });
+        return output;
+    }
+
+    private async Task<TrafficFile> StopTrafficAsync(MemoryStream output)
+    {
+        await _cancellation.CancelAsync();
+        await _traffic.DisposeAsync();
+        return TrafficFile.Parse(output);
+    }
+
+    private static TrafficCounts LinesOf(params string[] lines) =>
+        new(lines.Length, lines.Sum(line => System.Text.Encoding.UTF8.GetByteCount(line) + 1));
+
+    [Fact]
+    public async Task Traffic_Statistics_count_local_game_lines_and_their_bytes_per_kind_and_direction_without_their_content()
+    {
+        var output = RecordTraffic(trace: true);
+        await using var game = await ConnectWithSharedPoseAsync();
+        await _callbacks.ReceiveChat(new ChatEntry("Bob", "the password is swordfish"));
+        Assert.Equal("chatentry - - Bob:the password is swordfish", await game.ReadLineAsync());
+        await Task.Delay(80, TestContext.Current.CancellationToken);
+        await _callbacks.ReceivePose(ReceivedPose);
+        Assert.StartsWith("avatarpose partner ", await game.ReadLineAsync());
+        await game.SendAsync(LocalPoseState);
+        await game.SendAsync(LocalPoseState);
+        await WaitUntilAsync(() => _sessions.SentPoses.Count == 2);
+
+        var file = await StopTrafficAsync(output);
+
+        var connection = Assert.Single(file.Records("summary")).GetProperty("connection").GetInt32();
+        Assert.Equal("game", Assert.Single(file.Records("summary")).GetProperty("channel").GetString());
+        Assert.True(file.Statistics(connection).Count >= 2);
+        Assert.Equal(LinesOf(Negotiate), file.StatisticsTotal(connection, "outbound", "protocol"));
+        Assert.Equal(
+            LinesOf(InteractionsUnsupportedNotice, SharedCallbacksUnsupportedNotice, "chatentry - - Bob:the password is swordfish"),
+            file.StatisticsTotal(connection, "outbound", "chatentry"));
+        Assert.Equal(LinesOf("avatarcreate partner"), file.StatisticsTotal(connection, "outbound", "avatarcreate"));
+        Assert.Equal(1, file.StatisticsTotal(connection, "outbound", "avatarpose").Count);
+        Assert.Equal(LinesOf("Welcome to the Amnesia TCP server!"), file.StatisticsTotal(connection, "inbound", "other"));
+        Assert.Equal(LinesOf("RESPONSE protocol ok 2 avatars localpose"), file.StatisticsTotal(connection, "inbound", "RESPONSE protocol"));
+        Assert.Equal(LinesOf(LocalPoseState, LocalPoseState), file.StatisticsTotal(connection, "inbound", "STATE localpose"));
+        Assert.Contains(file.Records("trace"), record => record.GetProperty("kind").GetString() == "avatarpose");
+        Assert.DoesNotContain("swordfish", file.Text);
+        Assert.DoesNotContain("cellar one", file.Text);
+        Assert.DoesNotContain("mp-test-cs", file.Text);
+    }
+
+    [Fact]
+    public async Task Traffic_Statistics_record_how_long_writers_waited_at_the_write_gate()
+    {
+        var output = RecordTraffic();
+        var (game, _, _) = await ConnectAsync();
+        await using var _ = game;
+        Assert.Equal(Negotiate, await game.ReadLineAsync());
+
+        // The first holds the gate until the negotiation is answered; the second waits at the gate meanwhile.
+        var first = _callbacks.ReceiveChat(new ChatEntry("Bob", "first")).AsTask();
+        var second = _callbacks.ReceiveChat(new ChatEntry("Bob", "second")).AsTask();
+        await Task.Delay(150, TestContext.Current.CancellationToken);
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks");
+        await Task.WhenAll(first, second);
+
+        var summary = Assert.Single((await StopTrafficAsync(output)).Records("summary"));
+        Assert.True(summary.GetProperty("writeGateWaitPeakMs").GetDouble() >= 100);
+        Assert.True(summary.GetProperty("writeGateWaitTotalMs").GetDouble() >= 100);
+    }
+
+    [Fact]
+    public async Task Traffic_Statistics_count_received_Poses_replaced_before_the_frozen_local_game_could_take_them()
+    {
+        var output = RecordTraffic();
+        await using var game = await ConnectWithSharedPoseAsync();
+
+        for (ulong time = 0; time < 1_000; time++) await _callbacks.ReceivePose(ReceivedPose with { TimeMs = time });
+
+        var summary = Assert.Single((await StopTrafficAsync(output)).Records("summary"));
+        Assert.True(summary.GetProperty("replacedPoses").GetInt64() > 0);
     }
 
     [Fact]

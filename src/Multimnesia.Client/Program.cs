@@ -2,9 +2,11 @@ using Multimnesia.Client;
 
 var options = GamePeerConfiguration.Load(args, "appsettings.json");
 var errors = options.Validate();
+var logsDirectory = Path.Combine(AppContext.BaseDirectory, "logs");
+var startedAt = DateTime.Now;
 using var log = GamePeerLog.Open(
-    Path.Combine(AppContext.BaseDirectory, "logs"),
-    DateTime.Now,
+    logsDirectory,
+    startedAt,
     errors.Count == 0 ? options.ParsedLogLevel : RelaySeverity.Information,
     Console.Out,
     Console.Error);
@@ -14,6 +16,18 @@ if (errors.Count > 0)
     return 2;
 }
 log.Write(RelaySeverity.Information, $"{GamePeerVersion.DisplayName} starting.");
+await using var traffic = TrafficRecorder.Open(
+    logsDirectory, startedAt, options.ParsedTrafficOptions, warning => log.Write(RelaySeverity.Warning, warning));
+if (traffic.FilePath is not null)
+{
+    var features = (traffic.IsStatisticsOn, traffic.IsTraceOn) switch
+    {
+        (true, true) => "Traffic Statistics and the Traffic Trace are",
+        (true, false) => "Traffic Statistics are",
+        _ => "The Traffic Trace is"
+    };
+    log.Write(RelaySeverity.Information, $"{features} on, written to {traffic.FilePath}");
+}
 
 using var cancellation = new CancellationTokenSource();
 Console.CancelKeyPress += (_, eventArgs) => { eventArgs.Cancel = true; cancellation.Cancel(); };
@@ -41,7 +55,8 @@ await LocalGameSession.RunReconnectingAsync(
             receiveWorldMessage: callbacks.ReceiveWorldMessage,
             receiveEnemyPose: callbacks.ReceiveEnemyPose,
             receiveEnemyEvent: callbacks.ReceiveEnemyEvent,
-            receiveDeathMessage: callbacks.ReceiveDeathMessage),
+            receiveDeathMessage: callbacks.ReceiveDeathMessage,
+            traffic: traffic),
         entry =>
         {
             if (entry.Event == LocalGameEventName.Connected)
@@ -49,7 +64,8 @@ await LocalGameSession.RunReconnectingAsync(
             else
                 log.Write(entry.Severity, LocalGameLogEntry.Format(entry));
         },
-        connectedNotice: Interlocked.Exchange(ref isFirstConnection, false) ? GamePeerVersion.ConnectedNotice : null),
+        connectedNotice: Interlocked.Exchange(ref isFirstConnection, false) ? GamePeerVersion.ConnectedNotice : null,
+        trafficRecorder: traffic),
     (attempt, token) => Task.Delay(LocalGameReconnectPolicy.DelayForAttempt(
         attempt, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(30)), token),
     exception => log.Write(RelaySeverity.Error, $"Local-game connection was lost: {exception.Message}"),

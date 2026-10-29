@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using Multimnesia.Contracts;
@@ -56,7 +57,8 @@ public sealed class LocalGameSession(
     Stream gameStream,
     Func<SessionCallbacks, ISessionOperations> createSessions,
     Action<LocalGameLogEntry> log,
-    string? connectedNotice = null)
+    string? connectedNotice = null,
+    TrafficRecorder? trafficRecorder = null)
 {
     public const string AvatarsUnsupportedNotice = "Your game does not support Avatars; movement will not be shared.";
     public const string InteractionsUnsupportedNotice = "Your game does not support interactions; moving props will not be shared.";
@@ -101,21 +103,32 @@ public sealed class LocalGameSession(
     // Returns when cancelled; throws IOException when the local game connection is lost.
     public async Task RunAsync(CancellationToken cancellationToken)
     {
+        var traffic = (trafficRecorder ?? TrafficRecorder.Disabled).OpenConnection(TrafficChannel.LocalGame);
+        try { await RunAsync(traffic, cancellationToken); }
+        finally { traffic.Close(cancellationToken.IsCancellationRequested ? "ended" : "lost"); }
+    }
+
+    private async Task RunAsync(TrafficConnection traffic, CancellationToken cancellationToken)
+    {
         await using var writer = GameInteractionProtocol.CreateWriter(gameStream);
         using var reader = GameInteractionProtocol.CreateReader(gameStream);
         var welcome = await reader.ReadLineAsync(cancellationToken)
             ?? throw new IOException("The local game closed the Game Interaction Protocol session during startup.");
+        traffic.RecordGameLine(TrafficDirection.Inbound, welcome);
         Log(ConnectionLogSeverity.Information, LocalGameEventName.Connected, welcome);
 
         var writeGate = new SemaphoreSlim(1, 1);
         // Writers queue on the gate first, so lines held back by the negotiation keep their order.
         async ValueTask WriteLineAsync(string line, CancellationToken token)
         {
+            var waitStart = traffic.IsRecording ? Stopwatch.GetTimestamp() : 0;
             await writeGate.WaitAsync(token);
+            if (waitStart != 0) traffic.AddWriteGateWait(Stopwatch.GetElapsedTime(waitStart));
             try
             {
                 await _negotiation.Task.WaitAsync(token);
                 await writer.WriteLineAsync(line.AsMemory(), token);
+                traffic.RecordGameLine(TrafficDirection.Outbound, line);
             }
             finally { writeGate.Release(); }
         }
@@ -197,22 +210,25 @@ public sealed class LocalGameSession(
             sharedStart = new SharedCustomStoryStart(sessions, localGameCommands.StartCustomStoryAsync, DisplaySystemAsync);
             sharedPose = new SharedPose(
                 sessions, WriteLineAsync, DisplaySystemAsync, (severity, eventName, line) => Log(severity, eventName, line),
-                _negotiation.Task, cancellationToken);
+                _negotiation.Task, cancellationToken, traffic);
             sharedEnemies = new SharedEnemies(sessions, WriteLineAsync, _negotiation.Task, cancellationToken);
             holds = new Holds(
-                sessions, WriteLineAsync, (severity, eventName, line) => Log(severity, eventName, line), _negotiation.Task, cancellationToken);
+                sessions, WriteLineAsync, (severity, eventName, line) => Log(severity, eventName, line), _negotiation.Task, cancellationToken,
+                traffic);
             sharedCallbacks = new SharedCallbacks(
                 sessions, WriteLineAsync, (severity, eventName, line) => Log(severity, eventName, line), _negotiation.Task,
                 cancellationToken, holds.HandleStickyAttachAnswered);
 
             // Bypasses the gate: every other writer waits there until the negotiation is answered.
             await writer.WriteLineAsync(GameInteractionProtocol.Negotiate.AsMemory(), cancellationToken);
+            traffic.RecordGameLine(TrafficDirection.Outbound, GameInteractionProtocol.Negotiate);
             // Queued at the gate before the negotiation can settle, so it is the first chat line after it.
             if (connectedNotice is not null) _ = RunIgnoringDisconnectAsync(DisplaySystemAsync(connectedNotice).AsTask());
             while (!cancellationToken.IsCancellationRequested)
             {
                 var line = await reader.ReadLineAsync(cancellationToken)
                     ?? throw new IOException("The local game closed the Game Interaction Protocol session.");
+                traffic.RecordGameLine(TrafficDirection.Inbound, line);
                 var gameEvent = GameInteractionProtocol.ParseEvent(line);
                 if (!_negotiation.Task.IsCompleted && TryNegotiate(gameEvent) is { } negotiation)
                 {
