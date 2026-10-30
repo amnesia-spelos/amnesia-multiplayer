@@ -335,6 +335,8 @@ These steps need a game build that grants `settings` (amnesia-tdd-tcp#110), and 
 9. **The saved value survives a restart.** Close PC A's game and Game Peer, start them again with `--color FF00FF`, and rejoin. Chat color still reads `00FFFF`, and PC A's name is still cyan on PC B.
 10. **A bad value is ignored.** On PC A, set Chat color to `green` and press OK. PC A's chat shows `Your Chat color setting was ignored: use six hex digits, RRGGBB, or leave it empty.`, and PC A's name stays cyan on PC B. Set it to empty and press OK: PC A's name is in the default color on PC B.
 
+On 2026-10-30 steps 7–10 passed.
+
 ### Shared Callbacks walkthrough
 
 Run this after any change to how Shared Callbacks are shared (#43), with the Release Game Peer built from the same commit on both PCs and a game build that grants `sharedcallbacks`. Play chapter 1 of the main game together, both players on the same map unless a step says otherwise.
