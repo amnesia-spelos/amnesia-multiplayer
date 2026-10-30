@@ -13,8 +13,6 @@ public sealed class SessionNetworkOptions
     public TimeSpan HeartbeatInterval { get; init; } = TimeSpan.FromSeconds(2);
     public TimeSpan HeartbeatTimeout { get; init; } = TimeSpan.FromSeconds(10);
     public int ProtocolVersion { get; init; } = LanProtocol.CurrentVersion;
-    // Carried with each Chat Entry this player sends; null leaves the Chat Author name in the game default color.
-    public ChatColor? ChatColor { get; init; }
 }
 
 public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
@@ -333,7 +331,7 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
             connection = _joinedConnection ?? _admittedConnection;
         }
         if (outbound is null || connection is null) return;
-        if (outbound.TryWrite(new(new LanMessage.ChatEntry(entry.Author, entry.Message, _options.ChatColor?.Hex)))) return;
+        if (outbound.TryWrite(new(new LanMessage.ChatEntry(entry.Author, entry.Message, entry.AuthorColor?.Hex)))) return;
 
         connection.Dispose();
         await _notice("The remote Game Peer could not keep up with chat traffic.");

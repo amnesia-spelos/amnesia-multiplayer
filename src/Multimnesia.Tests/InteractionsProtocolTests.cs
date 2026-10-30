@@ -14,9 +14,9 @@ public sealed class InteractionsProtocolTests
     private const string AtRestText = "0.0000 0.0000 0.0000 0.0000 0.0000 0.0000 1.0000 0.0000 0.0000 0.0000 0.0000 0.0000 0.0000";
 
     [Fact]
-    public void The_negotiation_requests_interactions_after_the_Shared_Pose_Capabilities_then_Shared_Callbacks_and_playerplace()
+    public void The_negotiation_requests_interactions_after_the_Shared_Pose_Capabilities_then_the_others_and_settings_last()
     {
-        Assert.Equal("protocol 2 avatars localpose interactions sharedcallbacks playerplace enemies lean", GameInteractionProtocol.Negotiate);
+        Assert.Equal("protocol 2 avatars localpose interactions sharedcallbacks playerplace enemies lean settings", GameInteractionProtocol.Negotiate);
     }
 
     [Theory]

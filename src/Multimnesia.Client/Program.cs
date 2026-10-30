@@ -41,8 +41,7 @@ await LocalGameSession.RunReconnectingAsync(
             new SessionNetworkOptions
             {
                 Port = options.RelayPort,
-                JoinTimeout = TimeSpan.FromSeconds(options.JoinTimeoutSeconds),
-                ChatColor = options.ParsedChatColor
+                JoinTimeout = TimeSpan.FromSeconds(options.JoinTimeoutSeconds)
             },
             callbacks.DisplaySystem,
             receiveChat: callbacks.ReceiveChat,
@@ -65,7 +64,8 @@ await LocalGameSession.RunReconnectingAsync(
                 log.Write(entry.Severity, LocalGameLogEntry.Format(entry));
         },
         connectedNotice: Interlocked.Exchange(ref isFirstConnection, false) ? GamePeerVersion.ConnectedNotice : null,
-        trafficRecorder: traffic),
+        trafficRecorder: traffic,
+        chatColor: options.ParsedChatColor),
     (attempt, token) => Task.Delay(LocalGameReconnectPolicy.DelayForAttempt(
         attempt, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(30)), token),
     exception => log.Write(RelaySeverity.Error, $"Local-game connection was lost: {exception.Message}"),

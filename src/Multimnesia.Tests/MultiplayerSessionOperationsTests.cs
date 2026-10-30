@@ -163,7 +163,7 @@ public sealed class MultiplayerSessionOperationsTests
     }
 
     [Fact]
-    public async Task A_chat_entry_arrives_with_the_chat_color_its_sender_configured()
+    public async Task A_chat_entry_arrives_with_the_Chat_Color_its_sender_gave_it()
     {
         var port = FreePort();
         Assert.True(ChatColor.TryParse("ff00ff", out var magenta));
@@ -172,7 +172,7 @@ public sealed class MultiplayerSessionOperationsTests
         await using var hostWriter = GameInteractionProtocol.CreateWriter(hostGame);
         await using var joiningWriter = GameInteractionProtocol.CreateWriter(joiningGame);
         await using var hostOperations = new TcpSessionOperations(
-            new SessionNetworkOptions { Port = port, ChatColor = magenta },
+            new SessionNetworkOptions { Port = port },
             receiveChat: entry => new ValueTask(hostWriter.WriteLineAsync(GameInteractionProtocol.Display(entry))));
         await using var joinOperations = new TcpSessionOperations(
             new SessionNetworkOptions { Port = port },
@@ -182,7 +182,7 @@ public sealed class MultiplayerSessionOperationsTests
         await host.HandleAsync(new ChatEntry("Host", "/host"), TestContext.Current.CancellationToken);
         await joining.HandleAsync(new ChatEntry("Joiner", "/join 127.0.0.1"), TestContext.Current.CancellationToken);
 
-        await host.HandleAsync(new ChatEntry("Alice", "hi"), TestContext.Current.CancellationToken);
+        await host.HandleAsync(new ChatEntry("Alice", "hi", magenta), TestContext.Current.CancellationToken);
         await joining.HandleAsync(new ChatEntry("Bob", "hello"), TestContext.Current.CancellationToken);
         await WaitUntilAsync(() => hostGame.Length > 0 && joiningGame.Length > 0);
 

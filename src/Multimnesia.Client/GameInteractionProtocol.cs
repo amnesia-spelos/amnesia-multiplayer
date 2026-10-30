@@ -106,6 +106,7 @@ public static class GameInteractionProtocol
                 "enemydoorbreak" => TryParseEnemyDoorBreak(line) is { } doorBreak
                     ? new GameEvent.EnemyDoorBroke(doorBreak)
                     : new GameEvent.Unknown(line),
+                "settingchanged" => TryParseSettingChanged(line) ?? new GameEvent.Unknown(line),
                 "sharedcallback" or "buttonstate" or "lampstate" => TryParseWorldMessage(line) is { } change
                     ? new GameEvent.WorldChanged(change)
                     : new GameEvent.Unknown(line),
@@ -113,6 +114,7 @@ public static class GameInteractionProtocol
             };
         if (line.StartsWith(Version2ResponsePrefix, StringComparison.Ordinal))
         {
+            if (TryParseSettingResponse(line) is { } setting) return setting;
             // RESPONSE <keyword> <outcome> [<field>...]
             var fields = line.Split(' ');
             if (fields is [_, "chatentry", var outcome])
@@ -125,6 +127,26 @@ public static class GameInteractionProtocol
         }
         return new GameEvent.Unknown(line);
     }
+
+    // RESPONSE settingannounce|settingvalue ok <key> <value>, RESPONSE settingannounce|settingvalue <failure> <key>, or
+    // RESPONSE settingannounce|settingvalue invalid. The value is the rest of the line: it may hold spaces or be empty.
+    private static GameEvent? TryParseSettingResponse(string line)
+    {
+        var parts = line.Split(' ', 5);
+        if (parts[1] is not ("settingannounce" or "settingvalue")) return null;
+        return parts switch
+        {
+            [_, var keyword, "ok", var key, var value] when key.Length > 0 => new GameEvent.SettingResponded(keyword, "ok", key, value),
+            [_, var keyword, "invalid"] => new GameEvent.SettingResponded(keyword, "invalid", null, null),
+            [_, var keyword, var outcome, var key] when outcome is not ("ok" or "invalid") && outcome.Length > 0 && key.Length > 0 =>
+                new GameEvent.SettingResponded(keyword, outcome, key, null),
+            _ => new GameEvent.Unknown(line)
+        };
+    }
+
+    // EVENT settingchanged <key> <value>, where the value is the rest of the line and may be empty.
+    private static GameEvent? TryParseSettingChanged(string line) =>
+        line.Split(' ', 4) is [_, _, var key, var value] && key.Length > 0 ? new GameEvent.SettingChanged(key, value) : null;
 
     private static LanMessage.EnemyPose? TryParseEnemyPose(string line)
     {
@@ -371,13 +393,18 @@ public static class GameInteractionProtocol
     public static string Display(ChatEntry entry) =>
         $"chatentry {entry.AuthorColor?.Hex ?? "-"} {entry.MessageColor?.Hex ?? "-"} {entry.Author}:{entry.Message}";
 
+    // settingannounce <key> <label><TAB><default><TAB><description>: the fields after the key may hold spaces, never tabs.
+    public static string SettingAnnounce(string key, string label, string defaultValue, string description) =>
+        $"settingannounce {key} {label}\t{defaultValue}\t{description}";
+
     public static string StartCustomStory(string identifier) => $"startcustomstory:{identifier}";
 
     // The first Command of every game Session; the Shared Pose needs `avatars`, `localpose`, and `lean`, Holds `interactions`,
-    // Shared Callbacks `sharedcallbacks`, `/tp-to-peer` `playerplace`, and Shared Enemies `enemies`.
+    // Shared Callbacks `sharedcallbacks`, `/tp-to-peer` `playerplace`, Shared Enemies `enemies`, and the Chat Color setting `settings`.
     public const string Negotiate =
         $"protocol 2 {ProtocolNegotiation.Avatars} {ProtocolNegotiation.LocalPose} {ProtocolNegotiation.Interactions} " +
-        $"{ProtocolNegotiation.SharedCallbacks} {ProtocolNegotiation.PlayerPlace} {ProtocolNegotiation.Enemies} {ProtocolNegotiation.Lean}";
+        $"{ProtocolNegotiation.SharedCallbacks} {ProtocolNegotiation.PlayerPlace} {ProtocolNegotiation.Enemies} {ProtocolNegotiation.Lean} " +
+        $"{ProtocolNegotiation.Settings}";
 
     // Uses the default model, with collision on.
     public static string AvatarCreate(string avatarIdentifier) => $"avatarcreate {avatarIdentifier}";
@@ -537,6 +564,10 @@ public abstract record GameEvent
     public sealed record EntityReleased(int EntityId, string Map) : GameEvent;
     // The local player triggered a Shared Callback, or switched a button or lit a lamp (the `sharedcallbacks` Events).
     public sealed record WorldChanged(LanMessage.WorldMessage Change) : GameEvent;
+    // The `settings` Responses to `settingannounce` and `settingvalue`; Key is null for `invalid`, and Value is set only for `ok`.
+    public sealed record SettingResponded(string Keyword, string Outcome, string? Key, string? Value) : GameEvent;
+    // The player confirmed a new value for a Peer Setting this Session owns.
+    public sealed record SettingChanged(string Key, string Value) : GameEvent;
     public sealed record Responded(string Keyword, string Outcome, IReadOnlyList<string> Fields) : GameEvent;
     public sealed record Unknown(string Line) : GameEvent;
 }

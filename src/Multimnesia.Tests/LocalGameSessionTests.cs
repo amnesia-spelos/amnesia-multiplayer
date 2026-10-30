@@ -7,7 +7,10 @@ namespace Multimnesia.Tests;
 
 public sealed class LocalGameSessionTests : IAsyncDisposable
 {
-    private const string Negotiate = "protocol 2 avatars localpose interactions sharedcallbacks playerplace enemies lean";
+    private const string Negotiate = "protocol 2 avatars localpose interactions sharedcallbacks playerplace enemies lean settings";
+    // Every Capability but `settings`, so these Sessions do not announce the Chat Color.
+    private const string GrantedWithoutSettings =
+        "RESPONSE protocol ok 2 avatars localpose interactions sharedcallbacks playerplace enemies lean";
     private const string AvatarsUnsupportedNotice = "chatentry - - SYSTEM:Your game does not support Avatars with lean; movement will not be shared.";
     private const string InteractionsUnsupportedNotice = "chatentry - - SYSTEM:Your game does not support interactions; moving props will not be shared.";
     private const string SharedCallbacksUnsupportedNotice =
@@ -17,6 +20,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
     private readonly List<LocalGameLogEntry> _log = [];
     private SessionCallbacks _callbacks = null!;
     private TrafficRecorder _traffic = TrafficRecorder.Disabled;
+    private ChatColor? _configuredChatColor;
 
     public async ValueTask DisposeAsync()
     {
@@ -28,7 +32,8 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         gameStream,
         callbacks => { _callbacks = callbacks; return _sessions; },
         entry => { lock (_log) _log.Add(entry); },
-        trafficRecorder: _traffic);
+        trafficRecorder: _traffic,
+        chatColor: _configuredChatColor);
 
     private async Task<(FakeGame Game, LocalGameSession Session, Task Run)> ConnectAsync()
     {
@@ -269,6 +274,127 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         await game.SendAsync("EVENT:CHAT:Alice:/host");
 
         Assert.Equal("chatentry - 00FF00 SYSTEM:Hosting Multiplayer Session at 100.101.102.103:5000.", await game.ReadLineAsync());
+    }
+
+    private const string ChatColorDescription =
+        "Your name's color in the other players' chat, as RRGGBB. Empty uses the game default.";
+    private const string ChatColorIgnoredNotice =
+        "chatentry - - SYSTEM:Your Chat color setting was ignored: use six hex digits, RRGGBB, or leave it empty.";
+
+    private void ConfigureChatColor(string configuredColor) =>
+        _configuredChatColor = ChatColor.TryParse(configuredColor, out var color) ? color : null;
+
+    private async Task<FakeGame> HostWithSettingsAsync(string configuredColor)
+    {
+        ConfigureChatColor(configuredColor);
+        var (game, _, _) = await ConnectAsync();
+        Assert.Equal(Negotiate, await game.ReadLineAsync());
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks settings");
+        Assert.Equal($"settingannounce multimnesia.color Chat color\t{configuredColor}\t{ChatColorDescription}", await game.ReadLineAsync());
+        await game.SendAsync("EVENT:CHAT:Alice:/host");
+        return game;
+    }
+
+    private async Task<ChatColor?> AuthorColorOfSentChatAsync(FakeGame game, string message)
+    {
+        await game.SendAsync($"EVENT:CHAT:Alice:{message}");
+        await WaitUntilAsync(() => _sessions.SentChat.Any(entry => entry.Message == message));
+        return _sessions.SentChat.Single(entry => entry.Message == message).AuthorColor;
+    }
+
+    [Fact]
+    public async Task The_game_stored_Chat_Color_takes_priority_over_the_configured_one()
+    {
+        await using var game = await HostWithSettingsAsync("FF00FF");
+
+        await game.SendAsync("RESPONSE settingannounce ok multimnesia.color 00ff00");
+
+        Assert.Equal("00FF00", (await AuthorColorOfSentChatAsync(game, "hi"))?.Hex);
+    }
+
+    [Fact]
+    public async Task An_empty_Chat_Color_setting_uses_the_game_default_even_when_one_is_configured()
+    {
+        await using var game = await HostWithSettingsAsync("FF00FF");
+
+        await game.SendAsync("RESPONSE settingannounce ok multimnesia.color ");
+
+        Assert.Null(await AuthorColorOfSentChatAsync(game, "hi"));
+    }
+
+    [Fact]
+    public async Task Before_the_game_answers_the_announce_the_configured_Chat_Color_is_used()
+    {
+        await using var game = await HostWithSettingsAsync("FF00FF");
+
+        Assert.Equal("FF00FF", (await AuthorColorOfSentChatAsync(game, "hi"))?.Hex);
+    }
+
+    [Fact]
+    public async Task A_changed_Chat_Color_applies_to_later_chat_entries()
+    {
+        await using var game = await HostWithSettingsAsync("");
+        await game.SendAsync("RESPONSE settingannounce ok multimnesia.color ");
+        Assert.Null(await AuthorColorOfSentChatAsync(game, "before"));
+
+        await game.SendAsync("EVENT settingchanged multimnesia.color 0000FF");
+
+        Assert.Equal("0000FF", (await AuthorColorOfSentChatAsync(game, "after"))?.Hex);
+    }
+
+    [Theory]
+    [InlineData("RESPONSE settingannounce ok multimnesia.color #00FF00")]
+    [InlineData("EVENT settingchanged multimnesia.color green")]
+    public async Task An_invalid_Chat_Color_setting_keeps_the_previous_color_and_tells_the_local_player(string line)
+    {
+        await using var game = await HostWithSettingsAsync("FF00FF");
+
+        await game.SendAsync(line);
+
+        Assert.Equal(ChatColorIgnoredNotice, await game.ReadLineAsync());
+        Assert.Equal("FF00FF", (await AuthorColorOfSentChatAsync(game, "hi"))?.Hex);
+    }
+
+    [Fact]
+    public async Task A_change_to_another_setting_is_ignored()
+    {
+        await using var game = await HostWithSettingsAsync("FF00FF");
+
+        await game.SendAsync("EVENT settingchanged other.color 00FF00");
+
+        Assert.Equal("FF00FF", (await AuthorColorOfSentChatAsync(game, "hi"))?.Hex);
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(200)));
+    }
+
+    [Theory]
+    [InlineData("RESPONSE settingannounce duplicate multimnesia.color")]
+    [InlineData("RESPONSE settingannounce unavailable multimnesia.color")]
+    [InlineData("RESPONSE settingannounce invalid")]
+    public async Task A_refused_announce_is_logged_and_the_configured_Chat_Color_is_used(string line)
+    {
+        await using var game = await HostWithSettingsAsync("FF00FF");
+
+        await game.SendAsync(line);
+
+        await WaitUntilAsync(() => _log.Any(entry => entry.Event == LocalGameEventName.PeerSettingRefused));
+        var logged = _log.Single(entry => entry.Event == LocalGameEventName.PeerSettingRefused);
+        Assert.Equal(ConnectionLogSeverity.Warning, logged.Severity);
+        Assert.Equal(line, logged.Line);
+        Assert.Equal("FF00FF", (await AuthorColorOfSentChatAsync(game, "hi"))?.Hex);
+    }
+
+    [Fact]
+    public async Task A_game_without_settings_is_not_sent_the_announce_and_the_configured_Chat_Color_is_used()
+    {
+        ConfigureChatColor("FF00FF");
+        var (game, _, _) = await ConnectAsync();
+        await using var _ = game;
+        Assert.Equal(Negotiate, await game.ReadLineAsync());
+        await game.SendAsync(GrantedWithoutSettings);
+        await game.SendAsync("EVENT:CHAT:Alice:/host");
+
+        Assert.Equal("FF00FF", (await AuthorColorOfSentChatAsync(game, "hi"))?.Hex);
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(200)));
     }
 
     [Fact]
@@ -732,7 +858,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         _sessions.Joined = false;
         var (game, _, _) = await ConnectAsync();
         await game.ReadLineAsync();
-        await game.SendAsync(Negotiate.Replace("protocol", "RESPONSE protocol ok"));
+        await game.SendAsync(GrantedWithoutSettings);
         _sessions.SetPresent(true);
         for (var i = 0; i < 4; i++) await game.ReadLineAsync();
         await game.SendAsync("EVENT mapentered maps/a.map");
@@ -747,7 +873,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
     {
         var (game, _, _) = await ConnectAsync();
         await game.ReadLineAsync();
-        await game.SendAsync(Negotiate.Replace("protocol", "RESPONSE protocol ok"));
+        await game.SendAsync(GrantedWithoutSettings);
         _sessions.SetPresent(true);
         for (var i = 0; i < 3; i++) await game.ReadLineAsync();
         await game.SendAsync("EVENT mapentered maps/a.map");

@@ -69,6 +69,7 @@ public interface ISessionOperations
     Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken);
     Task<SessionOperationResult> JoinAsync(string destination, CancellationToken cancellationToken);
     Task LeaveAsync(GamePeerState state, CancellationToken cancellationToken);
+    // The other players see the Chat Author name in the entry's AuthorColor; null leaves it in the game default color.
     Task SendChatAsync(ChatEntry entry, CancellationToken cancellationToken);
     Task<bool> SendCustomStoryStartedAsync(string identifier, CancellationToken cancellationToken);
     Task SendCustomStoryStartOutcomeAsync(string identifier, SharedCustomStoryStartOutcome outcome, CancellationToken cancellationToken);

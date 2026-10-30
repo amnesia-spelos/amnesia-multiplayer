@@ -17,6 +17,8 @@ public sealed record ProtocolNegotiation(string Outcome, int? Version, IReadOnly
     public const string PlayerPlace = "playerplace";
     // Adds <lean> to `localpose` and `avatarpose`; a game without it would drop every Pose this Game Peer writes.
     public const string Lean = "lean";
+    // Peer Settings: string options the player edits in the game's options, such as the Chat Color.
+    public const string Settings = "settings";
 
     // An older game answers `protocol` with WARNING:Unknown command.
     public static ProtocolNegotiation UnknownCommand { get; } = new("unknown-command", null, []);
@@ -28,6 +30,8 @@ public sealed record ProtocolNegotiation(string Outcome, int? Version, IReadOnly
     public bool GrantsSharedCallbacks => Grants(SharedCallbacks);
 
     public bool GrantsPlayerPlace => Grants(PlayerPlace);
+
+    public bool GrantsSettings => Grants(Settings);
 
     // A game older than the Capability ignores its name, so it is simply missing from the granted list.
     private bool Grants(string capability) => Outcome == "ok" && Version == SupportedVersion && Capabilities.Contains(capability);

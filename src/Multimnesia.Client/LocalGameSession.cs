@@ -9,7 +9,7 @@ public enum LocalGameEventName
 {
     Connected, ProtocolNegotiated, UnrecognizedGameReply, AvatarCreated, SharedPoseCommandFailed,
     HoldClaimed, HoldClaimDenied, HoldEnded, HoldMessageIgnored, HoldCommandFailed, ChatEntryFailed,
-    SharedCallbackNotFound, SharedCallbackFailed, SharedCallbacksDiscarded
+    SharedCallbackNotFound, SharedCallbackFailed, SharedCallbacksDiscarded, PeerSettingRefused, PeerSettingIgnored
 }
 
 public sealed record LocalGameLogEntry(
@@ -58,7 +58,8 @@ public sealed class LocalGameSession(
     Func<SessionCallbacks, ISessionOperations> createSessions,
     Action<LocalGameLogEntry> log,
     string? connectedNotice = null,
-    TrafficRecorder? trafficRecorder = null)
+    TrafficRecorder? trafficRecorder = null,
+    ChatColor? chatColor = null)
 {
     public const string AvatarsUnsupportedNotice = "Your game does not support Avatars with lean; movement will not be shared.";
     public const string InteractionsUnsupportedNotice = "Your game does not support interactions; moving props will not be shared.";
@@ -135,6 +136,7 @@ public sealed class LocalGameSession(
         ValueTask DisplayAsync(ChatEntry entry) => WriteLineAsync(GameInteractionProtocol.Display(entry), cancellationToken);
         ValueTask DisplaySystemAsync(string message) => DisplayAsync(new ChatEntry("SYSTEM", message));
         var localGameCommands = new LocalGameCommands(WriteLineAsync, Task.Delay);
+        var chatColorSetting = new ChatColorSetting(chatColor);
         SharedCustomStoryStart sharedStart = null!;
         SharedPose sharedPose = null!;
         SharedEnemies sharedEnemies = null!;
@@ -241,7 +243,19 @@ public sealed class LocalGameSession(
                 if (gameEvent is GameEvent.ChatEntryResponded { Outcome: not ChatEntryOutcome.Ok })
                     Log(ConnectionLogSeverity.Warning, LocalGameEventName.ChatEntryFailed, line);
 
-                if (gameEvent is GameEvent.ChatSubmitted chat) _ = RunIgnoringDisconnectAsync(HandleCommandAsync(orchestrator, chat.Entry));
+                switch (chatColorSetting.Handle(gameEvent))
+                {
+                    case ChatColorSettingOutcome.Refused:
+                        Log(ConnectionLogSeverity.Warning, LocalGameEventName.PeerSettingRefused, line);
+                        break;
+                    case ChatColorSettingOutcome.Ignored:
+                        Log(ConnectionLogSeverity.Warning, LocalGameEventName.PeerSettingIgnored, line);
+                        _ = RunIgnoringDisconnectAsync(DisplaySystemAsync(ChatColorSetting.IgnoredNotice).AsTask());
+                        break;
+                }
+                // Each Chat Entry carries the Chat Color current when the local player submitted it.
+                if (gameEvent is GameEvent.ChatSubmitted chat)
+                    _ = RunIgnoringDisconnectAsync(HandleCommandAsync(orchestrator, chat.Entry with { AuthorColor = chatColorSetting.Current }));
                 if (gameEvent is GameEvent.LocalPoseReported reported) sharedPose.HandleLocalPose(reported.Pose);
                 if (gameEvent is GameEvent.Ponged) sharedPose.HandlePong();
                 if (gameEvent is GameEvent.Responded responded)
@@ -277,6 +291,9 @@ public sealed class LocalGameSession(
                 LocalGameEventName.ProtocolNegotiated, negotiation: negotiation);
             _negotiation.TrySetResult(negotiation);
             _ = RunIgnoringDisconnectAsync(DisplayUnsupportedNoticesAsync(negotiation));
+            // An older game keeps the configured Chat Color, without telling the player anything.
+            if (negotiation.GrantsSettings)
+                _ = RunIgnoringDisconnectAsync(WriteLineAsync(chatColorSetting.Announce, cancellationToken).AsTask());
         }
 
         // The Session carries on without what the local game does not support, and the player is told once per Session.

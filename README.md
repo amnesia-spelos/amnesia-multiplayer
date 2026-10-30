@@ -143,7 +143,7 @@ Safe defaults work for both Game Peers on one PC. Configuration can be supplied 
 | `RelayPort` | `5000` | TCP port the in-process Multiplayer Relay listens on when hosting, and connects to when joining. |
 | `JoinTimeoutSeconds` | `10` | Overall deadline for a `/join` attempt, including trying every resolved address. |
 | `LogLevel` | `Information` | Minimum severity logged to the console and the log file: `Debug`, `Information`, `Warning`, or `Error`. `Debug` additionally logs remote endpoints. |
-| `ChatColor` | unset | Chat Color of your Chat Author name on the other player's screen: six hex digits, `RRGGBB`, without `#`. Unset uses the game's default color. Your own messages always appear in the default color on your own screen. Also settable with the short switch `--color`. |
+| `ChatColor` | unset | Chat Color of your Chat Author name on the other player's screen: six hex digits, `RRGGBB`, without `#`. Unset uses the game's default color. Your own messages always appear in the default color on your own screen. Also settable with the short switch `--color`. A game that grants `settings` shows it as **Chat color** in Options → TDD TCP, with this value as its default; a value saved there takes priority, and a change applies to your next message. |
 | `TrafficStatistics` | `false` | Writes [Traffic Statistics](#measuring-traffic) to the traffic file. Also settable with the switch `--stats`. |
 | `TrafficTrace` | `false` | Writes the [Traffic Trace](#measuring-traffic) to the traffic file. Also settable with the switch `--trace`. |
 | `TrafficTraceMaxMegabytes` | `200` | The Traffic Trace stops once the traffic file reaches this size; Traffic Statistics carry on. Must be a positive number. |
@@ -327,6 +327,13 @@ Run this after any change to how chat is displayed or how Chat Colors are shared
 6. **Mismatched builds fail Admission.** Join from a Game Peer built before #48. The joiner sees `The Multiplayer Session uses an incompatible protocol version.`
 
 On 2026-10-11 these steps all passed.
+
+These steps need a game build that grants `settings` (amnesia-tdd-tcp#110), and check the Chat Color as a Peer Setting (#88). Before you start, remove any `multimnesia.color` value from the `PeerSettings` element of `main_settings.cfg` in `Documents/Amnesia/Main` on PC A.
+
+7. **The configured color is the default.** Start PC A's Game Peer with `--color FF00FF` and join from PC B. On PC A, open Options → TDD TCP: a **Chat color** row reads `FF00FF`, and hovering over it shows its description.
+8. **A change applies at once.** On PC A, change Chat color to `00FFFF` and press OK. Send a message: on PC B, PC A's name is cyan, without restarting anything.
+9. **The saved value survives a restart.** Close PC A's game and Game Peer, start them again with `--color FF00FF`, and rejoin. Chat color still reads `00FFFF`, and PC A's name is still cyan on PC B.
+10. **A bad value is ignored.** On PC A, set Chat color to `green` and press OK. PC A's chat shows `Your Chat color setting was ignored: use six hex digits, RRGGBB, or leave it empty.`, and PC A's name stays cyan on PC B. Set it to empty and press OK: PC A's name is in the default color on PC B.
 
 ### Shared Callbacks walkthrough
 
