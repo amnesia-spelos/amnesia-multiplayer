@@ -974,6 +974,62 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Each_Kaernk_bite_is_sent_by_the_Session_Host_while_players_share_a_map()
+    {
+        _sessions.Joined = false;
+        var (game, _, _) = await ConnectAsync();
+        await using var _ = game;
+        await game.ReadLineAsync();
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks playerplace enemies");
+        _sessions.SetPresent(true);
+        for (var i = 0; i < 4; i++) await game.ReadLineAsync();
+        await game.SendAsync("EVENT mapentered maps/a.map");
+        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, false, 0, "maps/elsewhere.map"));
+        await game.SendAsync("EVENT enemyeat 139 maps/a.map");
+        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 0.0000 maps/a.map");
+        await WaitUntilAsync(() => _sessions.SentPoses.Count == 1);
+        Assert.Empty(_sessions.SentEnemyEvents);
+        await _callbacks.ReceivePose(new(2, 0, 0, 0, 0, 0, 0, false, false, 0, "maps/a.map"));
+        await game.SendAsync("EVENT enemyeat 139 maps/a.map");
+        await game.SendAsync("EVENT enemyeat 139 maps/a.map");
+        await game.SendAsync("STATE localpose 2 0 0 0 0 0 0 0 0 0.0000 maps/a.map");
+        await WaitUntilAsync(() => _sessions.SentPoses.Count == 2);
+        Assert.Equal([EnemyBitesProtocolTests.Sample, EnemyBitesProtocolTests.Sample], _sessions.SentEnemyEvents);
+    }
+
+    [Fact]
+    public async Task A_Joining_Player_never_sends_its_own_games_Kaernk_bite()
+    {
+        await using var game = await JoiningPlayerDrivingAGruntAsync();
+        await game.SendAsync("EVENT enemyeat 139 maps/a.map");
+        await SyncAsync(game);
+        Assert.Empty(_sessions.SentEnemyEvents);
+    }
+
+    [Fact]
+    public async Task A_received_Kaernk_bite_is_shown_on_the_copy_only_on_the_current_map()
+    {
+        await using var game = await JoiningPlayerDrivingAGruntAsync();
+        await _callbacks.ReceiveEnemyEvent(EnemyBitesProtocolTests.Sample with { Map = "maps/elsewhere.map" });
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+        await _callbacks.ReceiveEnemyEvent(EnemyBitesProtocolTests.Sample);
+        Assert.Equal("enemyeat 139 maps/a.map", await game.ReadLineAsync());
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+        Assert.Empty(_sessions.SentEnemyEvents);
+    }
+
+    // The game shows the bite where the copy is shown, so the copy must first reach the Enemy Pose received before it.
+    [Fact]
+    public async Task A_Kaernk_bite_follows_the_Enemy_Pose_received_before_it()
+    {
+        await using var game = await JoiningPlayerDrivingAGruntAsync();
+        await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample with { TimeMs = 4100 });
+        await _callbacks.ReceiveEnemyEvent(EnemyBitesProtocolTests.Sample);
+        Assert.StartsWith("enemypose 139 4100 ", await game.ReadLineAsync());
+        Assert.Equal("enemyeat 139 maps/a.map", await game.ReadLineAsync());
+    }
+
+    [Fact]
     public async Task An_enemy_attack_follows_the_Enemy_Pose_received_before_it()
     {
         var (game, _, _) = await ConnectAsync();
@@ -1108,6 +1164,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         await game.SendAsync("STATE enemypose 139 1000 0 -2 0 28.25 90 Walk 0.2 1 maps/a.map");
         await game.SendAsync("EVENT enemyattack 139 normal 1.2 1.5 1 0 0.75 0.9 maps/a.map");
         await game.SendAsync("EVENT enemydisappear 139 4200 maps/a.map");
+        await game.SendAsync("EVENT enemyeat 139 maps/a.map");
         await SyncAsync(game);
         Assert.Empty(_sessions.SentEnemyPoses);
         Assert.Empty(_sessions.SentEnemyEvents);
@@ -1135,6 +1192,17 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         Assert.StartsWith("shareddeath 1 0 ", await game.ReadLineAsync());
         await _callbacks.ReceiveEnemyEvent(EnemyDoorBreaksProtocolTests.Sample);
         Assert.Equal("enemydoorbreak 141 maps/a.map", await game.ReadLineAsync());
+    }
+
+    // The checkpoint resets the copy the bite was sampled from, so a bite arriving during the episode is stale.
+    [Fact]
+    public async Task A_Joining_Player_shows_no_received_Kaernk_bite_during_an_episode()
+    {
+        await using var game = await JoiningPlayerDrivingAGruntAsync();
+        await _callbacks.ReceiveDeathMessage(SharedDeathsProtocolTests.Episode with { Death = 0 });
+        Assert.StartsWith("shareddeath 1 0 ", await game.ReadLineAsync());
+        await _callbacks.ReceiveEnemyEvent(EnemyBitesProtocolTests.Sample);
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
     }
 
     [Fact]

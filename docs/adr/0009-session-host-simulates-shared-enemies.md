@@ -29,7 +29,7 @@ Alternatives considered:
 - **Only while both players are on the map.** A player alone on a map has the vanilla enemy in their own game. When the other player arrives, the Session Host's enemy takes over and a Joining Player's own enemy is replaced by the copy, which may visibly jump; when a player leaves, the one who stays keeps or regains a vanilla enemy.
 - **A door an enemy breaks is an event.** Every other game breaks its own copy of the door, and the debris stays local.
 - **Enemy-triggered callbacks run once.** A copy fires no Map Script callbacks. The Session Host relays the enemy-triggered callbacks that change shared world state as Shared Callbacks (ADR 0006).
-- **On the wire**, a Shared Enemy is an **Enemy Pose** stream (enemy, position, rotation, animation) at Pose rate, with its own Inbound Allowance and one newest-only outbound slot per enemy, plus attack, door-break, and hallucination-disappearance events on the ordered lane. The `LanProtocol` invariant and the Trusted-LAN boundary are extended when those messages are built.
+- **On the wire**, a Shared Enemy is an **Enemy Pose** stream (enemy, position, rotation, animation) at Pose rate, with its own Inbound Allowance and one newest-only outbound slot per enemy, plus attack, door-break, hallucination-disappearance, and Kaernk bite events on the ordered lane. The `LanProtocol` invariant and the Trusted-LAN boundary are extended when those messages are built.
 - **The Grunt comes first**, then the Brute, then the Kaernk.
 
 ## Consequences

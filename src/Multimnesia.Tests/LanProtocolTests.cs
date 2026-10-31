@@ -181,9 +181,9 @@ public sealed class LanProtocolTests
     }
 
     [Fact]
-    public void Protocol_version_is_16_for_enemy_disappearances()
+    public void Protocol_version_is_17_for_Kaernk_bites()
     {
-        Assert.Equal(16, LanProtocol.CurrentVersion);
+        Assert.Equal(17, LanProtocol.CurrentVersion);
     }
 
     private static MemoryStream Frame(string json)

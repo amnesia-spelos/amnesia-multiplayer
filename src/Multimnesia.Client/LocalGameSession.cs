@@ -191,6 +191,7 @@ public sealed class LocalGameSession(
                 if (enemyEvent is LanMessage.EnemyDoorBreak doorBreak) sharedEnemies.HandleReceivedEnemyDoorBreak(doorBreak);
                 if (enemyEvent is LanMessage.EnemyDisappearance disappearance)
                     sharedEnemies.HandleReceivedEnemyDisappearance(disappearance);
+                if (enemyEvent is LanMessage.EnemyBite bite) sharedEnemies.HandleReceivedEnemyBite(bite);
                 return ValueTask.CompletedTask;
             },
             // Not awaited: an episode the Session Host decides is sent to the Joining Player without stalling the read loop.

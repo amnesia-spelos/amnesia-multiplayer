@@ -562,6 +562,7 @@ public static class TrafficKinds
         LanMessage.EnemyAttack => "enemy-attack",
         LanMessage.EnemyDoorBreak => "enemy-door-break",
         LanMessage.EnemyDisappearance => "enemy-disappearance",
+        LanMessage.EnemyBite => "enemy-bite",
         LanMessage.PlayerDeath => "player-death",
         LanMessage.SharedDeath => "shared-death",
         LanMessage.Claim => "claim",

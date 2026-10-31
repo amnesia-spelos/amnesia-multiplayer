@@ -285,6 +285,7 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         LanMessage.EnemyDoorBreak doorBreak when LanProtocol.IsValid(doorBreak) => SendOrderedAsync(doorBreak, hostOnly: true),
         LanMessage.EnemyDisappearance disappearance when LanProtocol.IsValid(disappearance) =>
             SendOrderedAsync(disappearance, hostOnly: true),
+        LanMessage.EnemyBite bite when LanProtocol.IsValid(bite) => SendOrderedAsync(bite, hostOnly: true),
         _ => Task.CompletedTask
     };
 

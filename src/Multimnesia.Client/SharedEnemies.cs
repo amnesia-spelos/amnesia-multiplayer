@@ -101,6 +101,9 @@ public sealed class SharedEnemies
             // Only the Session Host's game decides a disappearance; a Joining Player's own report is never relayed.
             if (gameEvent is GameEvent.EnemyDisappeared disappeared && !_dying && SharesLocked(disappeared.Disappearance.Map))
                 enemyEvent = disappeared.Disappearance;
+            // Only the simulating game's Kaernk eats its own food; a Joining Player's copy never reports a bite.
+            if (gameEvent is GameEvent.EnemyAte ate && !_dying && SharesLocked(ate.Bite.Map))
+                enemyEvent = ate.Bite;
             // A broken door stays broken through a checkpoint, so every game breaks its own copy, even during an episode.
             if (gameEvent is GameEvent.EnemyDoorBroke broke && SharesLocked(broke.DoorBreak.Map))
                 enemyEvent = broke.DoorBreak;
@@ -203,6 +206,11 @@ public sealed class SharedEnemies
     // activated it again. The game also rejects a duplicate or stale delivery itself.
     public void HandleReceivedEnemyDisappearance(LanMessage.EnemyDisappearance disappearance) =>
         DeliverAfterReceivedPoses(disappearance.Map, disappearance.EntityId, GameInteractionProtocol.EnemyDisappear(disappearance));
+
+    // The game shows the eat splash where the driven copy is shown and pauses its movement splashes; it answers not-found
+    // for an enemy it does not drive.
+    public void HandleReceivedEnemyBite(LanMessage.EnemyBite bite) =>
+        DeliverAfterReceivedPoses(bite.Map, bite.EntityId, GameInteractionProtocol.EnemyEat(bite));
 
     // An enemy event acts on the copy as posed by every sample received before it. A Shared Death resets the copies, so
     // none is delivered until this game's checkpoint completes the episode.
