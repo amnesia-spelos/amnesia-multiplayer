@@ -252,6 +252,8 @@ For the Shared Main Story Start (#23), use game builds with amnesia-spelos/amnes
 16. With PC B joined, start a new game on PC B. Confirm it stays local: PC A's game stays in the main menu and PC B sees `Only the Session Host's Main Story starts are shared.`
 17. Leave PC B in the game it started in step 16, and start a new game on PC A. Confirm both see `The Main Story could not start for the Joining Player: their game is not in the main menu.` and the session remains.
 
+On 2026-10-31 the maintainer reported that step 15 passed on two PCs: the Joining Player's game started the Main Story with the Session Host's.
+
 A build is considered verified only when every step above produces the documented outcome on real hardware, in addition to the automated test suite passing.
 
 ### Release walkthrough (from the release archive)
