@@ -233,6 +233,8 @@ public sealed class CommandOrchestratorTests
         }
         public Task<bool> SendCustomStoryStartedAsync(string identifier, CancellationToken cancellationToken) => Task.FromResult(false);
         public Task SendCustomStoryStartOutcomeAsync(
-            string identifier, SharedCustomStoryStartOutcome outcome, CancellationToken cancellationToken) => Task.CompletedTask;
+            string identifier, SharedStoryStartOutcome outcome, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task<bool> SendMainStoryStartedAsync(CancellationToken cancellationToken) => Task.FromResult(false);
+        public Task SendMainStoryStartOutcomeAsync(SharedStoryStartOutcome outcome, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

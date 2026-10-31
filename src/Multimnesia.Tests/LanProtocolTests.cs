@@ -181,9 +181,9 @@ public sealed class LanProtocolTests
     }
 
     [Fact]
-    public void Protocol_version_is_14_for_the_lean_in_a_Pose()
+    public void Protocol_version_is_15_for_the_Shared_Main_Story_Start()
     {
-        Assert.Equal(14, LanProtocol.CurrentVersion);
+        Assert.Equal(15, LanProtocol.CurrentVersion);
     }
 
     private static MemoryStream Frame(string json)
@@ -317,11 +317,11 @@ public sealed class LanProtocolTests
     public static TheoryData<LanMessage> CustomStoryMessages => new()
     {
         new LanMessage.CustomStoryStarted("mp-test-cs"),
-        new LanMessage.CustomStoryStartOutcome("mp-test-cs", SharedCustomStoryStartOutcome.Started),
-        new LanMessage.CustomStoryStartOutcome("Příběh 👻", SharedCustomStoryStartOutcome.NotFound),
-        new LanMessage.CustomStoryStartOutcome("mp-test-cs", SharedCustomStoryStartOutcome.Invalid),
-        new LanMessage.CustomStoryStartOutcome("mp-test-cs", SharedCustomStoryStartOutcome.NotInMainMenu),
-        new LanMessage.CustomStoryStartOutcome("mp-test-cs", SharedCustomStoryStartOutcome.Unavailable),
+        new LanMessage.CustomStoryStartOutcome("mp-test-cs", SharedStoryStartOutcome.Started),
+        new LanMessage.CustomStoryStartOutcome("Příběh 👻", SharedStoryStartOutcome.NotFound),
+        new LanMessage.CustomStoryStartOutcome("mp-test-cs", SharedStoryStartOutcome.Invalid),
+        new LanMessage.CustomStoryStartOutcome("mp-test-cs", SharedStoryStartOutcome.NotInMainMenu),
+        new LanMessage.CustomStoryStartOutcome("mp-test-cs", SharedStoryStartOutcome.Unavailable),
     };
 
     [Theory]
@@ -337,12 +337,12 @@ public sealed class LanProtocolTests
     }
 
     [Theory]
-    [InlineData("started", SharedCustomStoryStartOutcome.Started)]
-    [InlineData("not-found", SharedCustomStoryStartOutcome.NotFound)]
-    [InlineData("invalid", SharedCustomStoryStartOutcome.Invalid)]
-    [InlineData("not-in-main-menu", SharedCustomStoryStartOutcome.NotInMainMenu)]
-    [InlineData("unavailable", SharedCustomStoryStartOutcome.Unavailable)]
-    public async Task Custom_story_start_outcomes_use_their_wire_names(string wireName, SharedCustomStoryStartOutcome outcome)
+    [InlineData("started", SharedStoryStartOutcome.Started)]
+    [InlineData("not-found", SharedStoryStartOutcome.NotFound)]
+    [InlineData("invalid", SharedStoryStartOutcome.Invalid)]
+    [InlineData("not-in-main-menu", SharedStoryStartOutcome.NotInMainMenu)]
+    [InlineData("unavailable", SharedStoryStartOutcome.Unavailable)]
+    public async Task Custom_story_start_outcomes_use_their_wire_names(string wireName, SharedStoryStartOutcome outcome)
     {
         await using var stream = new MemoryStream();
 
@@ -384,7 +384,7 @@ public sealed class LanProtocolTests
         await Assert.ThrowsAsync<LanProtocolException>(() => LanProtocol.WriteAsync(
             stream, new LanMessage.CustomStoryStarted(identifier), TestContext.Current.CancellationToken).AsTask());
         await Assert.ThrowsAsync<LanProtocolException>(() => LanProtocol.WriteAsync(
-            stream, new LanMessage.CustomStoryStartOutcome(identifier, SharedCustomStoryStartOutcome.Started),
+            stream, new LanMessage.CustomStoryStartOutcome(identifier, SharedStoryStartOutcome.Started),
             TestContext.Current.CancellationToken).AsTask());
         Assert.Empty(stream.ToArray());
     }
@@ -395,7 +395,7 @@ public sealed class LanProtocolTests
         await using var stream = new MemoryStream();
 
         await Assert.ThrowsAsync<LanProtocolException>(() => LanProtocol.WriteAsync(
-            stream, new LanMessage.CustomStoryStartOutcome("mp-test-cs", (SharedCustomStoryStartOutcome)99),
+            stream, new LanMessage.CustomStoryStartOutcome("mp-test-cs", (SharedStoryStartOutcome)99),
             TestContext.Current.CancellationToken).AsTask());
         Assert.Empty(stream.ToArray());
     }
@@ -427,6 +427,60 @@ public sealed class LanProtocolTests
         BinaryPrimitives.WriteInt32BigEndian(bytes, payload.Length);
         payload.CopyTo(bytes.AsSpan(4));
         await using var stream = new MemoryStream(bytes);
+
+        await Assert.ThrowsAsync<LanProtocolException>(
+            () => LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken).AsTask());
+    }
+
+    public static TheoryData<LanMessage, string> MainStoryMessages => new()
+    {
+        { new LanMessage.MainStoryStarted(), "{\"type\":\"main-story-started\"}" },
+        { new LanMessage.MainStoryStartOutcome(SharedStoryStartOutcome.Started), "{\"type\":\"main-story-start-outcome\",\"outcome\":\"started\"}" },
+        {
+            new LanMessage.MainStoryStartOutcome(SharedStoryStartOutcome.NotInMainMenu),
+            "{\"type\":\"main-story-start-outcome\",\"outcome\":\"not-in-main-menu\"}"
+        },
+        {
+            new LanMessage.MainStoryStartOutcome(SharedStoryStartOutcome.Unavailable),
+            "{\"type\":\"main-story-start-outcome\",\"outcome\":\"unavailable\"}"
+        },
+    };
+
+    [Theory]
+    [MemberData(nameof(MainStoryMessages))]
+    public async Task Main_story_messages_use_their_wire_names_and_round_trip(LanMessage message, string json)
+    {
+        await using var stream = new MemoryStream();
+
+        await LanProtocol.WriteAsync(stream, message, TestContext.Current.CancellationToken);
+
+        Assert.Equal(json, Encoding.UTF8.GetString(stream.ToArray(), 4, (int)stream.Length - 4));
+        stream.Position = 0;
+        Assert.Equal(message, await LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken));
+    }
+
+    [Theory]
+    [InlineData(SharedStoryStartOutcome.NotFound)]
+    [InlineData(SharedStoryStartOutcome.Invalid)]
+    [InlineData((SharedStoryStartOutcome)99)]
+    public async Task Main_story_start_outcomes_that_only_a_Custom_Story_can_have_are_rejected_when_written(SharedStoryStartOutcome outcome)
+    {
+        await using var stream = new MemoryStream();
+
+        await Assert.ThrowsAsync<LanProtocolException>(() => LanProtocol.WriteAsync(
+            stream, new LanMessage.MainStoryStartOutcome(outcome), TestContext.Current.CancellationToken).AsTask());
+        Assert.Empty(stream.ToArray());
+    }
+
+    [Theory]
+    [InlineData("{\"type\":\"main-story-start-outcome\"}")]
+    [InlineData("{\"type\":\"main-story-start-outcome\",\"outcome\":\"not-found\"}")]
+    [InlineData("{\"type\":\"main-story-start-outcome\",\"outcome\":\"invalid\"}")]
+    [InlineData("{\"type\":\"main-story-start-outcome\",\"outcome\":\"exploded\"}")]
+    [InlineData("{\"type\":\"main-story-start-outcome\",\"outcome\":0}")]
+    public async Task Invalid_main_story_messages_are_rejected_when_read(string json)
+    {
+        await using var stream = Frame(json);
 
         await Assert.ThrowsAsync<LanProtocolException>(
             () => LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken).AsTask());

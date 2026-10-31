@@ -21,13 +21,13 @@ public sealed class LocalGameCommandsTests
     private void ExpireDeadline() => _pendingDeadlines[^1].SetResult();
 
     [Theory]
-    [InlineData(StartCustomStoryOutcome.Starting, StartCustomStoryExchangeOutcome.Starting)]
-    [InlineData(StartCustomStoryOutcome.NotFound, StartCustomStoryExchangeOutcome.NotFound)]
-    [InlineData(StartCustomStoryOutcome.Invalid, StartCustomStoryExchangeOutcome.Invalid)]
-    [InlineData(StartCustomStoryOutcome.NotInMainMenu, StartCustomStoryExchangeOutcome.NotInMainMenu)]
-    [InlineData(StartCustomStoryOutcome.Unrecognized, StartCustomStoryExchangeOutcome.Unrecognized)]
+    [InlineData(StartCustomStoryOutcome.Starting, StartStoryExchangeOutcome.Starting)]
+    [InlineData(StartCustomStoryOutcome.NotFound, StartStoryExchangeOutcome.NotFound)]
+    [InlineData(StartCustomStoryOutcome.Invalid, StartStoryExchangeOutcome.Invalid)]
+    [InlineData(StartCustomStoryOutcome.NotInMainMenu, StartStoryExchangeOutcome.NotInMainMenu)]
+    [InlineData(StartCustomStoryOutcome.Unrecognized, StartStoryExchangeOutcome.Unrecognized)]
     public async Task Start_custom_story_issues_the_command_and_yields_the_next_response(
-        StartCustomStoryOutcome outcome, StartCustomStoryExchangeOutcome expected)
+        StartCustomStoryOutcome outcome, StartStoryExchangeOutcome expected)
     {
         var commands = CreateCommands();
 
@@ -38,6 +38,46 @@ public sealed class LocalGameCommandsTests
         Assert.Equal(["startcustomstory:mp-test-cs"], _written);
     }
 
+    [Theory]
+    [InlineData(StartMainStoryOutcome.Starting, StartStoryExchangeOutcome.Starting)]
+    [InlineData(StartMainStoryOutcome.NotInMainMenu, StartStoryExchangeOutcome.NotInMainMenu)]
+    [InlineData(StartMainStoryOutcome.Unrecognized, StartStoryExchangeOutcome.Unrecognized)]
+    public async Task Start_main_story_issues_the_command_and_yields_the_next_response(
+        StartMainStoryOutcome outcome, StartStoryExchangeOutcome expected)
+    {
+        var commands = CreateCommands();
+
+        var start = commands.StartMainStoryAsync(TestContext.Current.CancellationToken);
+        commands.Dispatch(new GameEvent.StartMainStoryResponded(outcome));
+
+        Assert.Equal(expected, await start);
+        Assert.Equal(["startmainstory"], _written);
+    }
+
+    [Fact]
+    public async Task A_game_without_start_main_story_yields_an_unrecognized_reply()
+    {
+        var commands = CreateCommands();
+
+        var start = commands.StartMainStoryAsync(TestContext.Current.CancellationToken);
+        commands.Dispatch(new GameEvent.UnknownCommandWarned());
+
+        Assert.Equal(StartStoryExchangeOutcome.Unrecognized, await start);
+    }
+
+    [Fact]
+    public async Task A_main_story_start_while_a_custom_story_start_is_pending_is_reported_as_pending()
+    {
+        var commands = CreateCommands();
+        var first = commands.StartCustomStoryAsync("first", TestContext.Current.CancellationToken);
+
+        Assert.Equal(StartStoryExchangeOutcome.AlreadyPending, await commands.StartMainStoryAsync(TestContext.Current.CancellationToken));
+
+        Assert.Equal(["startcustomstory:first"], _written);
+        commands.Dispatch(new GameEvent.StartCustomStoryResponded(StartCustomStoryOutcome.Starting));
+        Assert.Equal(StartStoryExchangeOutcome.Starting, await first);
+    }
+
     [Fact]
     public async Task A_game_without_start_custom_story_yields_an_unrecognized_reply()
     {
@@ -46,7 +86,7 @@ public sealed class LocalGameCommandsTests
         var start = commands.StartCustomStoryAsync("mp-test-cs", TestContext.Current.CancellationToken);
         commands.Dispatch(new GameEvent.UnknownCommandWarned());
 
-        Assert.Equal(StartCustomStoryExchangeOutcome.Unrecognized, await start);
+        Assert.Equal(StartStoryExchangeOutcome.Unrecognized, await start);
     }
 
     [Fact]
@@ -57,7 +97,7 @@ public sealed class LocalGameCommandsTests
         var start = commands.StartCustomStoryAsync("mp-test-cs", TestContext.Current.CancellationToken);
         ExpireDeadline();
 
-        Assert.Equal(StartCustomStoryExchangeOutcome.TimedOut, await start);
+        Assert.Equal(StartStoryExchangeOutcome.TimedOut, await start);
         Assert.Equal([TimeSpan.FromSeconds(5)], _deadlines);
     }
 
@@ -74,7 +114,7 @@ public sealed class LocalGameCommandsTests
 
         Assert.False(next.IsCompleted);
         commands.Dispatch(new GameEvent.StartCustomStoryResponded(StartCustomStoryOutcome.NotFound));
-        Assert.Equal(StartCustomStoryExchangeOutcome.NotFound, await next);
+        Assert.Equal(StartStoryExchangeOutcome.NotFound, await next);
     }
 
     [Fact]
@@ -85,10 +125,10 @@ public sealed class LocalGameCommandsTests
 
         var second = await commands.StartCustomStoryAsync("second", TestContext.Current.CancellationToken);
 
-        Assert.Equal(StartCustomStoryExchangeOutcome.AlreadyPending, second);
+        Assert.Equal(StartStoryExchangeOutcome.AlreadyPending, second);
         Assert.Equal(["startcustomstory:first"], _written);
         commands.Dispatch(new GameEvent.StartCustomStoryResponded(StartCustomStoryOutcome.Starting));
-        Assert.Equal(StartCustomStoryExchangeOutcome.Starting, await first);
+        Assert.Equal(StartStoryExchangeOutcome.Starting, await first);
     }
 
     [Fact]
@@ -102,7 +142,7 @@ public sealed class LocalGameCommandsTests
         var second = commands.StartCustomStoryAsync("second", TestContext.Current.CancellationToken);
         commands.Dispatch(new GameEvent.StartCustomStoryResponded(StartCustomStoryOutcome.Starting));
 
-        Assert.Equal(StartCustomStoryExchangeOutcome.Starting, await second);
+        Assert.Equal(StartStoryExchangeOutcome.Starting, await second);
         Assert.Equal(["startcustomstory:first", "startcustomstory:second"], _written);
     }
 
@@ -118,7 +158,7 @@ public sealed class LocalGameCommandsTests
 
         Assert.False(start.IsCompleted);
         ExpireDeadline();
-        Assert.Equal(StartCustomStoryExchangeOutcome.TimedOut, await start);
+        Assert.Equal(StartStoryExchangeOutcome.TimedOut, await start);
     }
 
     [Theory]
@@ -147,6 +187,6 @@ public sealed class LocalGameCommandsTests
         var next = commands.StartCustomStoryAsync("second", TestContext.Current.CancellationToken);
         commands.Dispatch(new GameEvent.StartCustomStoryResponded(StartCustomStoryOutcome.Starting));
 
-        Assert.Equal(StartCustomStoryExchangeOutcome.Starting, await next);
+        Assert.Equal(StartStoryExchangeOutcome.Starting, await next);
     }
 }

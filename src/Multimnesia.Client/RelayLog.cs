@@ -20,7 +20,11 @@ public enum RelayEventName
     CustomStoryStartSent,
     CustomStoryStartReceived,
     CustomStoryStartOutcomeSent,
-    CustomStoryStartOutcomeReceived
+    CustomStoryStartOutcomeReceived,
+    MainStoryStartSent,
+    MainStoryStartReceived,
+    MainStoryStartOutcomeSent,
+    MainStoryStartOutcomeReceived
 }
 
 public sealed record RelayLogEntry(
@@ -34,7 +38,7 @@ public sealed record RelayLogEntry(
     RelayFailureCategory Failure = RelayFailureCategory.None,
     IPEndPoint? Endpoint = null,
     string? CustomStoryIdentifier = null,
-    SharedCustomStoryStartOutcome? CustomStoryStartOutcome = null);
+    SharedStoryStartOutcome? StoryStartOutcome = null);
 
 public static class RelayLog
 {
@@ -55,6 +59,6 @@ public static class RelayLog
         failure = entry.Failure.ToString(),
         endpoint = entry.Severity == RelaySeverity.Debug ? entry.Endpoint?.ToString() : null,
         customStoryIdentifier = entry.CustomStoryIdentifier,
-        customStoryStartOutcome = entry.CustomStoryStartOutcome?.ToString()
+        storyStartOutcome = entry.StoryStartOutcome?.ToString()
     }, SerializerOptions);
 }

@@ -8,14 +8,15 @@ namespace Multimnesia.Client;
 // the local game with a Command it composes from identifiers alone, so every game runs its own Map Script's registration.
 // A change for a map the local game is not on is kept as a Pending Shared Callback, per map and in arrival order, and
 // applied once the local game enters that map. Kept changes last the Multiplayer Session, until a new Shared Custom Story
-// Start discards them. Active only while the local game granted `sharedcallbacks`. One per local game Session.
+// Start or Shared Main Story Start discards them. Active only while the local game granted `sharedcallbacks`. One per
+// local game Session.
 public sealed class SharedCallbacks
 {
     // Far beyond a chapter's worth of triggers on maps the local player has yet to visit; a change past it is dropped.
     public const int MaximumPending = 4096;
 
-    // Arrival orders the kept changes of a map. Story is the Shared Custom Story Start the change belongs to, and Visit
-    // the Map Visit its Command was queued for.
+    // Arrival orders the kept changes of a map. Story is the Shared Custom Story Start or Shared Main Story Start the change
+    // belongs to, and Visit the Map Visit its Command was queued for.
     private readonly record struct Change(long Arrival, long Story, LanMessage.WorldMessage Message, long Visit = 0)
     {
         public override string ToString() => Message.ToString();
@@ -74,8 +75,8 @@ public sealed class SharedCallbacks
                 case GameEvent.MapEntered entered:
                     ObserveLocalMapLocked(entered.Map, newVisit: true);
                     break;
-                // The Session Host's Custom Story starts are the Shared Custom Story Starts.
-                case GameEvent.CustomStoryStarted when !_sessions.IsJoined:
+                // The Session Host's story starts are the Shared Custom Story Starts and Shared Main Story Starts.
+                case GameEvent.CustomStoryStarted or GameEvent.MainStoryStarted when !_sessions.IsJoined:
                     DiscardLocked();
                     break;
                 case GameEvent.WorldChanged changed:
@@ -106,8 +107,8 @@ public sealed class SharedCallbacks
         Update();
     }
 
-    // Joining Player: the Session Host started a Custom Story. Called before any change sent after it is received.
-    public void HandleReceivedCustomStoryStart()
+    // Joining Player: the Session Host started a story. Called before any change sent after it is received.
+    public void HandleReceivedStoryStart()
     {
         lock (_gate) DiscardLocked();
     }
@@ -134,7 +135,7 @@ public sealed class SharedCallbacks
                 _log(ConnectionLogSeverity.Information, LocalGameEventName.SharedCallbackNotFound, $"Nothing in the local game matched {change}.");
                 return;
             // The local game left the map before the Command reached it, so the change waits for its next visit there.
-            // A change from before a Shared Custom Story Start was discarded with the rest.
+            // A change from before a Shared Custom Story Start or Shared Main Story Start was discarded with the rest.
             case "wrong-map":
                 lock (_gate)
                 {
@@ -183,7 +184,7 @@ public sealed class SharedCallbacks
     {
         if (_pendingCount > 0)
             _log(ConnectionLogSeverity.Information, LocalGameEventName.SharedCallbacksDiscarded,
-                $"Discarded {_pendingCount} Pending Shared Callbacks for a new Shared Custom Story Start.");
+                $"Discarded {_pendingCount} Pending Shared Callbacks for a new story start.");
         _pending.Clear();
         _pendingCount = 0;
         // Changes still to be written, or written and still unanswered, belong to the story before it too.

@@ -72,7 +72,9 @@ public interface ISessionOperations
     // The other players see the Chat Author name in the entry's AuthorColor; null leaves it in the game default color.
     Task SendChatAsync(ChatEntry entry, CancellationToken cancellationToken);
     Task<bool> SendCustomStoryStartedAsync(string identifier, CancellationToken cancellationToken);
-    Task SendCustomStoryStartOutcomeAsync(string identifier, SharedCustomStoryStartOutcome outcome, CancellationToken cancellationToken);
+    Task SendCustomStoryStartOutcomeAsync(string identifier, SharedStoryStartOutcome outcome, CancellationToken cancellationToken);
+    Task<bool> SendMainStoryStartedAsync(CancellationToken cancellationToken);
+    Task SendMainStoryStartOutcomeAsync(SharedStoryStartOutcome outcome, CancellationToken cancellationToken);
     // Latest-wins: replaces any Pose not yet sent to the other player.
     void SendPose(LanMessage.Pose pose);
     void SendEnemyPose(LanMessage.EnemyPose pose);

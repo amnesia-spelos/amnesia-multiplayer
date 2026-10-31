@@ -12,7 +12,7 @@ Players do not build any of this: a release archive contains the modified `Amnes
 - Windows x64 on both PCs.
 - Amnesia: The Dark Descent installed on both PCs.
 - The same game version on both PCs.
-- The modified `Amnesia.exe` produced by [`amnesia-tdd-tcp`](https://github.com/amnesia-spelos/amnesia-tdd-tcp), with its Game Interaction Protocol listening locally on port 5150. It must support the `chatentry` Command for chat to display; an older `Amnesia.exe` answers it with `WARNING:Unknown command`, and chat from the other player and `SYSTEM` feedback stop appearing. It must include Custom Story start support (`startcustomstory:<id>` and `EVENT:CustomStoryStarted:<id>`); without it, chat still works, but the Session Host's starts are never shared, and starts shared with a Joining Player fail as unsupported. It must also support Game Interaction Protocol Version 2 with the `avatars` and `localpose` Capabilities for the Shared Pose; without them, the rest keeps working and the player is told movement will not be shared. For Entity Interaction Sync it must also grant the `interactions` Capability; without it, the rest keeps working and the player is told moving props will not be shared. For Shared Enemies it must grant `enemies` as well as the Shared Pose Capabilities, support the `enemyattack` Command and Event for the Joining Player to be hit, the `checkpoint` and `playerdeath` Events and `shareddeath` Command for Shared Deaths, and the `enemydoorbreak` Command and Event and the `autodisabled` Shared Callback kind for door breaks and enemy-triggered callbacks. For Shared Callbacks it must also grant the `sharedcallbacks` Capability; without it, the rest keeps working and the player is told triggers, buttons, and lamps will not be shared.
+- The modified `Amnesia.exe` produced by [`amnesia-tdd-tcp`](https://github.com/amnesia-spelos/amnesia-tdd-tcp), with its Game Interaction Protocol listening locally on port 5150. It must support the `chatentry` Command for chat to display; an older `Amnesia.exe` answers it with `WARNING:Unknown command`, and chat from the other player and `SYSTEM` feedback stop appearing. It must include Custom Story start support (`startcustomstory:<id>` and `EVENT:CustomStoryStarted:<id>`) and Main Story start support (`startmainstory` and `EVENT:MainStoryStarted`); without them, chat still works, but the Session Host's starts are never shared, and starts shared with a Joining Player fail as unsupported. It must also support Game Interaction Protocol Version 2 with the `avatars` and `localpose` Capabilities for the Shared Pose; without them, the rest keeps working and the player is told movement will not be shared. For Entity Interaction Sync it must also grant the `interactions` Capability; without it, the rest keeps working and the player is told moving props will not be shared. For Shared Enemies it must grant `enemies` as well as the Shared Pose Capabilities, support the `enemyattack` Command and Event for the Joining Player to be hit, the `checkpoint` and `playerdeath` Events and `shareddeath` Command for Shared Deaths, and the `enemydoorbreak` Command and Event and the `autodisabled` Shared Callback kind for door breaks and enemy-triggered callbacks. For Shared Callbacks it must also grant the `sharedcallbacks` Capability; without it, the rest keeps working and the player is told triggers, buttons, and lamps will not be shared.
 - The same Custom Story installed on both PCs under the same folder name (its Custom Story Identifier). Custom Story versions are not compared.
 - For development, the .NET 10 SDK. Published self-contained builds do not require a separately installed .NET runtime.
 
@@ -65,6 +65,10 @@ The Session Host's Game Peer shares this Shared Custom Story Start with the Join
 - Returning to the main menu, quitting, Continue, Load Game, death reloads, and map changes are not shared.
 - If the Joining Player's game cannot start the Custom Story, both players see why in chat and the Multiplayer Session stays up.
 
+## Starting the Main Story together
+
+Follow the same order, but in step 3 the Session Host starts a new game from the main menu. The Session Host's Game Peer shares this Shared Main Story Start the moment its game starts the Main Story, and each Joining Player's game starts a new game of the Main Story too, so both games load at the same time. The rules above apply here too. Joining Players always start in normal mode, even if the Session Host chose hard mode.
+
 ## Seeing each other move
 
 Once both players are in the Custom Story, each Game Peer streams its own player's Pose to the other, which shows it as an Avatar — the skeleton model from `resources\entities\multiplayer\skeleton_spelos` — in its own game. This is the Shared Pose. It needs nothing from the players: it starts when the second player is admitted and stops when either leaves.
@@ -106,6 +110,11 @@ Every slash-prefixed chat entry is interpreted as a Game Peer command; commands 
 | Joining Player's game is not in the main menu, or is still handling a previous start (seen by both) | `Custom Story <id> could not start for the Joining Player: their game is not in the main menu.` |
 | Joining Player's game lacks Custom Story start support or does not reply within 5 seconds (seen by both) | `Custom Story <id> could not start for the Joining Player: their game does not support Custom Story starts or did not respond.` |
 | Joining Player starts a Custom Story themselves (seen by Joining Player) | `Only the Session Host's Custom Story starts are shared.` |
+| Session Host starts a new game while a Joining Player is joined (seen by Session Host) | `Starting the Main Story for the other player.` |
+| Joining Player's game starts the Session Host's Main Story (seen by Joining Player) | `The host started the Main Story.` |
+| Joining Player's game is not in the main menu, or is still handling a previous start (seen by both) | `The Main Story could not start for the Joining Player: their game is not in the main menu.` |
+| Joining Player's game lacks Main Story start support or does not reply within 5 seconds (seen by both) | `The Main Story could not start for the Joining Player: their game does not support Main Story starts or did not respond.` |
+| Joining Player starts a new game themselves (seen by Joining Player) | `Only the Session Host's Main Story starts are shared.` |
 
 | You use `/tp-to-peer` and are placed at the other player | `Teleported to the other player.` |
 | You use `/tp-to-peer` outside a Multiplayer Session, or while still joining | `You are not in a Multiplayer Session.` |
@@ -236,6 +245,12 @@ For the Shared Custom Story Start, install `mp-test-cs` on both PCs and start ea
 12. Remove `mp-test-cs` from PC B's `custom_stories` folder, then start it on PC A. Confirm both see `Custom Story mp-test-cs could not start for the Joining Player: it is not installed.` and the session remains. Reinstall it on PC B.
 13. With PC B joined, start "Amnesia Multiplayer Test" on PC B. Confirm it stays local: PC A's game stays in the main menu and PC B sees `Only the Session Host's Custom Story starts are shared.`
 14. Leave PC B in the Custom Story it started in step 13, and start "Amnesia Multiplayer Test" on PC A. Confirm both see `Custom Story mp-test-cs could not start for the Joining Player: their game is not in the main menu.` and the session remains.
+
+For the Shared Main Story Start (#23), use game builds with amnesia-spelos/amnesia-tdd-tcp#38 and #122, and start each step with both games in the main menu:
+
+15. With PC B joined, start a new game on PC A. Confirm PC A sees `Starting the Main Story for the other player.`, PC B sees `The host started the Main Story.`, both loading screens appear at the same time, and both games reach the Main Story's first map.
+16. With PC B joined, start a new game on PC B. Confirm it stays local: PC A's game stays in the main menu and PC B sees `Only the Session Host's Main Story starts are shared.`
+17. Leave PC B in the game it started in step 16, and start a new game on PC A. Confirm both see `The Main Story could not start for the Joining Player: their game is not in the main menu.` and the session remains.
 
 A build is considered verified only when every step above produces the documented outcome on real hardware, in addition to the automated test suite passing.
 
@@ -398,7 +413,7 @@ The architecture does not preclude any of the above being built later, but none 
 
 ### Shared Enemy walkthrough
 
-Use identical Game Peer builds (`LanProtocol` version 14) and game builds granting `enemies`, `avatars`, `localpose`, `lean`, `interactions`, and `sharedcallbacks`, with support for `avatarenemysight`, `enemyattack`, `shareddeath`, `enemydoorbreak`, and `autodisabled`, on two LAN PCs. Install the current `mp-test-cs` on both PCs. This verifies Shared Enemy playback (#72), targeting the Joining Player (#73), attacks on the Joining Player (#74), Shared Deaths (#75), arriving on or leaving the map mid-chase (#76), door breaks and enemy-triggered callbacks (#77), and the Brute (#78).
+Use identical Game Peer builds (`LanProtocol` version 15) and game builds granting `enemies`, `avatars`, `localpose`, `lean`, `interactions`, and `sharedcallbacks`, with support for `avatarenemysight`, `enemyattack`, `shareddeath`, `enemydoorbreak`, and `autodisabled`, on two LAN PCs. Install the current `mp-test-cs` on both PCs. This verifies Shared Enemy playback (#72), targeting the Joining Player (#73), attacks on the Joining Player (#74), Shared Deaths (#75), arriving on or leaving the map mid-chase (#76), door breaks and enemy-triggered callbacks (#77), and the Brute (#78).
 
 1. On PC A, `/host`; on PC B, `/join <PC A's LAN address>`. Start "Amnesia Multiplayer Test" on PC A. Confirm both players are in `multiplayer-test.map` and see each other's Avatar.
 2. PC A enters `SpawnGruntArea` (ID 154, centered at `-2 1.875 18.875`). It activates `grunt` (ID 139, initially at `6.25 0 28`). PC B stays near the cabinets, watching the corridor. Confirm PC B sees the same Grunt's position, turning, and animation as PC A, with a small interpolation delay.

@@ -41,6 +41,8 @@ public static class GameInteractionProtocol
 {
     private const string CustomStoryStartedPrefix = "EVENT:CustomStoryStarted:";
     private const string StartCustomStoryResponsePrefix = "RESPONSE:startcustomstory:";
+    private const string MainStoryStartedEvent = "EVENT:MainStoryStarted";
+    private const string StartMainStoryResponsePrefix = "RESPONSE:startmainstory:";
     private const string UnknownCommandWarning = "WARNING:Unknown command";
     private const string PongResponse = "RESPONSE:ping:pong";
     private const string LocalPoseStatePrefix = "STATE localpose ";
@@ -77,6 +79,14 @@ public static class GameInteractionProtocol
                 "invalid" => StartCustomStoryOutcome.Invalid,
                 "not in main menu" => StartCustomStoryOutcome.NotInMainMenu,
                 _ => StartCustomStoryOutcome.Unrecognized
+            });
+        if (line == MainStoryStartedEvent) return new GameEvent.MainStoryStarted();
+        if (line.StartsWith(StartMainStoryResponsePrefix, StringComparison.Ordinal))
+            return new GameEvent.StartMainStoryResponded(line[StartMainStoryResponsePrefix.Length..] switch
+            {
+                "starting" => StartMainStoryOutcome.Starting,
+                "not in main menu" => StartMainStoryOutcome.NotInMainMenu,
+                _ => StartMainStoryOutcome.Unrecognized
             });
         if (line == UnknownCommandWarning) return new GameEvent.UnknownCommandWarned();
         if (line == PongResponse) return new GameEvent.Ponged();
@@ -387,7 +397,8 @@ public static class GameInteractionProtocol
 
     // Replies that LocalGameCommands turns into an Unrecognized start, which the Joining Player reports as unavailable.
     public static bool IsUnrecognizedReply(GameEvent gameEvent) => gameEvent is
-        GameEvent.StartCustomStoryResponded { Outcome: StartCustomStoryOutcome.Unrecognized } or GameEvent.UnknownCommandWarned;
+        GameEvent.StartCustomStoryResponded { Outcome: StartCustomStoryOutcome.Unrecognized } or
+        GameEvent.StartMainStoryResponded { Outcome: StartMainStoryOutcome.Unrecognized } or GameEvent.UnknownCommandWarned;
 
     // chatentry <authorColor> <messageColor> <author>:<message>, where "-" is the game default color.
     public static string Display(ChatEntry entry) =>
@@ -398,6 +409,8 @@ public static class GameInteractionProtocol
         $"settingannounce {key} {label}\t{defaultValue}\t{description}";
 
     public static string StartCustomStory(string identifier) => $"startcustomstory:{identifier}";
+
+    public const string StartMainStory = "startmainstory";
 
     // The first Command of every game Session; the Shared Pose needs `avatars`, `localpose`, and `lean`, Holds `interactions`,
     // Shared Callbacks `sharedcallbacks`, `/tp-to-peer` `playerplace`, Shared Enemies `enemies`, and the Chat Color setting `settings`.
@@ -532,6 +545,8 @@ public static class GameInteractionProtocol
 
 public enum StartCustomStoryOutcome { Starting, NotFound, Invalid, NotInMainMenu, Unrecognized }
 
+public enum StartMainStoryOutcome { Starting, NotInMainMenu, Unrecognized }
+
 public enum ChatEntryOutcome { Ok, Invalid, InvalidAuthor, InvalidMessage, Unavailable }
 
 public enum InteractionEnding { Released, Thrown, TooFar, Destroyed }
@@ -541,6 +556,8 @@ public abstract record GameEvent
     public sealed record ChatSubmitted(ChatEntry Entry) : GameEvent;
     public sealed record CustomStoryStarted(string Identifier) : GameEvent;
     public sealed record StartCustomStoryResponded(StartCustomStoryOutcome Outcome) : GameEvent;
+    public sealed record MainStoryStarted : GameEvent;
+    public sealed record StartMainStoryResponded(StartMainStoryOutcome Outcome) : GameEvent;
     public sealed record UnknownCommandWarned : GameEvent;
     public sealed record Ponged : GameEvent;
     public sealed record ChatEntryResponded(ChatEntryOutcome Outcome) : GameEvent;

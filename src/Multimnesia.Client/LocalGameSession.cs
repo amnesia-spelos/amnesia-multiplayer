@@ -43,7 +43,9 @@ public sealed record SessionCallbacks(
     Func<string, ValueTask> DisplaySystem,
     Func<ChatEntry, ValueTask> ReceiveChat,
     Func<string, ValueTask> ReceiveCustomStoryStarted,
-    Func<string, SharedCustomStoryStartOutcome, ValueTask> ReceiveCustomStoryStartOutcome,
+    Func<string, SharedStoryStartOutcome, ValueTask> ReceiveCustomStoryStartOutcome,
+    Func<ValueTask> ReceiveMainStoryStarted,
+    Func<SharedStoryStartOutcome, ValueTask> ReceiveMainStoryStartOutcome,
     Func<LanMessage.Pose, ValueTask> ReceivePose,
     Func<LanMessage.HoldMessage, ValueTask> ReceiveHoldMessage,
     Func<LanMessage.Bodies, ValueTask> ReceiveBodies,
@@ -137,7 +139,7 @@ public sealed class LocalGameSession(
         ValueTask DisplaySystemAsync(string message) => DisplayAsync(new ChatEntry("SYSTEM", message));
         var localGameCommands = new LocalGameCommands(WriteLineAsync, Task.Delay);
         var chatColorSetting = new ChatColorSetting(chatColor);
-        SharedCustomStoryStart sharedStart = null!;
+        SharedStoryStart sharedStart = null!;
         SharedPose sharedPose = null!;
         SharedEnemies sharedEnemies = null!;
         Holds holds = null!;
@@ -147,20 +149,10 @@ public sealed class LocalGameSession(
         var sessions = createSessions(new SessionCallbacks(
             DisplaySystemAsync,
             DisplayAsync,
-            // Not awaited: the exchange with the local game must not stall reading Heartbeats from the Session Host.
-            identifier =>
-            {
-                // Before the next message is received, so only the changes sent after the start are kept.
-                sharedCallbacks.HandleReceivedCustomStoryStart();
-                _ = RunIgnoringDisconnectAsync(sharedStart.HandleHostStartAsync(identifier, cancellationToken));
-                return ValueTask.CompletedTask;
-            },
-            // Not awaited: the Session Host's game may be frozen loading, and writing to it must not stall reading Heartbeats.
-            (identifier, outcome) =>
-            {
-                _ = RunIgnoringDisconnectAsync(sharedStart.HandleOutcomeAsync(identifier, outcome));
-                return ValueTask.CompletedTask;
-            },
+            identifier => ReceiveStoryStarted(new Story.Custom(identifier)),
+            (identifier, outcome) => ReceiveStoryStartOutcome(new Story.Custom(identifier), outcome),
+            () => ReceiveStoryStarted(new Story.Main()),
+            outcome => ReceiveStoryStartOutcome(new Story.Main(), outcome),
             // Never blocks: the Pose is written to the local game later, and only the newest one.
             pose =>
             {
@@ -205,11 +197,30 @@ public sealed class LocalGameSession(
                 _ = RunIgnoringDisconnectAsync(sharedEnemies.HandleReceivedDeathMessageAsync(death));
                 return ValueTask.CompletedTask;
             }));
+        // Not awaited: the exchange with the local game must not stall reading Heartbeats from the Session Host.
+        ValueTask ReceiveStoryStarted(Story story)
+        {
+            // Before the next message is received, so only the changes sent after the start are kept.
+            sharedCallbacks.HandleReceivedStoryStart();
+            _ = RunIgnoringDisconnectAsync(sharedStart.HandleHostStartAsync(story, cancellationToken));
+            return ValueTask.CompletedTask;
+        }
+        // Not awaited: the Session Host's game may be frozen loading, and writing to it must not stall reading Heartbeats.
+        ValueTask ReceiveStoryStartOutcome(Story story, SharedStoryStartOutcome outcome)
+        {
+            _ = RunIgnoringDisconnectAsync(sharedStart.HandleOutcomeAsync(story, outcome));
+            return ValueTask.CompletedTask;
+        }
         try
         {
             playerTeleport = new PlayerTeleport(sessions, WriteLineAsync, _negotiation.Task, Task.Delay);
             var orchestrator = new GamePeerOrchestrator(sessions, teleportToPeer: playerTeleport.TeleportAsync);
-            sharedStart = new SharedCustomStoryStart(sessions, localGameCommands.StartCustomStoryAsync, DisplaySystemAsync);
+            sharedStart = new SharedStoryStart(
+                sessions,
+                (story, token) => story is Story.Custom custom
+                    ? localGameCommands.StartCustomStoryAsync(custom.Identifier, token)
+                    : localGameCommands.StartMainStoryAsync(token),
+                DisplaySystemAsync);
             sharedPose = new SharedPose(
                 sessions, WriteLineAsync, DisplaySystemAsync, (severity, eventName, line) => Log(severity, eventName, line),
                 _negotiation.Task, cancellationToken, traffic);

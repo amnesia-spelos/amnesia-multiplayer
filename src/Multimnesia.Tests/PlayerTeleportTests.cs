@@ -219,6 +219,9 @@ public sealed class PlayerTeleportTests
         public Task SendChatAsync(ChatEntry entry, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<bool> SendCustomStoryStartedAsync(string identifier, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task SendCustomStoryStartOutcomeAsync(
-            string identifier, SharedCustomStoryStartOutcome outcome, CancellationToken cancellationToken) => throw new NotSupportedException();
+            string identifier, SharedStoryStartOutcome outcome, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<bool> SendMainStoryStartedAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task SendMainStoryStartOutcomeAsync(SharedStoryStartOutcome outcome, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

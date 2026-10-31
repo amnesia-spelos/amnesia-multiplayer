@@ -555,6 +555,8 @@ public static class TrafficKinds
         LanMessage.Heartbeat => "heartbeat",
         LanMessage.CustomStoryStarted => "custom-story-started",
         LanMessage.CustomStoryStartOutcome => "custom-story-start-outcome",
+        LanMessage.MainStoryStarted => "main-story-started",
+        LanMessage.MainStoryStartOutcome => "main-story-start-outcome",
         LanMessage.Pose => "pose",
         LanMessage.EnemyPose => "enemy-pose",
         LanMessage.EnemyAttack => "enemy-attack",

@@ -48,7 +48,9 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     private readonly Func<string, Task<IPAddress[]>> _resolver;
     private readonly Action<RelayLogEntry> _log;
     private readonly Func<string, ValueTask> _receiveCustomStoryStarted;
-    private readonly Func<string, SharedCustomStoryStartOutcome, ValueTask> _receiveCustomStoryStartOutcome;
+    private readonly Func<string, SharedStoryStartOutcome, ValueTask> _receiveCustomStoryStartOutcome;
+    private readonly Func<ValueTask> _receiveMainStoryStarted;
+    private readonly Func<SharedStoryStartOutcome, ValueTask> _receiveMainStoryStartOutcome;
     private readonly Func<LanMessage.EnemyPose, ValueTask> _receiveEnemyPose;
     private readonly Func<LanMessage.EnemyEvent, ValueTask> _receiveEnemyEvent;
     private readonly Func<LanMessage.DeathMessage, ValueTask> _receiveDeathMessage;
@@ -76,7 +78,9 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         Func<ChatEntry, ValueTask>? receiveChat = null,
         Action<RelayLogEntry>? log = null,
         Func<string, ValueTask>? receiveCustomStoryStarted = null,
-        Func<string, SharedCustomStoryStartOutcome, ValueTask>? receiveCustomStoryStartOutcome = null,
+        Func<string, SharedStoryStartOutcome, ValueTask>? receiveCustomStoryStartOutcome = null,
+        Func<ValueTask>? receiveMainStoryStarted = null,
+        Func<SharedStoryStartOutcome, ValueTask>? receiveMainStoryStartOutcome = null,
         Func<LanMessage.Pose, ValueTask>? receivePose = null,
         Func<LanMessage.HoldMessage, ValueTask>? receiveHoldMessage = null,
         Func<LanMessage.Bodies, ValueTask>? receiveBodies = null,
@@ -93,6 +97,8 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         _log = log ?? (_ => { });
         _receiveCustomStoryStarted = receiveCustomStoryStarted ?? (_ => ValueTask.CompletedTask);
         _receiveCustomStoryStartOutcome = receiveCustomStoryStartOutcome ?? ((_, _) => ValueTask.CompletedTask);
+        _receiveMainStoryStarted = receiveMainStoryStarted ?? (() => ValueTask.CompletedTask);
+        _receiveMainStoryStartOutcome = receiveMainStoryStartOutcome ?? (_ => ValueTask.CompletedTask);
         _receiveEnemyPose = receiveEnemyPose ?? (_ => ValueTask.CompletedTask);
         _receiveEnemyEvent = receiveEnemyEvent ?? (_ => ValueTask.CompletedTask);
         _receiveDeathMessage = receiveDeathMessage ?? (_ => ValueTask.CompletedTask);
@@ -350,13 +356,34 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
     }
 
     public Task SendCustomStoryStartOutcomeAsync(
-        string identifier, SharedCustomStoryStartOutcome outcome, CancellationToken cancellationToken)
+        string identifier, SharedStoryStartOutcome outcome, CancellationToken cancellationToken)
     {
         LanOutbound? outbound;
         lock (_gate) outbound = _joinedOutbound;
         if (outbound is not null && outbound.TryWrite(new(new LanMessage.CustomStoryStartOutcome(identifier, outcome))))
             Log(OutcomeSeverity(outcome), RelayEventName.CustomStoryStartOutcomeSent, RelayRole.Joining, "Admitted->Admitted",
-                customStoryIdentifier: identifier, customStoryStartOutcome: outcome);
+                customStoryIdentifier: identifier, storyStartOutcome: outcome);
+        return Task.CompletedTask;
+    }
+
+    public Task<bool> SendMainStoryStartedAsync(CancellationToken cancellationToken)
+    {
+        LanOutbound? outbound;
+        lock (_gate) outbound = _admittedOutbound;
+        if (outbound is null || !outbound.TryWrite(new(new LanMessage.MainStoryStarted())))
+            return Task.FromResult(false);
+
+        Log(RelaySeverity.Information, RelayEventName.MainStoryStartSent, RelayRole.Host, "Admitted->Admitted");
+        return Task.FromResult(true);
+    }
+
+    public Task SendMainStoryStartOutcomeAsync(SharedStoryStartOutcome outcome, CancellationToken cancellationToken)
+    {
+        LanOutbound? outbound;
+        lock (_gate) outbound = _joinedOutbound;
+        if (outbound is not null && outbound.TryWrite(new(new LanMessage.MainStoryStartOutcome(outcome))))
+            Log(OutcomeSeverity(outcome), RelayEventName.MainStoryStartOutcomeSent, RelayRole.Joining, "Admitted->Admitted",
+                storyStartOutcome: outcome);
         return Task.CompletedTask;
     }
 
@@ -501,15 +528,15 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
         RelaySeverity severity, RelayEventName @event, RelayRole role, string transition,
         RelayFailureCategory failure = RelayFailureCategory.None, IPEndPoint? endpoint = null,
         Guid? peerCorrelationId = null, string? customStoryIdentifier = null,
-        SharedCustomStoryStartOutcome? customStoryStartOutcome = null) =>
+        SharedStoryStartOutcome? storyStartOutcome = null) =>
         _log(new RelayLogEntry(
             DateTimeOffset.UtcNow, severity, @event, role, transition,
             SessionCorrelationId == Guid.Empty ? null : SessionCorrelationId,
             peerCorrelationId ?? (PeerCorrelationId == Guid.Empty ? null : PeerCorrelationId),
-            failure, endpoint, customStoryIdentifier, customStoryStartOutcome));
+            failure, endpoint, customStoryIdentifier, storyStartOutcome));
 
-    private static RelaySeverity OutcomeSeverity(SharedCustomStoryStartOutcome outcome) =>
-        outcome == SharedCustomStoryStartOutcome.Started ? RelaySeverity.Information : RelaySeverity.Warning;
+    private static RelaySeverity OutcomeSeverity(SharedStoryStartOutcome outcome) =>
+        outcome == SharedStoryStartOutcome.Started ? RelaySeverity.Information : RelaySeverity.Warning;
 
     private LanOutbound StartOutbound(TcpClient connection, TrafficConnection traffic, CancellationToken cancellationToken)
     {
@@ -615,8 +642,17 @@ public sealed class TcpSessionOperations : ISessionOperations, IAsyncDisposable
                     case LanMessage.CustomStoryStartOutcome reported when isHost:
                         Log(OutcomeSeverity(reported.Outcome), RelayEventName.CustomStoryStartOutcomeReceived, role, "Admitted->Admitted",
                             peerCorrelationId: peerCorrelationId, customStoryIdentifier: reported.Identifier,
-                            customStoryStartOutcome: reported.Outcome);
+                            storyStartOutcome: reported.Outcome);
                         await _receiveCustomStoryStartOutcome(reported.Identifier, reported.Outcome);
+                        break;
+                    case LanMessage.MainStoryStarted when !isHost:
+                        Log(RelaySeverity.Information, RelayEventName.MainStoryStartReceived, role, "Admitted->Admitted");
+                        await _receiveMainStoryStarted();
+                        break;
+                    case LanMessage.MainStoryStartOutcome reported when isHost:
+                        Log(OutcomeSeverity(reported.Outcome), RelayEventName.MainStoryStartOutcomeReceived, role, "Admitted->Admitted",
+                            peerCorrelationId: peerCorrelationId, storyStartOutcome: reported.Outcome);
+                        await _receiveMainStoryStartOutcome(reported.Outcome);
                         break;
                     case LanMessage.EnemyPose enemy when !isHost:
                         await _receiveEnemyPose(enemy);

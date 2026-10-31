@@ -189,7 +189,7 @@ public sealed class SharedCallbacksTests
         sharedCallbacks.HandleReceivedWorldMessage(OpenedDrawer);
         sharedCallbacks.HandleReceivedWorldMessage(EnteredArea);
 
-        sharedCallbacks.HandleReceivedCustomStoryStart();
+        sharedCallbacks.HandleReceivedStoryStart();
         sharedCallbacks.HandleReceivedWorldMessage(LitCandle);
         await sharedCallbacks.HandleLocalGameEventAsync(Entered(Cellar));
         await sharedCallbacks.HandleLocalGameEventAsync(Entered(Study));
@@ -206,6 +206,19 @@ public sealed class SharedCallbacksTests
         sharedCallbacks.HandleReceivedWorldMessage(OpenedDrawer);
 
         await sharedCallbacks.HandleLocalGameEventAsync(new GameEvent.CustomStoryStarted("mp-test-cs"));
+        await sharedCallbacks.HandleLocalGameEventAsync(Entered(Study));
+
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        Assert.Empty(_game.Lines);
+    }
+
+    [Fact]
+    public async Task The_Session_Hosts_Main_Story_start_discards_every_kept_change()
+    {
+        var sharedCallbacks = CreateSharedCallbacks();
+        sharedCallbacks.HandleReceivedWorldMessage(OpenedDrawer);
+
+        await sharedCallbacks.HandleLocalGameEventAsync(new GameEvent.MainStoryStarted());
         await sharedCallbacks.HandleLocalGameEventAsync(Entered(Study));
 
         await Task.Delay(50, TestContext.Current.CancellationToken);
@@ -235,7 +248,7 @@ public sealed class SharedCallbacksTests
         sharedCallbacks.HandleReceivedWorldMessage(OpenedDrawer);
         await _game.WaitForLinesAsync(1);
 
-        sharedCallbacks.HandleReceivedCustomStoryStart();
+        sharedCallbacks.HandleReceivedStoryStart();
         sharedCallbacks.HandleResponse(new GameEvent.Responded("sharedcallback", "wrong-map", []));
         await sharedCallbacks.HandleLocalGameEventAsync(Entered(Study));
 
@@ -398,6 +411,9 @@ public sealed class SharedCallbacksTests
         public Task SendChatAsync(ChatEntry entry, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task<bool> SendCustomStoryStartedAsync(string identifier, CancellationToken cancellationToken) => throw new NotSupportedException();
         public Task SendCustomStoryStartOutcomeAsync(
-            string identifier, SharedCustomStoryStartOutcome outcome, CancellationToken cancellationToken) => throw new NotSupportedException();
+            string identifier, SharedStoryStartOutcome outcome, CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<bool> SendMainStoryStartedAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task SendMainStoryStartOutcomeAsync(SharedStoryStartOutcome outcome, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }

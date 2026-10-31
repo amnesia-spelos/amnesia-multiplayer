@@ -14,7 +14,11 @@ public abstract record LanMessage
     public sealed record Departure : LanMessage;
     public sealed record Heartbeat : LanMessage;
     public sealed record CustomStoryStarted(string Identifier) : LanMessage;
-    public sealed record CustomStoryStartOutcome(string Identifier, SharedCustomStoryStartOutcome Outcome) : LanMessage;
+    public sealed record CustomStoryStartOutcome(string Identifier, SharedStoryStartOutcome Outcome) : LanMessage;
+    // A fresh Main Story start names nothing: every game has the same Main Story (ADR 0011).
+    public sealed record MainStoryStarted : LanMessage;
+    // Only started, not-in-main-menu, or unavailable: a Main Story is never missing or invalid.
+    public sealed record MainStoryStartOutcome(SharedStoryStartOutcome Outcome) : LanMessage;
     // The fields of a `STATE localpose` State Update, unchanged in meaning (ADR 0003). Lean runs from -1 (left) to 1 (right).
     public sealed record Pose(
         ulong TimeMs, uint TeleportCounter, double X, double Y, double Z, double Yaw, double Pitch, bool Crouch, bool Lantern, double Lean,
@@ -110,7 +114,7 @@ public sealed record BodyState(
 // One body of a map-placed entity, named by the entity's ID in its map file and the body's ID in its entity file.
 public sealed record BodyEntry(int PropId, int BodyId, BodyState State);
 
-public enum SharedCustomStoryStartOutcome { Started, NotFound, Invalid, NotInMainMenu, Unavailable }
+public enum SharedStoryStartOutcome { Started, NotFound, Invalid, NotInMainMenu, Unavailable }
 
 // A message read from the wire, with its framed size: the payload and its 4-byte length prefix.
 public readonly record struct LanFrame(LanMessage Message, int Bytes);
@@ -119,7 +123,7 @@ public sealed class LanProtocolException(string message, Exception? innerExcepti
 
 public static class LanProtocol
 {
-    public const int CurrentVersion = 14;
+    public const int CurrentVersion = 15;
     // Fits the largest bodies message: 32 entries of 13 longest-form numbers and a fully escaped map path.
     public const int MaximumFrameBytes = 32 * 1024;
     // Keeps a Pose's numbers within the game's 15-digit, 4-decimal line format; real positions and angles are far smaller.
@@ -179,6 +183,11 @@ public static class LanProtocol
                 type = "custom-story-start-outcome",
                 identifier = ValidIdentifier(value.Identifier),
                 outcome = OutcomeWireName(value.Outcome)
+            },
+            LanMessage.MainStoryStarted => new { type = "main-story-started" },
+            LanMessage.MainStoryStartOutcome value => new
+            {
+                type = "main-story-start-outcome", outcome = MainStoryOutcomeWireName(value.Outcome)
             },
             LanMessage.Pose value when IsValid(value) => new
             {
@@ -309,6 +318,9 @@ public static class LanProtocol
                 "custom-story-started" => new LanMessage.CustomStoryStarted(RequiredIdentifier(root)),
                 "custom-story-start-outcome" => new LanMessage.CustomStoryStartOutcome(
                     RequiredIdentifier(root), ParseOutcome(RequiredString(root, "outcome", 32))),
+                "main-story-started" => new LanMessage.MainStoryStarted(),
+                "main-story-start-outcome" => new LanMessage.MainStoryStartOutcome(
+                    ParseMainStoryOutcome(RequiredString(root, "outcome", 32))),
                 "pose" => ReadPose(root),
                 "enemy-pose" => ReadEnemyPose(root),
                 "enemy-attack" => ReadEnemyAttack(root),
@@ -369,24 +381,35 @@ public static class LanProtocol
     private static string ValidIdentifier(string identifier) =>
         CustomStoryIdentifier.IsValid(identifier) ? identifier : throw new LanProtocolException("Invalid Custom Story Identifier.");
 
-    private static string OutcomeWireName(SharedCustomStoryStartOutcome outcome) => outcome switch
+    private static string OutcomeWireName(SharedStoryStartOutcome outcome) => outcome switch
     {
-        SharedCustomStoryStartOutcome.Started => "started",
-        SharedCustomStoryStartOutcome.NotFound => "not-found",
-        SharedCustomStoryStartOutcome.Invalid => "invalid",
-        SharedCustomStoryStartOutcome.NotInMainMenu => "not-in-main-menu",
-        SharedCustomStoryStartOutcome.Unavailable => "unavailable",
-        _ => throw new LanProtocolException("Unknown Custom Story start outcome.")
+        SharedStoryStartOutcome.Started => "started",
+        SharedStoryStartOutcome.NotFound => "not-found",
+        SharedStoryStartOutcome.Invalid => "invalid",
+        SharedStoryStartOutcome.NotInMainMenu => "not-in-main-menu",
+        SharedStoryStartOutcome.Unavailable => "unavailable",
+        _ => throw new LanProtocolException("Unknown story start outcome.")
     };
 
-    private static SharedCustomStoryStartOutcome ParseOutcome(string wireName) => wireName switch
+    private static string MainStoryOutcomeWireName(SharedStoryStartOutcome outcome) =>
+        IsMainStoryOutcome(outcome) ? OutcomeWireName(outcome) : throw new LanProtocolException("Invalid Main Story start outcome.");
+
+    private static SharedStoryStartOutcome ParseMainStoryOutcome(string wireName) =>
+        ParseOutcome(wireName) is var outcome && IsMainStoryOutcome(outcome)
+            ? outcome
+            : throw new LanProtocolException("Invalid Main Story start outcome.");
+
+    private static bool IsMainStoryOutcome(SharedStoryStartOutcome outcome) => outcome is
+        SharedStoryStartOutcome.Started or SharedStoryStartOutcome.NotInMainMenu or SharedStoryStartOutcome.Unavailable;
+
+    private static SharedStoryStartOutcome ParseOutcome(string wireName) => wireName switch
     {
-        "started" => SharedCustomStoryStartOutcome.Started,
-        "not-found" => SharedCustomStoryStartOutcome.NotFound,
-        "invalid" => SharedCustomStoryStartOutcome.Invalid,
-        "not-in-main-menu" => SharedCustomStoryStartOutcome.NotInMainMenu,
-        "unavailable" => SharedCustomStoryStartOutcome.Unavailable,
-        _ => throw new LanProtocolException("Unknown Custom Story start outcome.")
+        "started" => SharedStoryStartOutcome.Started,
+        "not-found" => SharedStoryStartOutcome.NotFound,
+        "invalid" => SharedStoryStartOutcome.Invalid,
+        "not-in-main-menu" => SharedStoryStartOutcome.NotInMainMenu,
+        "unavailable" => SharedStoryStartOutcome.Unavailable,
+        _ => throw new LanProtocolException("Unknown story start outcome.")
     };
 
     private static LanMessage.ChatEntry ReadChatEntry(JsonElement root)

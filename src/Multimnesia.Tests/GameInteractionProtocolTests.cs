@@ -83,6 +83,34 @@ public sealed class GameInteractionProtocolTests
     }
 
     [Fact]
+    public void Main_story_started_events_are_typed()
+    {
+        Assert.IsType<GameEvent.MainStoryStarted>(GameInteractionProtocol.ParseEvent("EVENT:MainStoryStarted"));
+    }
+
+    [Theory]
+    [InlineData("EVENT:MainStoryStarted:")]
+    [InlineData("EVENT:MainStoryStarted:mp-test-cs")]
+    [InlineData("EVENT:MainStoryStartedx")]
+    public void Main_story_started_events_with_anything_after_them_are_unknown(string line)
+    {
+        Assert.IsType<GameEvent.Unknown>(GameInteractionProtocol.ParseEvent(line));
+    }
+
+    [Theory]
+    [InlineData("RESPONSE:startmainstory:starting", StartMainStoryOutcome.Starting)]
+    [InlineData("RESPONSE:startmainstory:not in main menu", StartMainStoryOutcome.NotInMainMenu)]
+    [InlineData("RESPONSE:startmainstory:not found", StartMainStoryOutcome.Unrecognized)]
+    [InlineData("RESPONSE:startmainstory:exploded", StartMainStoryOutcome.Unrecognized)]
+    [InlineData("RESPONSE:startmainstory:", StartMainStoryOutcome.Unrecognized)]
+    public void Start_main_story_responses_are_typed(string line, StartMainStoryOutcome expected)
+    {
+        var parsed = Assert.IsType<GameEvent.StartMainStoryResponded>(GameInteractionProtocol.ParseEvent(line));
+
+        Assert.Equal(expected, parsed.Outcome);
+    }
+
+    [Fact]
     public void Unknown_command_warnings_are_typed()
     {
         Assert.IsType<GameEvent.UnknownCommandWarned>(GameInteractionProtocol.ParseEvent("WARNING:Unknown command"));
@@ -102,6 +130,9 @@ public sealed class GameInteractionProtocolTests
     [InlineData("RESPONSE:startcustomstory:not in main menu", false)]
     [InlineData("RESPONSE chatentry unavailable", false)]
     [InlineData("EVENT:CustomStoryStarted:mp-test-cs", false)]
+    [InlineData("RESPONSE:startmainstory:exploded", true)]
+    [InlineData("RESPONSE:startmainstory:starting", false)]
+    [InlineData("EVENT:MainStoryStarted", false)]
     public void Replies_that_make_a_start_unavailable_are_recognized_for_logging(string line, bool expected)
     {
         Assert.Equal(expected, GameInteractionProtocol.IsUnrecognizedReply(GameInteractionProtocol.ParseEvent(line)));
@@ -140,6 +171,12 @@ public sealed class GameInteractionProtocolTests
     public void Start_custom_story_command_names_the_identifier()
     {
         Assert.Equal("startcustomstory:mp-test-cs", GameInteractionProtocol.StartCustomStory("mp-test-cs"));
+    }
+
+    [Fact]
+    public void Start_main_story_command_is_bare()
+    {
+        Assert.Equal("startmainstory", GameInteractionProtocol.StartMainStory);
     }
 
     [Fact]

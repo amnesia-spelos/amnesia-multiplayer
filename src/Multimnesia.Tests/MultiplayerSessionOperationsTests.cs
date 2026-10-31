@@ -532,7 +532,7 @@ public sealed class MultiplayerSessionOperationsTests
         var hostLog = new List<RelayLogEntry>();
         var joiningLog = new List<RelayLogEntry>();
         var receivedStarts = new List<string>();
-        var receivedOutcomes = new List<(string, SharedCustomStoryStartOutcome)>();
+        var receivedOutcomes = new List<(string, SharedStoryStartOutcome)>();
         await using var host = new TcpSessionOperations(
             new SessionNetworkOptions { Port = port },
             notice => { lock (hostNotices) hostNotices.Add(notice); return ValueTask.CompletedTask; },
@@ -556,25 +556,125 @@ public sealed class MultiplayerSessionOperationsTests
 
         Assert.True(await host.SendCustomStoryStartedAsync("mp-test-cs", TestContext.Current.CancellationToken));
         await WaitUntilAsync(() => { lock (receivedStarts) return receivedStarts.Count > 0; });
-        await joining.SendCustomStoryStartOutcomeAsync("mp-test-cs", SharedCustomStoryStartOutcome.Started, TestContext.Current.CancellationToken);
+        await joining.SendCustomStoryStartOutcomeAsync("mp-test-cs", SharedStoryStartOutcome.Started, TestContext.Current.CancellationToken);
         await WaitUntilAsync(() => { lock (receivedOutcomes) return receivedOutcomes.Count > 0; });
 
         lock (receivedStarts) Assert.Equal(["mp-test-cs"], receivedStarts);
-        lock (receivedOutcomes) Assert.Equal([("mp-test-cs", SharedCustomStoryStartOutcome.Started)], receivedOutcomes);
+        lock (receivedOutcomes) Assert.Equal([("mp-test-cs", SharedStoryStartOutcome.Started)], receivedOutcomes);
         lock (hostLog)
         {
             Assert.Contains(hostLog, entry => entry.Event == RelayEventName.CustomStoryStartSent
                 && entry.Role == RelayRole.Host && entry.CustomStoryIdentifier == "mp-test-cs");
             Assert.Contains(hostLog, entry => entry.Event == RelayEventName.CustomStoryStartOutcomeReceived
-                && entry.CustomStoryIdentifier == "mp-test-cs" && entry.CustomStoryStartOutcome == SharedCustomStoryStartOutcome.Started);
+                && entry.CustomStoryIdentifier == "mp-test-cs" && entry.StoryStartOutcome == SharedStoryStartOutcome.Started);
         }
         lock (joiningLog)
         {
             Assert.Contains(joiningLog, entry => entry.Event == RelayEventName.CustomStoryStartReceived
                 && entry.Role == RelayRole.Joining && entry.CustomStoryIdentifier == "mp-test-cs");
             Assert.Contains(joiningLog, entry => entry.Event == RelayEventName.CustomStoryStartOutcomeSent
-                && entry.CustomStoryIdentifier == "mp-test-cs" && entry.CustomStoryStartOutcome == SharedCustomStoryStartOutcome.Started);
+                && entry.CustomStoryIdentifier == "mp-test-cs" && entry.StoryStartOutcome == SharedStoryStartOutcome.Started);
         }
+    }
+
+    [Fact]
+    public async Task Shared_Main_Story_Start_travels_to_the_Joining_Player_and_its_outcome_travels_back()
+    {
+        var port = FreePort();
+        var hostNotices = new List<string>();
+        var hostLog = new List<RelayLogEntry>();
+        var joiningLog = new List<RelayLogEntry>();
+        var receivedStarts = 0;
+        var receivedOutcomes = new List<SharedStoryStartOutcome>();
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            notice => { lock (hostNotices) hostNotices.Add(notice); return ValueTask.CompletedTask; },
+            log: entry => { lock (hostLog) hostLog.Add(entry); },
+            receiveMainStoryStartOutcome: outcome =>
+            {
+                lock (receivedOutcomes) receivedOutcomes.Add(outcome);
+                return ValueTask.CompletedTask;
+            });
+        await using var joining = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            log: entry => { lock (joiningLog) joiningLog.Add(entry); },
+            receiveMainStoryStarted: () => { Interlocked.Increment(ref receivedStarts); return ValueTask.CompletedTask; });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        Assert.False(await host.SendMainStoryStartedAsync(TestContext.Current.CancellationToken));
+        await joining.JoinAsync("127.0.0.1", TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => { lock (hostNotices) return hostNotices.Contains("A player joined."); });
+        Assert.False(await joining.SendMainStoryStartedAsync(TestContext.Current.CancellationToken));
+
+        Assert.True(await host.SendMainStoryStartedAsync(TestContext.Current.CancellationToken));
+        await WaitUntilAsync(() => Volatile.Read(ref receivedStarts) > 0);
+        await joining.SendMainStoryStartOutcomeAsync(SharedStoryStartOutcome.NotInMainMenu, TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => { lock (receivedOutcomes) return receivedOutcomes.Count > 0; });
+
+        Assert.Equal(1, receivedStarts);
+        lock (receivedOutcomes) Assert.Equal([SharedStoryStartOutcome.NotInMainMenu], receivedOutcomes);
+        lock (hostLog)
+        {
+            Assert.Contains(hostLog, entry => entry.Event == RelayEventName.MainStoryStartSent && entry.Role == RelayRole.Host);
+            Assert.Contains(hostLog, entry => entry.Event == RelayEventName.MainStoryStartOutcomeReceived
+                && entry.Severity == RelaySeverity.Warning && entry.StoryStartOutcome == SharedStoryStartOutcome.NotInMainMenu);
+        }
+        lock (joiningLog)
+        {
+            Assert.Contains(joiningLog, entry => entry.Event == RelayEventName.MainStoryStartReceived && entry.Role == RelayRole.Joining);
+            Assert.Contains(joiningLog, entry => entry.Event == RelayEventName.MainStoryStartOutcomeSent
+                && entry.StoryStartOutcome == SharedStoryStartOutcome.NotInMainMenu);
+        }
+    }
+
+    [Fact]
+    public async Task A_Joining_Player_sending_a_Main_Story_start_violates_the_protocol()
+    {
+        var port = FreePort();
+        var notices = new List<string>();
+        await using var host = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            notice => { lock (notices) notices.Add(notice); return ValueTask.CompletedTask; });
+        await host.HostAsync(TestContext.Current.CancellationToken);
+        using var offender = new TcpClient(AddressFamily.InterNetwork);
+        await offender.ConnectAsync(IPAddress.Loopback, port, TestContext.Current.CancellationToken);
+        var stream = offender.GetStream();
+        await LanProtocol.WriteAsync(stream,
+            new LanMessage.JoinRequest(LanProtocol.CurrentVersion, Guid.NewGuid()), TestContext.Current.CancellationToken);
+        Assert.IsType<LanMessage.AdmissionAccepted>(await LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken));
+
+        await LanProtocol.WriteAsync(stream, new LanMessage.MainStoryStarted(), TestContext.Current.CancellationToken);
+
+        await WaitUntilAsync(() => { lock (notices) return notices.Contains("The remote Game Peer violated the Multiplayer Session protocol."); });
+    }
+
+    [Fact]
+    public async Task A_Session_Host_sending_a_Main_Story_start_outcome_returns_the_Joining_Player_to_Local()
+    {
+        var port = FreePort();
+        var notices = new List<string>();
+        using var relay = new TcpListener(IPAddress.Loopback, port);
+        relay.Start();
+        var relayTask = Task.Run(async () =>
+        {
+            using var connection = await relay.AcceptTcpClientAsync(TestContext.Current.CancellationToken);
+            var stream = connection.GetStream();
+            Assert.IsType<LanMessage.JoinRequest>(await LanProtocol.ReadAsync(stream, TestContext.Current.CancellationToken));
+            await LanProtocol.WriteAsync(stream,
+                new LanMessage.AdmissionAccepted(LanProtocol.CurrentVersion, Guid.NewGuid()), TestContext.Current.CancellationToken);
+            await Task.Delay(50, TestContext.Current.CancellationToken);
+            await LanProtocol.WriteAsync(stream,
+                new LanMessage.MainStoryStartOutcome(SharedStoryStartOutcome.Started), TestContext.Current.CancellationToken);
+        }, TestContext.Current.CancellationToken);
+        await using var operations = new TcpSessionOperations(
+            new SessionNetworkOptions { Port = port },
+            notice => { lock (notices) notices.Add(notice); return ValueTask.CompletedTask; });
+        var joining = new GamePeerOrchestrator(operations);
+
+        await joining.HandleAsync(new ChatEntry("Player", "/join 127.0.0.1"), TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => joining.State == GamePeerState.Local);
+
+        lock (notices) Assert.Contains("The remote Game Peer violated the Multiplayer Session protocol.", notices);
+        await relayTask;
     }
 
     [Fact]
@@ -585,7 +685,7 @@ public sealed class MultiplayerSessionOperationsTests
         var hostLog = new List<RelayLogEntry>();
         var joiningLog = new List<RelayLogEntry>();
         var receivedStarts = new List<string>();
-        var receivedOutcomes = new List<(string, SharedCustomStoryStartOutcome)>();
+        var receivedOutcomes = new List<(string, SharedStoryStartOutcome)>();
         var hostChat = new List<ChatEntry>();
         var joiningChat = new List<ChatEntry>();
         await using var host = new TcpSessionOperations(
@@ -615,7 +715,7 @@ public sealed class MultiplayerSessionOperationsTests
 
         Assert.True(await host.SendCustomStoryStartedAsync("mp-test-cs", TestContext.Current.CancellationToken));
         await WaitUntilAsync(() => { lock (receivedStarts) return receivedStarts.Count == 1; });
-        await joining.SendCustomStoryStartOutcomeAsync("mp-test-cs", SharedCustomStoryStartOutcome.NotFound, TestContext.Current.CancellationToken);
+        await joining.SendCustomStoryStartOutcomeAsync("mp-test-cs", SharedStoryStartOutcome.NotFound, TestContext.Current.CancellationToken);
         await WaitUntilAsync(() => { lock (receivedOutcomes) return receivedOutcomes.Count == 1; });
 
         await hostPeer.HandleAsync(new ChatEntry("Host", "still here"), TestContext.Current.CancellationToken);
@@ -630,10 +730,10 @@ public sealed class MultiplayerSessionOperationsTests
         lock (joiningChat) Assert.Equal([new ChatEntry("Host", "still here")], joiningChat);
         lock (hostLog)
             Assert.Contains(hostLog, entry => entry.Event == RelayEventName.CustomStoryStartOutcomeReceived
-                && entry.Severity == RelaySeverity.Warning && entry.CustomStoryStartOutcome == SharedCustomStoryStartOutcome.NotFound);
+                && entry.Severity == RelaySeverity.Warning && entry.StoryStartOutcome == SharedStoryStartOutcome.NotFound);
         lock (joiningLog)
             Assert.Contains(joiningLog, entry => entry.Event == RelayEventName.CustomStoryStartOutcomeSent
-                && entry.Severity == RelaySeverity.Warning && entry.CustomStoryStartOutcome == SharedCustomStoryStartOutcome.NotFound);
+                && entry.Severity == RelaySeverity.Warning && entry.StoryStartOutcome == SharedStoryStartOutcome.NotFound);
     }
 
     [Fact]
@@ -699,7 +799,7 @@ public sealed class MultiplayerSessionOperationsTests
                 new LanMessage.AdmissionAccepted(LanProtocol.CurrentVersion, Guid.NewGuid()), TestContext.Current.CancellationToken);
             await Task.Delay(50, TestContext.Current.CancellationToken);
             await LanProtocol.WriteAsync(stream,
-                new LanMessage.CustomStoryStartOutcome("mp-test-cs", SharedCustomStoryStartOutcome.Started),
+                new LanMessage.CustomStoryStartOutcome("mp-test-cs", SharedStoryStartOutcome.Started),
                 TestContext.Current.CancellationToken);
         }, TestContext.Current.CancellationToken);
         await using var operations = new TcpSessionOperations(
@@ -727,7 +827,7 @@ public sealed class MultiplayerSessionOperationsTests
         await offender.ConnectAsync(IPAddress.Loopback, port, TestContext.Current.CancellationToken);
 
         await LanProtocol.WriteAsync(offender.GetStream(),
-            new LanMessage.CustomStoryStartOutcome("mp-test-cs", SharedCustomStoryStartOutcome.Started), TestContext.Current.CancellationToken);
+            new LanMessage.CustomStoryStartOutcome("mp-test-cs", SharedStoryStartOutcome.Started), TestContext.Current.CancellationToken);
 
         Assert.Equal(0, await offender.GetStream().ReadAsync(new byte[1], TestContext.Current.CancellationToken));
         Assert.Equal(0, receivedOutcomes);

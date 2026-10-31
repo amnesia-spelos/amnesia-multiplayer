@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted. Amends the `LanProtocol` invariant stated in ADR 0001.
+Accepted. Amends the `LanProtocol` invariant stated in ADR 0001. Amended by ADR 0011 (issue #23), which lets `LanProtocol` ask for the Main Story to start too.
 
 ## Context
 

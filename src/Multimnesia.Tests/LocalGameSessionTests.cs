@@ -171,7 +171,76 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         await game.SendAsync("RESPONSE:startcustomstory:starting");
 
         Assert.Equal("chatentry - - SYSTEM:The host started Custom Story mp-test-cs.", await game.ReadLineAsync());
-        Assert.Equal([("mp-test-cs", SharedCustomStoryStartOutcome.Started)], _sessions.SentOutcomes);
+        Assert.Equal([("mp-test-cs", SharedStoryStartOutcome.Started)], _sessions.SentOutcomes);
+    }
+
+    [Fact]
+    public async Task The_Session_Host_relays_its_Main_Story_start_the_moment_the_game_reports_it()
+    {
+        _sessions.Joined = false;
+        _sessions.JoiningPlayerAdmitted = true;
+        var (game, _, _) = await ConnectAsync();
+        await using var _ = game;
+        Assert.Equal(Negotiate, await game.ReadLineAsync());
+        await game.SendAsync(GrantedWithoutSettings);
+
+        await game.SendAsync("EVENT:MainStoryStarted");
+
+        Assert.Equal("chatentry - - SYSTEM:Starting the Main Story for the other player.", await game.ReadLineAsync());
+        Assert.Equal(1, _sessions.SentMainStoryStarts);
+    }
+
+    [Fact]
+    public async Task A_Joining_Player_starts_the_Session_Hosts_Main_Story_and_reports_back()
+    {
+        var (game, _, _) = await ConnectAsync();
+        await using var _ = game;
+        Assert.Equal(Negotiate, await game.ReadLineAsync());
+        await game.SendAsync(GrantedWithoutSettings);
+
+        await _callbacks.ReceiveMainStoryStarted();
+        Assert.Equal("startmainstory", await game.ReadLineAsync());
+        await game.SendAsync("RESPONSE:startmainstory:starting");
+        await game.SendAsync("EVENT:MainStoryStarted");
+
+        Assert.Equal("chatentry - - SYSTEM:The host started the Main Story.", await game.ReadLineAsync());
+        Assert.Equal([SharedStoryStartOutcome.Started], _sessions.SentMainStoryOutcomes);
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(200)));
+    }
+
+    [Fact]
+    public async Task The_Session_Host_sees_why_its_Main_Story_start_failed_for_a_Joining_Player()
+    {
+        _sessions.Joined = false;
+        var (game, _, _) = await ConnectAsync();
+        await using var _ = game;
+        Assert.Equal(Negotiate, await game.ReadLineAsync());
+        await game.SendAsync(GrantedWithoutSettings);
+
+        await _callbacks.ReceiveMainStoryStartOutcome(SharedStoryStartOutcome.NotInMainMenu);
+
+        Assert.Equal(
+            "chatentry - - SYSTEM:The Main Story could not start for the Joining Player: their game is not in the main menu.",
+            await game.ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task A_new_Shared_Main_Story_Start_from_the_Session_Host_discards_the_kept_changes()
+    {
+        var (game, _, _) = await ConnectAsync();
+        await using var _ = game;
+        Assert.Equal(Negotiate, await game.ReadLineAsync());
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks");
+
+        await _callbacks.ReceiveWorldMessage(new LanMessage.ButtonState("maps/old.map", 5, true));
+        await _callbacks.ReceiveMainStoryStarted();
+        await _callbacks.ReceiveWorldMessage(new LanMessage.ButtonState("maps/first.map", 6, true));
+        await game.SendAsync("EVENT mapentered maps/old.map");
+        await game.SendAsync("EVENT mapentered maps/first.map");
+
+        string? line;
+        do line = await game.ReadLineAsync(); while (line == "startmainstory");
+        Assert.Equal("buttonstate 6 1 maps/first.map", line);
     }
 
     [Fact]
@@ -1404,7 +1473,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
             lock (_sentDeathMessages) _sentDeathMessages.Add(message);
             return Task.CompletedTask;
         }
-        public List<(string, SharedCustomStoryStartOutcome)> SentOutcomes { get; } = [];
+        public List<(string, SharedStoryStartOutcome)> SentOutcomes { get; } = [];
         public SessionOperationResult HostResult { get; set; } = SessionOperationResult.Succeeded;
         public Task<SessionOperationResult> HostAsync(CancellationToken cancellationToken) => Task.FromResult(HostResult);
         public Task<SessionOperationResult> JoinAsync(string destination, CancellationToken cancellationToken) => throw new NotSupportedException();
@@ -1420,9 +1489,25 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         public Task<bool> SendCustomStoryStartedAsync(string identifier, CancellationToken cancellationToken) => throw new NotSupportedException();
 
         public Task SendCustomStoryStartOutcomeAsync(
-            string identifier, SharedCustomStoryStartOutcome outcome, CancellationToken cancellationToken)
+            string identifier, SharedStoryStartOutcome outcome, CancellationToken cancellationToken)
         {
             SentOutcomes.Add((identifier, outcome));
+            return Task.CompletedTask;
+        }
+        public bool JoiningPlayerAdmitted { get; set; }
+        private int _sentMainStoryStarts;
+        public int SentMainStoryStarts => Volatile.Read(ref _sentMainStoryStarts);
+
+        public Task<bool> SendMainStoryStartedAsync(CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _sentMainStoryStarts);
+            return Task.FromResult(JoiningPlayerAdmitted);
+        }
+        public List<SharedStoryStartOutcome> SentMainStoryOutcomes { get; } = [];
+
+        public Task SendMainStoryStartOutcomeAsync(SharedStoryStartOutcome outcome, CancellationToken cancellationToken)
+        {
+            SentMainStoryOutcomes.Add(outcome);
             return Task.CompletedTask;
         }
     }

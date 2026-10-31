@@ -101,6 +101,13 @@ public sealed class TrafficRecorderTests
     }
 
     [Fact]
+    public void Main_story_messages_are_named_by_their_wire_types()
+    {
+        Assert.Equal("main-story-started", TrafficKinds.Of(new LanMessage.MainStoryStarted()));
+        Assert.Equal("main-story-start-outcome", TrafficKinds.Of(new LanMessage.MainStoryStartOutcome(SharedStoryStartOutcome.Started)));
+    }
+
+    [Fact]
     public async Task Without_either_feature_nothing_is_written()
     {
         var output = new MemoryStream();
