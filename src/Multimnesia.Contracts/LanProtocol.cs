@@ -39,6 +39,9 @@ public abstract record LanMessage
         double SizeX, double SizeY, double SizeZ, double OffsetX, double OffsetY, double OffsetZ) : EnemyEvent(Map);
     // A Shared Enemy broke the map-placed door DoorId. Every other game breaks its own copy, and the debris stays local.
     public sealed record EnemyDoorBreak(string Map, int DoorId) : EnemyEvent(Map);
+    // A Shared Enemy's hallucination ended near a player at TimeMs on the clock of its Enemy Poses. Every other game plays
+    // the full disappearance on its own copy once, and ignores that copy's Enemy Poses sampled no later than TimeMs.
+    public sealed record EnemyDisappearance(string Map, int EntityId, ulong TimeMs) : EnemyEvent(Map);
 
     // A Shared Death (ADR 0009): what the games agree on when a player dies on a map whose checkpoint has a death callback.
     // A death message names a checkpoint only by its bounded, script-chosen name; it never names the callback function.
@@ -123,7 +126,7 @@ public sealed class LanProtocolException(string message, Exception? innerExcepti
 
 public static class LanProtocol
 {
-    public const int CurrentVersion = 15;
+    public const int CurrentVersion = 16;
     // Fits the largest bodies message: 32 entries of 13 longest-form numbers and a fully escaped map path.
     public const int MaximumFrameBytes = 32 * 1024;
     // Keeps a Pose's numbers within the game's 15-digit, 4-decimal line format; real positions and angles are far smaller.
@@ -159,6 +162,11 @@ public static class LanProtocol
             LanMessage.EnemyAttack => throw new LanProtocolException("Invalid enemy attack."),
             LanMessage.EnemyDoorBreak value when IsValid(value) => new { type = "enemy-door-break", map = value.Map, doorId = value.DoorId },
             LanMessage.EnemyDoorBreak => throw new LanProtocolException("Invalid enemy door break."),
+            LanMessage.EnemyDisappearance value when IsValid(value) => new
+            {
+                type = "enemy-disappearance", map = value.Map, entityId = value.EntityId, timeMs = value.TimeMs
+            },
+            LanMessage.EnemyDisappearance => throw new LanProtocolException("Invalid enemy disappearance."),
             LanMessage.PlayerDeath value when IsValid(value) => new
             {
                 type = "player-death", map = value.Map, death = value.Death, afterEpisode = value.AfterEpisode
@@ -325,6 +333,8 @@ public static class LanProtocol
                 "enemy-pose" => ReadEnemyPose(root),
                 "enemy-attack" => ReadEnemyAttack(root),
                 "enemy-door-break" => new LanMessage.EnemyDoorBreak(RequiredMap(root), RequiredInt32(root, "doorId")),
+                "enemy-disappearance" => new LanMessage.EnemyDisappearance(
+                    RequiredMap(root), RequiredInt32(root, "entityId"), root.GetProperty("timeMs").GetUInt64()),
                 "player-death" => ReadPlayerDeath(root),
                 "shared-death" => ReadSharedDeath(root),
                 "claim" => new LanMessage.Claim(
@@ -466,6 +476,8 @@ public static class LanProtocol
     };
 
     public static bool IsValid(LanMessage.EnemyDoorBreak doorBreak) => IsValidMap(doorBreak.Map);
+
+    public static bool IsValid(LanMessage.EnemyDisappearance disappearance) => IsValidMap(disappearance.Map);
 
     private static LanMessage.EnemyAttack ReadEnemyAttack(JsonElement root)
     {

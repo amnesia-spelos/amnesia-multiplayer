@@ -116,6 +116,9 @@ public static class GameInteractionProtocol
                 "enemydoorbreak" => TryParseEnemyDoorBreak(line) is { } doorBreak
                     ? new GameEvent.EnemyDoorBroke(doorBreak)
                     : new GameEvent.Unknown(line),
+                "enemydisappear" => TryParseEnemyDisappearance(line) is { } disappearance
+                    ? new GameEvent.EnemyDisappeared(disappearance)
+                    : new GameEvent.Unknown(line),
                 "settingchanged" => TryParseSettingChanged(line) ?? new GameEvent.Unknown(line),
                 "sharedcallback" or "buttonstate" or "lampstate" => TryParseWorldMessage(line) is { } change
                     ? new GameEvent.WorldChanged(change)
@@ -203,6 +206,16 @@ public static class GameInteractionProtocol
             !ProtocolVersion2Line.TryParseIdentifier(fields[2], out var doorId)) return null;
         var doorBreak = new LanMessage.EnemyDoorBreak(fields[3], doorId);
         return LanProtocol.IsValid(doorBreak) ? doorBreak : null;
+    }
+
+    // EVENT enemydisappear <entityId> <timeMs> <map>
+    private static LanMessage.EnemyDisappearance? TryParseEnemyDisappearance(string line)
+    {
+        if (!ProtocolVersion2Line.TrySplit(line, fixedFieldCount: 4, hasPath: true, out var fields) ||
+            !ProtocolVersion2Line.TryParseIdentifier(fields[2], out var id) ||
+            !ulong.TryParse(fields[3], NumberStyles.None, CultureInfo.InvariantCulture, out var time)) return null;
+        var disappearance = new LanMessage.EnemyDisappearance(fields[4], id, time);
+        return LanProtocol.IsValid(disappearance) ? disappearance : null;
     }
 
     private static EnemyAttackKind? ParseEnemyAttackKind(string token) => token switch
@@ -473,6 +486,10 @@ public static class GameInteractionProtocol
     public static string EnemyDoorBreak(LanMessage.EnemyDoorBreak doorBreak) =>
         $"enemydoorbreak {ProtocolVersion2Line.FormatIdentifier(doorBreak.DoorId)} {doorBreak.Map}";
 
+    public static string EnemyDisappear(LanMessage.EnemyDisappearance disappearance) =>
+        $"enemydisappear {ProtocolVersion2Line.FormatIdentifier(disappearance.EntityId)} " +
+        $"{disappearance.TimeMs.ToString(CultureInfo.InvariantCulture)} {disappearance.Map}";
+
     public static string EnemyDrive(int id, string map) => $"enemydrive {ProtocolVersion2Line.FormatIdentifier(id)} {map}";
     public static string EnemyRelease(int id, string map) => $"enemyrelease {ProtocolVersion2Line.FormatIdentifier(id)} {map}";
 
@@ -564,6 +581,7 @@ public abstract record GameEvent
     public sealed record EnemyPoseReported(LanMessage.EnemyPose Pose) : GameEvent;
     public sealed record EnemyAttackReported(LanMessage.EnemyAttack Attack) : GameEvent;
     public sealed record EnemyDoorBroke(LanMessage.EnemyDoorBreak DoorBreak) : GameEvent;
+    public sealed record EnemyDisappeared(LanMessage.EnemyDisappearance Disappearance) : GameEvent;
     // The `enemies` Events about the current map's checkpoint registration, and the local player's own deaths on it.
     public sealed record CheckPointReported(CheckPoint CheckPoint) : GameEvent;
     public sealed record PlayerDied(int Death, CheckPoint CheckPoint) : GameEvent;

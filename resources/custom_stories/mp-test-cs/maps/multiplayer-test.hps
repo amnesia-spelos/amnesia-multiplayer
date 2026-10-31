@@ -41,6 +41,17 @@ void OnStart()
     // Whichever enemy spawns first, the other one's trigger goes away until the story starts fresh.
     SetEntityPlayerInteractCallback("cabinet_simple_1", "SpawnBrute", true);
     SetEntityCallbackFunc("brute", "BruteCallback");
+
+    // Hallucinations (#83). Grabbing vase01_1 makes the Grunt a hallucination, which disappears within 3 m of
+    // either player. Grabbing it again once the Grunt has spawned brings the Grunt back, still a hallucination.
+    SetEntityPlayerInteractCallback("vase01_1", "MakeGruntHallucination", false);
+}
+
+void MakeGruntHallucination(string &in asEntity)
+{
+    SetEnemyIsHallucination("grunt", true);
+    if(GetLocalVarInt("GruntSpawned") == 1) SetEntityActive("grunt", true);
+    Print("TEST83: grunt is a hallucination\n");
 }
 
 void MansionDoorCallback(string &in asEntity, string &in asType)

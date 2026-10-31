@@ -899,6 +899,81 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Each_hallucination_disappearance_is_sent_by_the_Session_Host_while_players_share_a_map()
+    {
+        _sessions.Joined = false;
+        var (game, _, _) = await ConnectAsync();
+        await using var _ = game;
+        await game.ReadLineAsync();
+        await game.SendAsync("RESPONSE protocol ok 2 avatars localpose lean interactions sharedcallbacks playerplace enemies");
+        _sessions.SetPresent(true);
+        for (var i = 0; i < 4; i++) await game.ReadLineAsync();
+        await game.SendAsync("EVENT mapentered maps/a.map");
+        await _callbacks.ReceivePose(new(1, 0, 0, 0, 0, 0, 0, false, false, 0, "maps/elsewhere.map"));
+        await game.SendAsync("EVENT enemydisappear 139 4200 maps/a.map");
+        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 0.0000 maps/a.map");
+        await WaitUntilAsync(() => _sessions.SentPoses.Count == 1);
+        Assert.Empty(_sessions.SentEnemyEvents);
+        await _callbacks.ReceivePose(new(2, 0, 0, 0, 0, 0, 0, false, false, 0, "maps/a.map"));
+        await game.SendAsync("EVENT enemydisappear 139 4200 maps/a.map");
+        await game.SendAsync("STATE localpose 2 0 0 0 0 0 0 0 0 0.0000 maps/a.map");
+        await WaitUntilAsync(() => _sessions.SentPoses.Count == 2);
+        Assert.Equal(EnemyDisappearancesProtocolTests.Sample, Assert.Single(_sessions.SentEnemyEvents));
+    }
+
+    [Fact]
+    public async Task A_Joining_Player_never_sends_its_own_games_hallucination_disappearance()
+    {
+        await using var game = await JoiningPlayerDrivingAGruntAsync();
+        await game.SendAsync("EVENT enemydisappear 139 4200 maps/a.map");
+        await SyncAsync(game);
+        Assert.Empty(_sessions.SentEnemyEvents);
+    }
+
+    [Fact]
+    public async Task A_received_hallucination_disappearance_plays_once_only_on_the_current_map()
+    {
+        await using var game = await JoiningPlayerDrivingAGruntAsync();
+        await _callbacks.ReceiveEnemyEvent(EnemyDisappearancesProtocolTests.Sample with { Map = "maps/elsewhere.map" });
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+        await _callbacks.ReceiveEnemyEvent(EnemyDisappearancesProtocolTests.Sample);
+        Assert.Equal("enemydisappear 139 4200 maps/a.map", await game.ReadLineAsync());
+        Assert.True(await game.WritesNothingWithinAsync(TimeSpan.FromMilliseconds(100)));
+        Assert.Empty(_sessions.SentEnemyEvents);
+    }
+
+    // The game ignores the copy's Enemy Poses sampled no later than the disappearance, so the copy disappears where the Session
+    // Host's enemy was, and a later one brings the enemy back as the Session Host's game activated it again.
+    [Fact]
+    public async Task A_hallucination_disappearance_follows_the_Enemy_Pose_received_before_it_and_later_poses_still_follow()
+    {
+        await using var game = await JoiningPlayerDrivingAGruntAsync();
+        await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample with { TimeMs = 4100 });
+        await _callbacks.ReceiveEnemyEvent(EnemyDisappearancesProtocolTests.Sample);
+        Assert.StartsWith("enemypose 139 4100 ", await game.ReadLineAsync());
+        Assert.Equal("enemydisappear 139 4200 maps/a.map", await game.ReadLineAsync());
+        await _callbacks.ReceiveEnemyPose(EnemyPosesProtocolTests.Sample with { TimeMs = 9000 });
+        Assert.StartsWith("enemypose 139 9000 ", await game.ReadLineAsync());
+    }
+
+    // A hallucination can end before its first Enemy Pose reaches the Joining Player; the game plays it on the enemy undriven.
+    [Fact]
+    public async Task A_hallucination_disappearance_plays_on_a_copy_not_yet_driven()
+    {
+        var (game, _, _) = await ConnectAsync();
+        await using var _ = game;
+        await game.ReadLineAsync();
+        await game.SendAsync(GrantedWithoutSettings);
+        _sessions.SetPresent(true);
+        for (var i = 0; i < 3; i++) await game.ReadLineAsync();
+        await game.SendAsync("EVENT mapentered maps/a.map");
+        await game.SendAsync("STATE localpose 1 0 0 0 0 0 0 0 0 0.0000 maps/a.map");
+        await WaitUntilAsync(() => _sessions.SentPoses.Count == 1);
+        await _callbacks.ReceiveEnemyEvent(EnemyDisappearancesProtocolTests.Sample);
+        Assert.Equal("enemydisappear 139 4200 maps/a.map", await game.ReadLineAsync());
+    }
+
+    [Fact]
     public async Task An_enemy_attack_follows_the_Enemy_Pose_received_before_it()
     {
         var (game, _, _) = await ConnectAsync();
@@ -1032,6 +1107,7 @@ public sealed class LocalGameSessionTests : IAsyncDisposable
         Assert.StartsWith("shareddeath 1 1 ", await game.ReadLineAsync());
         await game.SendAsync("STATE enemypose 139 1000 0 -2 0 28.25 90 Walk 0.2 1 maps/a.map");
         await game.SendAsync("EVENT enemyattack 139 normal 1.2 1.5 1 0 0.75 0.9 maps/a.map");
+        await game.SendAsync("EVENT enemydisappear 139 4200 maps/a.map");
         await SyncAsync(game);
         Assert.Empty(_sessions.SentEnemyPoses);
         Assert.Empty(_sessions.SentEnemyEvents);

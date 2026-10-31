@@ -98,6 +98,9 @@ public sealed class SharedEnemies
                 _sessions.SendEnemyPose(enemy.Pose);
             if (gameEvent is GameEvent.EnemyAttackReported attacked && !_dying && SharesLocked(attacked.Attack.Map))
                 enemyEvent = attacked.Attack;
+            // Only the Session Host's game decides a disappearance; a Joining Player's own report is never relayed.
+            if (gameEvent is GameEvent.EnemyDisappeared disappeared && !_dying && SharesLocked(disappeared.Disappearance.Map))
+                enemyEvent = disappeared.Disappearance;
             // A broken door stays broken through a checkpoint, so every game breaks its own copy, even during an episode.
             if (gameEvent is GameEvent.EnemyDoorBroke broke && SharesLocked(broke.DoorBreak.Map))
                 enemyEvent = broke.DoorBreak;
@@ -192,14 +195,24 @@ public sealed class SharedEnemies
     }
 
     // The game tests the attack against its own player from the driven copy; it answers not-found for an enemy it does not drive.
-    public void HandleReceivedEnemyAttack(LanMessage.EnemyAttack attack)
+    public void HandleReceivedEnemyAttack(LanMessage.EnemyAttack attack) =>
+        DeliverAfterReceivedPoses(attack.Map, attack.EntityId, GameInteractionProtocol.EnemyAttack(attack));
+
+    // The game plays the full disappearance on its own enemy once, driven or not yet driven, and ignores that enemy's Enemy
+    // Poses sampled no later than it, so late poses cannot bring it back; a later one means the Session Host's game
+    // activated it again. The game also rejects a duplicate or stale delivery itself.
+    public void HandleReceivedEnemyDisappearance(LanMessage.EnemyDisappearance disappearance) =>
+        DeliverAfterReceivedPoses(disappearance.Map, disappearance.EntityId, GameInteractionProtocol.EnemyDisappear(disappearance));
+
+    // An enemy event acts on the copy as posed by every sample received before it. A Shared Death resets the copies, so
+    // none is delivered until this game's checkpoint completes the episode.
+    private void DeliverAfterReceivedPoses(string map, int entityId, string command)
     {
         lock (_gate)
         {
-            if (_dying || !DrivesLocked(attack.Map)) return;
-            // The attack is tested against the copy as posed by every sample received before it.
-            if (_pending.Remove(attack.EntityId, out var pose)) EnqueuePoseLocked(pose);
-            _commands.Enqueue(GameInteractionProtocol.EnemyAttack(attack));
+            if (_dying || !DrivesLocked(map)) return;
+            if (_pending.Remove(entityId, out var pose)) EnqueuePoseLocked(pose);
+            _commands.Enqueue(command);
         }
         _wake.Writer.TryWrite(true);
     }

@@ -1455,6 +1455,7 @@ public sealed class MultiplayerSessionOperationsTests
         { new LanMessage.Heartbeat(), OtherPlayers * TcpSessionOperations.MaxInboundMessagesPerWindow + 5 },
         { EnemyAttacksProtocolTests.Sample, OtherPlayers * TcpSessionOperations.MaxInboundMessagesPerWindow + 5 },
         { EnemyDoorBreaksProtocolTests.Sample, OtherPlayers * TcpSessionOperations.MaxInboundMessagesPerWindow + 5 },
+        { EnemyDisappearancesProtocolTests.Sample, OtherPlayers * TcpSessionOperations.MaxInboundMessagesPerWindow + 5 },
     };
 
     [Theory]
@@ -1517,7 +1518,7 @@ public sealed class MultiplayerSessionOperationsTests
     }
 
     [Fact]
-    public async Task Only_the_Session_Host_sends_enemy_attacks_and_door_breaks_in_order_with_the_other_messages()
+    public async Task Only_the_Session_Host_sends_enemy_attacks_door_breaks_and_disappearances_in_order_with_the_other_messages()
     {
         var port = FreePort();
         var received = new System.Collections.Concurrent.ConcurrentQueue<LanMessage>();
@@ -1532,19 +1533,27 @@ public sealed class MultiplayerSessionOperationsTests
         await host.SendEnemyEventAsync(EnemyAttacksProtocolTests.Sample, TestContext.Current.CancellationToken);
         await host.SendWorldMessageAsync(lamp, TestContext.Current.CancellationToken);
         await host.SendEnemyEventAsync(EnemyDoorBreaksProtocolTests.Sample, TestContext.Current.CancellationToken);
-        await WaitUntilAsync(() => received.Count == 3);
-        Assert.Equal([EnemyAttacksProtocolTests.Sample, lamp, EnemyDoorBreaksProtocolTests.Sample], received.ToArray());
+        await host.SendEnemyEventAsync(EnemyDisappearancesProtocolTests.Sample, TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => received.Count == 4);
+        Assert.Equal(
+            [EnemyAttacksProtocolTests.Sample, lamp, EnemyDoorBreaksProtocolTests.Sample, EnemyDisappearancesProtocolTests.Sample],
+            received.ToArray());
         // An invalid game report is dropped locally, and a Joining Player never sends one, without ending the Multiplayer Session.
         await host.SendEnemyEventAsync(EnemyAttacksProtocolTests.Sample with { SizeX = 0 }, TestContext.Current.CancellationToken);
         await host.SendEnemyEventAsync(EnemyDoorBreaksProtocolTests.Sample with { Map = "" }, TestContext.Current.CancellationToken);
+        await host.SendEnemyEventAsync(EnemyDisappearancesProtocolTests.Sample with { Map = "" }, TestContext.Current.CancellationToken);
         await joining.SendEnemyEventAsync(EnemyAttacksProtocolTests.Sample, TestContext.Current.CancellationToken);
         await joining.SendEnemyEventAsync(EnemyDoorBreaksProtocolTests.Sample, TestContext.Current.CancellationToken);
+        await joining.SendEnemyEventAsync(EnemyDisappearancesProtocolTests.Sample, TestContext.Current.CancellationToken);
         await joining.SendChatAsync(new("Joiner", "still joined"), TestContext.Current.CancellationToken);
         Assert.True(host.IsOtherPlayerPresent);
         Assert.True(joining.IsOtherPlayerPresent);
     }
 
-    public static TheoryData<LanMessage> EnemyEvents => new() { EnemyAttacksProtocolTests.Sample, EnemyDoorBreaksProtocolTests.Sample };
+    public static TheoryData<LanMessage> EnemyEvents => new()
+    {
+        EnemyAttacksProtocolTests.Sample, EnemyDoorBreaksProtocolTests.Sample, EnemyDisappearancesProtocolTests.Sample
+    };
 
     [Theory]
     [MemberData(nameof(EnemyEvents))]

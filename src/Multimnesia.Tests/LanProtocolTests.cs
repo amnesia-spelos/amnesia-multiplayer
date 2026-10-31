@@ -181,9 +181,9 @@ public sealed class LanProtocolTests
     }
 
     [Fact]
-    public void Protocol_version_is_15_for_the_Shared_Main_Story_Start()
+    public void Protocol_version_is_16_for_enemy_disappearances()
     {
-        Assert.Equal(15, LanProtocol.CurrentVersion);
+        Assert.Equal(16, LanProtocol.CurrentVersion);
     }
 
     private static MemoryStream Frame(string json)
