@@ -379,10 +379,9 @@ On 2026-10-15 the pickup, combine, and flashback steps (2–7 and 12) passed on 
 
 ## Expected behavior and limitations
 
-Two players host, join, chat, start the same Custom Story together, see each other move, share how they move props, doors, levers, valves, and sliders, and face the same Grunts and Brutes as Shared Enemies. What that does *not* cover:
+Two players host, join, chat, start the same Custom Story or the Main Story together, see each other move, share how they move props, doors, levers, valves, and sliders, and face the same Grunts, Brutes, and Kaernks as Shared Enemies. What that does *not* cover:
 
-- **Only Custom Story starts are shared.** In the main game, each player starts or loads it themselves (#23). Once both are on the same map, the Shared Pose and Holds work there as in a Custom Story.
-- **Map changes and returning to the main menu are not shared.** Only the Session Host's fresh Custom Story start is. Continue, Load Game, death reloads, quitting, and every map transition after the start are local.
+- **Only new-game starts are shared, not loads, map changes, or returning to the main menu.** Only the Session Host's fresh Custom Story or Main Story start is shared (#23). Continue, Load Game, death reloads, quitting, and every map transition after the start are local.
 - **Changing game settings ends the Multiplayer Session for that player.** Applying settings restarts the game's Game Interaction Protocol server (amnesia-tdd-tcp#66), so the Game Peer loses its local game and has to rejoin. Pausing through the menu or a note does not.
 - **An Avatar stays frozen at its last Pose when its player returns to the main menu.** The game sends no Poses from the main menu and reports no map-left event, so the other player keeps seeing a motionless Avatar where that player last stood. Start the Custom Story again to resynchronize.
 - **`/tp-to-peer` does not follow the other player to another map.** It places you only on the map you are both on. A player left behind on another map has to reach it themselves.

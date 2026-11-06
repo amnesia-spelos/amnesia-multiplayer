@@ -198,10 +198,11 @@ $releaseNotes = @"
 # Amnesia Multiplayer v$version "$codename"
 
 A trusted-LAN, two-player Multiplayer Session for Amnesia: The Dark Descent. Two players host
-and join over a private network, chat in game, start the same Custom Story together, see each
-other move, and share how they move props, doors, levers, valves, and sliders. Grunts and
-Brutes are Shared Enemies: the Session Host's game runs each one, it hunts, attacks, and switches
-between both players, and the doors it breaks are broken for both.
+and join over a private network, chat in game, start the same Custom Story or the Main Story
+together, see each other move, and share how they move props, doors, levers, valves, and sliders.
+Grunts, Brutes, and Kaernks are Shared Enemies: the Session Host's game runs each one, it hunts,
+attacks, and switches between both players, and the doors it breaks are broken for both.
+Hallucinations disappear for both players when either comes near.
 
 ## Install
 
@@ -224,13 +225,13 @@ need this same archive.
 
 ## Known limitations
 
-- Only Custom Story starts are shared; in the main game, each player starts or loads it themselves.
-- Map changes and returning to the main menu are not shared.
+- Only the Session Host's new-game starts are shared; Continue, Load Game, map changes, and
+  returning to the main menu are not.
 - An Avatar stays frozen at its last Pose while its player is in the main menu.
 - Shared Enemies see the Joining Player but do not hear them.
 - A Shared Enemy is shared only while both players are on its map, and may visibly jump when a
   player arrives or leaves mid-chase.
-- Kaernks are not Shared Enemies yet, and hallucinations vanish only for the Session Host's player.
+- The meat a Kaernk eats stays local to each game; only its splashes are shared.
 - Consumables, kept-local script callbacks, and breaks a script causes are not shared.
 
 See the README for the full list and the two-PC walkthrough.
